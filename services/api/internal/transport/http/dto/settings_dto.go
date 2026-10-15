@@ -12,6 +12,14 @@ type BrandingResponse struct {
 	BrandName         *string `json:"brand_name,omitempty"`
 	PrimaryColorLight *string `json:"primary_color_light,omitempty"`
 	PrimaryColorDark  *string `json:"primary_color_dark,omitempty"`
+	// CommitmentsProjectID is the project that holds every commitment, when set.
+	CommitmentsProjectID *string `json:"commitments_project_id,omitempty"`
+}
+
+// SetCommitmentsProjectRequest is the body for PUT /admin/settings/commitments-project.
+// A null project id clears the setting.
+type SetCommitmentsProjectRequest struct {
+	ProjectID *string `json:"project_id"`
 }
 
 // UpdateSettingsRequest is the body for PATCH /admin/settings. A nil or

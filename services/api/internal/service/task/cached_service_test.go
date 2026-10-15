@@ -663,3 +663,7 @@ func TestCachedTask_SumTaskField_DelegatesToUnderlying(t *testing.T) {
 		t.Errorf("expected underlying SumTaskField called once, got %d", calls)
 	}
 }
+
+func (s *stubTaskSvc) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
+	return nil, nil
+}

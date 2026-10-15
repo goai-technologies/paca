@@ -178,6 +178,17 @@ func (s *Service) UpdateSettings(ctx context.Context, brandName, light, dark *st
 	})
 }
 
+// SetCommitmentsProject records which project is the commitment catalog —
+// nil clears it. Runs under the same lock as the other settings writes.
+func (s *Service) SetCommitmentsProject(ctx context.Context, projectID *uuid.UUID, updatedBy uuid.UUID) (*settingsdom.WorkspaceSettings, error) {
+	return s.repo.WithLock(ctx, func(ws *settingsdom.WorkspaceSettings) (*settingsdom.WorkspaceSettings, error) {
+		ws.CommitmentsProjectID = projectID
+		ws.UpdatedAt = time.Now().UTC()
+		ws.UpdatedBy = &updatedBy
+		return ws, nil
+	})
+}
+
 // normalizeColor treats nil/empty as "clear this override" (returned as
 // nil), and otherwise requires a "#rrggbb" hex string.
 func normalizeColor(c *string) (*string, error) {

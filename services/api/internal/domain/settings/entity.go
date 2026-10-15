@@ -24,8 +24,12 @@ type WorkspaceSettings struct {
 	// browser tab title (<title>) and the wordmark text shown next to the
 	// logo — nil meaning "use the app's default ('Paca')".
 	BrandName *string
-	UpdatedAt time.Time
-	UpdatedBy *uuid.UUID
+	// CommitmentsProjectID names the one project that holds every
+	// commitment (the "Commitments" project). nil until an admin sets it,
+	// and until then no ticket can be attached to a commitment.
+	CommitmentsProjectID *uuid.UUID
+	UpdatedAt            time.Time
+	UpdatedBy            *uuid.UUID
 }
 
 // ImageSlot discriminates the two image slots a WorkspaceSettings row holds.

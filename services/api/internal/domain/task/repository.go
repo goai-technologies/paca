@@ -71,6 +71,9 @@ type TaskRepository interface {
 	// ignoring cursor-based pagination. fieldKey is "story_points" or a custom field key.
 	SumTaskField(ctx context.Context, projectID uuid.UUID, filter TaskFilter, fieldKey string) (float64, error)
 	FindTaskByID(ctx context.Context, id uuid.UUID) (*Task, error)
+	// ListCommitmentWork returns every live task, in any project, whose
+	// commitment_task_id is commitmentID, ordered by project then task number.
+	ListCommitmentWork(ctx context.Context, commitmentID uuid.UUID) ([]*Task, error)
 	FindTaskByNumber(ctx context.Context, projectID uuid.UUID, taskNumber int64) (*Task, error)
 	CreateTask(ctx context.Context, t *Task) error
 	UpdateTask(ctx context.Context, t *Task) error

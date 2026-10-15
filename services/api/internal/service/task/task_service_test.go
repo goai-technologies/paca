@@ -37,6 +37,18 @@ type fakeTaskRepo struct {
 	setDefaultStatusErr  error               // injected error for SetDefaultTaskStatus
 }
 
+func (f *fakeTaskRepo) ListCommitmentWork(_ context.Context, commitmentID uuid.UUID) ([]*taskdom.Task, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var out []*taskdom.Task
+	for _, t := range f.tasks {
+		if t.CommitmentTaskID != nil && *t.CommitmentTaskID == commitmentID && t.DeletedAt == nil {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 // taskMatchesSearch mirrors the postgres repo's title / "#<task_number>" ILIKE
 // matching so the fake exercises the same filter contract as production.
 func taskMatchesSearch(t *taskdom.Task, filter taskdom.TaskFilter) bool {

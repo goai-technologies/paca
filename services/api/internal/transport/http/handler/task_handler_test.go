@@ -1891,6 +1891,10 @@ func TestActivityHandler_UpdateComment_NullContent_Returns400(t *testing.T) {
 	}
 }
 
+func (f *fakeTaskSvc) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
+	return nil, nil
+}
+
 func TestTaskHandler_ListTaskActivities_PagedMode(t *testing.T) {
 	act := newFakeActivitySvc()
 	older := "older-page"

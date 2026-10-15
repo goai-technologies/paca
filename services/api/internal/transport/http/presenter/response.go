@@ -193,6 +193,8 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusNotFound, apierr.CodeProjectNotFound
 	case errors.Is(err, projectdom.ErrNameTaken):
 		return http.StatusConflict, apierr.CodeProjectNameTaken
+	case errors.Is(err, projectdom.ErrWorkstreamInvalid):
+		return http.StatusBadRequest, apierr.CodeProjectWorkstreamInvalid
 	case errors.Is(err, projectdom.ErrNameInvalid):
 		return http.StatusBadRequest, apierr.CodeProjectNameInvalid
 	case errors.Is(err, projectdom.ErrPrefixInvalid):
@@ -221,6 +223,18 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeTaskTitleInvalid
 	case errors.Is(err, taskdom.ErrEpicCannotHaveParent):
 		return http.StatusBadRequest, apierr.CodeEpicCannotHaveParent
+	case errors.Is(err, taskdom.ErrCommitmentNotFound):
+		return http.StatusNotFound, apierr.CodeCommitmentNotFound
+	case errors.Is(err, taskdom.ErrCommitmentSelf),
+		errors.Is(err, taskdom.ErrCommitmentOnChildTask),
+		errors.Is(err, taskdom.ErrCommitmentOnCommitment),
+		errors.Is(err, taskdom.ErrCommitmentTargetNotCommitment),
+		errors.Is(err, taskdom.ErrCommitmentOutsideCatalog):
+		return http.StatusBadRequest, apierr.CodeCommitmentInvalid
+	case errors.Is(err, taskdom.ErrCommitmentClosed):
+		return http.StatusConflict, apierr.CodeCommitmentClosed
+	case errors.Is(err, taskdom.ErrCommitmentsProjectNotConfigured):
+		return http.StatusConflict, apierr.CodeCommitmentsProjectNotConfigured
 	case errors.Is(err, taskdom.ErrTaskCannotBeOwnParent):
 		return http.StatusBadRequest, apierr.CodeTaskCannotBeOwnParent
 	case errors.Is(err, taskdom.ErrTaskParentCycleDetected):

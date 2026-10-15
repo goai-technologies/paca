@@ -178,7 +178,8 @@ func New(cfg *config.Config) (*App, error) {
 	projectService := projectsvc.NewCachedService(projectServiceBase, cacheStore, cfg.Cache.ProjectTTL, log)
 	// Member lists show each member's roles, so changing them drops the cache.
 	roleService = roleService.WithMembersCache(projectService)
-	taskService := tasksvc.NewCachedService(tasksvc.New(taskRepo).WithAutomationStatusChecker(rawAutomationRepo).WithActivityRecorder(activityRecorder), cacheStore, cfg.Cache.ConfigTTL, log)
+	settingsService := settingssvc.New(settingsRepo)
+	taskService := tasksvc.NewCachedService(tasksvc.New(taskRepo).WithAutomationStatusChecker(rawAutomationRepo).WithActivityRecorder(activityRecorder).WithCommitmentCatalog(commitmentCatalog{settingsService}), cacheStore, cfg.Cache.ConfigTTL, log)
 	sprintService := sprintsvc.NewCachedSprintService(sprintsvc.New(sprintRepo, taskRepo, publisher), cacheStore, cfg.Cache.SprintTTL, log)
 	viewService := sprintsvc.NewCachedViewService(sprintsvc.NewViewService(viewRepo, sprintRepo, taskRepo, publisher), cacheStore, cfg.Cache.SprintTTL, log)
 	notificationService := notificationsvc.New(notificationRepo, projectRepo, publisher).
@@ -205,7 +206,7 @@ func New(cfg *config.Config) (*App, error) {
 	// trigger go through this gate — see package triggergate. The agent
 	// service itself carries no authorization for them.
 	triggerGate := triggergate.New(agentService, authorizer, projectRepo, httpmw.AgentRepoLookups{Repo: agentRepo})
-	settingsService := settingssvc.New(settingsRepo)
+	// settingsService is created above, next to the task service, which needs it as its commitment catalog.
 	// encryptor is reused, verbatim, for every at-rest secret in this
 	// codebase (agent LLM keys, environment secrets, and — see below —
 	// each project's own Jev API key): a nil encryptor (ENCRYPTION_KEY
@@ -560,6 +561,7 @@ func New(cfg *config.Config) (*App, error) {
 		Conversation:       convHandler,
 		Automation:         automationHandler,
 		Settings:           handler.NewSettingsHandler(settingsService).WithAvatarService(attachmentService),
+		Commitment:         handler.NewCommitmentHandler(taskService, projectService, settingsService, authorizer),
 		Log:                log,
 		CORSAllowedOrigins: cfg.Server.CORSAllowedOrigins,
 		AuthRateLimit:      cfg.Server.AuthRateLimit,
@@ -643,4 +645,15 @@ func (a *App) Shutdown(ctx context.Context) error {
 		a.publisher.Close()
 	}
 	return a.server.Shutdown(ctx)
+}
+
+// commitmentCatalog adapts the settings service to tasksvc.CommitmentCatalog.
+type commitmentCatalog struct{ settings *settingssvc.Service }
+
+func (c commitmentCatalog) CommitmentsProjectID(ctx context.Context) (*uuid.UUID, error) {
+	ws, err := c.settings.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return ws.CommitmentsProjectID, nil
 }
