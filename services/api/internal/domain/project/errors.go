@@ -4,10 +4,12 @@ import "errors"
 
 // Sentinel domain errors for the project aggregate.
 var (
-	ErrNotFound           = errors.New("project: not found")
-	ErrNameTaken          = errors.New("project: name already in use")
-	ErrNameInvalid        = errors.New("project: name is empty or invalid")
-	ErrPrefixInvalid      = errors.New("project: task ID prefix must be 1–10 uppercase letters/digits")
+	ErrNotFound      = errors.New("project: not found")
+	ErrNameTaken     = errors.New("project: name already in use")
+	ErrNameInvalid   = errors.New("project: name is empty or invalid")
+	ErrPrefixInvalid = errors.New("project: task ID prefix must be 1–10 uppercase letters/digits")
+	// ErrWorkstreamInvalid: settings.default_workstream is set to something other than "delivery", "platform" or "internal".
+	ErrWorkstreamInvalid  = errors.New("project: default_workstream must be \"delivery\", \"platform\" or \"internal\"")
 	ErrMemberAlreadyAdded = errors.New("project: user is already a member")
 	ErrMemberNotFound     = errors.New("project: member not found")
 	// ErrInvalidMemberCursor is returned when a client-supplied member list

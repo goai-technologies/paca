@@ -124,6 +124,10 @@ type CustomFieldDefinition struct {
 	UpdatedAt   time.Time
 }
 
+// CommitmentTypeName is the task type name that marks a task as a commitment.
+// Matched case-insensitively, the same way external readers recognise commitments.
+const CommitmentTypeName = "Commitment"
+
 // LinkType describes the directional relationship stored in a TaskLink row.
 // Inverse display types (is_blocked_by, is_duplicated_by) are computed at
 // the service layer and never persisted.
@@ -180,19 +184,24 @@ type Task struct {
 	StatusID     *uuid.UUID
 	SprintID     *uuid.UUID
 	ParentTaskID *uuid.UUID
-	Title        string
-	Description  json.RawMessage
-	Importance   int
-	StoryPoints  *int
-	AssigneeIDs  []uuid.UUID
-	ReporterID   *uuid.UUID
-	CustomFields map[string]any
-	StartDate    *time.Time
-	DueDate      *time.Time
-	Tags         []string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
+	// CommitmentTaskID is the commitment this ticket belongs to — a
+	// Commitment-typed task in the workspace's Commitments project, which may
+	// be a different project from this task's. At most one per ticket, set only
+	// on top-level tickets; descendants inherit it. See migration 900001.
+	CommitmentTaskID *uuid.UUID
+	Title            string
+	Description      json.RawMessage
+	Importance       int
+	StoryPoints      *int
+	AssigneeIDs      []uuid.UUID
+	ReporterID       *uuid.UUID
+	CustomFields     map[string]any
+	StartDate        *time.Time
+	DueDate          *time.Time
+	Tags             []string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	DeletedAt        *time.Time
 	// AssignmentMode is AssignmentModeManual (default) or AssignmentModeAuto.
 	// When "auto", worker.TaskAutofillConsumer resolves AssigneeIDs via Jev
 	// whenever it's empty — see that consumer's own doc comment. A human

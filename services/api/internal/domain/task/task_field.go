@@ -11,6 +11,7 @@ const (
 	TaskFieldStatus         TaskField = "status_id"
 	TaskFieldSprint         TaskField = "sprint_id"
 	TaskFieldParentTask     TaskField = "parent_task_id"
+	TaskFieldCommitment     TaskField = "commitment_task_id"
 	TaskFieldTitle          TaskField = "title"
 	TaskFieldDescription    TaskField = "description"
 	TaskFieldImportance     TaskField = "importance"

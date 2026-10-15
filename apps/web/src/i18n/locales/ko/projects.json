@@ -1614,6 +1614,20 @@
 		"searchableList": {
 			"searchPlaceholder": "검색…",
 			"noResults": "일치하는 항목 없음"
+		},
+		"commitment": {
+			"label": "커밋먼트",
+			"inherited": "상속됨",
+			"inheritedHint": "최상위 티켓에서 설정되며 이 티켓은 이를 상속합니다.",
+			"searchPlaceholder": "커밋먼트 검색…",
+			"open": "커밋먼트 열기",
+			"remove": "커밋먼트에서 제거",
+			"loading": "불러오는 중…",
+			"empty": "열린 커밋먼트가 없습니다",
+			"workTitle": "이 커밋먼트의 작업",
+			"workEmpty": "아직 이 커밋먼트에 연결된 티켓이 없습니다.",
+			"workError": "연결된 작업을 불러오지 못했습니다.",
+			"hiddenProjects_other": "볼 수 없는 프로젝트 {{count}}개는 표시되지 않습니다."
 		}
 	},
 	"portForwardDetail": {
@@ -2520,5 +2534,12 @@
 			"comment": "댓글:",
 			"fallback": "{{type}}:"
 		}
+	},
+	"workstream": {
+		"label": "워크스트림",
+		"hint": "이 프로젝트의 커밋먼트가 기본으로 표시될 대시보드입니다. 커밋먼트 자체의 워크스트림 필드가 우선합니다.",
+		"delivery": "딜리버리",
+		"platform": "플랫폼",
+		"internal": "내부"
 	}
 }

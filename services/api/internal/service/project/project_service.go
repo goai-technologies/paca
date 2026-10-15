@@ -280,6 +280,10 @@ func (s *Service) Create(ctx context.Context, in projectdom.CreateProjectInput) 
 		return nil, err
 	}
 
+	if err := validateProjectSettings(in.Settings); err != nil {
+		return nil, err
+	}
+
 	now := time.Now()
 	p := &projectdom.Project{
 		ID:           uuid.New(),
@@ -371,6 +375,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in projectdom.Update
 		p.TaskIDPrefix = rawPrefix
 	}
 	if in.Settings != nil {
+		if err := validateProjectSettings(in.Settings); err != nil {
+			return nil, err
+		}
 		p.Settings = cloneSettings(in.Settings)
 	}
 
@@ -493,4 +500,29 @@ func cloneSettings(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// WorkstreamSettingKey is the projects.settings key for the project's default
+// workstream — which dashboard (Delivery, Platform or Internal) a commitment
+// raised for this project belongs on when the commitment does not say itself.
+const WorkstreamSettingKey = "default_workstream"
+
+// validateProjectSettings rejects reserved settings keys holding values the
+// rest of the system cannot read. Unknown keys pass through untouched: settings
+// is an open map that plugins and the web app also write to.
+func validateProjectSettings(settings map[string]any) error {
+	raw, ok := settings[WorkstreamSettingKey]
+	if !ok || raw == nil {
+		return nil
+	}
+	v, isString := raw.(string)
+	if !isString {
+		return projectdom.ErrWorkstreamInvalid
+	}
+	switch v {
+	case "", "delivery", "platform", "internal":
+		return nil
+	default:
+		return projectdom.ErrWorkstreamInvalid
+	}
 }

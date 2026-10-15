@@ -1643,3 +1643,7 @@ func TestViewService_BulkMoveTasks_WrongProject_ReturnsNotFound(t *testing.T) {
 		t.Errorf("no task position should have been persisted, found %d", len(repo.positions))
 	}
 }
+
+func (permissiveTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
+	return nil, nil
+}

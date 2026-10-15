@@ -753,3 +753,7 @@ func TestCompleteSprint_MoveToSprintWrongProject_ReturnsNotFound(t *testing.T) {
 		t.Error("source sprint must not be completed when the destination sprint check fails")
 	}
 }
+
+func (r *fakeTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
+	return nil, nil
+}

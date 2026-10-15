@@ -1614,6 +1614,21 @@
 		"searchableList": {
 			"searchPlaceholder": "Pesquisar…",
 			"noResults": "Nenhum resultado"
+		},
+		"commitment": {
+			"label": "Compromisso",
+			"inherited": "herdado",
+			"inheritedHint": "Definido no ticket de nível superior; este ticket o herda.",
+			"searchPlaceholder": "Buscar compromissos…",
+			"open": "Abrir compromisso",
+			"remove": "Remover do compromisso",
+			"loading": "Carregando…",
+			"empty": "Nenhum compromisso aberto",
+			"workTitle": "Trabalho neste compromisso",
+			"workEmpty": "Ainda não há tickets vinculados a este compromisso.",
+			"workError": "Não foi possível carregar o trabalho vinculado.",
+			"hiddenProjects_one": "{{count}} projeto que você não pode ver não é mostrado.",
+			"hiddenProjects_other": "{{count}} projetos que você não pode ver não são mostrados."
 		}
 	},
 	"portForwardDetail": {
@@ -2520,5 +2535,12 @@
 			"comment": "comentou em",
 			"fallback": "realizou {{type}} em"
 		}
+	},
+	"workstream": {
+		"label": "Frente de trabalho",
+		"hint": "Em qual painel os compromissos deste projeto aparecem por padrão. O campo Frente de trabalho do próprio compromisso tem prioridade.",
+		"delivery": "Entrega",
+		"platform": "Plataforma",
+		"internal": "Interno"
 	}
 }

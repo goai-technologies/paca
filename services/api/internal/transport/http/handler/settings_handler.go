@@ -36,9 +36,10 @@ func (h *SettingsHandler) WithAvatarService(svc attachmentdom.AvatarService) *Se
 // is configured, resolves its image keys into presigned display URLs.
 func (h *SettingsHandler) toBrandingResponse(ctx context.Context, ws *settingsdom.WorkspaceSettings) dto.BrandingResponse {
 	resp := dto.BrandingResponse{
-		BrandName:         ws.BrandName,
-		PrimaryColorLight: ws.PrimaryColorLight,
-		PrimaryColorDark:  ws.PrimaryColorDark,
+		BrandName:            ws.BrandName,
+		CommitmentsProjectID: uuidPtrToStringPtr(ws.CommitmentsProjectID),
+		PrimaryColorLight:    ws.PrimaryColorLight,
+		PrimaryColorDark:     ws.PrimaryColorDark,
 	}
 	if h.avatarSvc != nil {
 		resp.LogoURL, _ = h.avatarSvc.ResolveAvatarURL(ctx, ws.LogoKey)
@@ -172,6 +173,48 @@ func (h *SettingsHandler) CompleteFaviconUpload(w http.ResponseWriter, r *http.R
 // DeleteFavicon handles DELETE /admin/settings/favicon/avatar.
 func (h *SettingsHandler) DeleteFavicon(w http.ResponseWriter, r *http.Request) {
 	h.deleteImage(w, r, settingsdom.SlotFavicon)
+}
+
+func uuidPtrToStringPtr(id *uuid.UUID) *string {
+	if id == nil {
+		return nil
+	}
+	s := id.String()
+	return &s
+}
+
+// SetCommitmentsProject handles PUT /admin/settings/commitments-project.
+func (h *SettingsHandler) SetCommitmentsProject(w http.ResponseWriter, r *http.Request) {
+	id, ok := actingUserID(w, r)
+	if !ok {
+		return
+	}
+	var req dto.SetCommitmentsProjectRequest
+	if !middleware.BindJSON(w, r, &req) {
+		return
+	}
+	var projectID *uuid.UUID
+	if req.ProjectID != nil && *req.ProjectID != "" {
+		parsed, err := uuid.Parse(*req.ProjectID)
+		if err != nil {
+			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid project_id"))
+			return
+		}
+		projectID = &parsed
+	}
+	setter, ok := h.svc.(interface {
+		SetCommitmentsProject(ctx context.Context, projectID *uuid.UUID, updatedBy uuid.UUID) (*settingsdom.WorkspaceSettings, error)
+	})
+	if !ok {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "settings service does not support the commitments project"))
+		return
+	}
+	ws, err := setter.SetCommitmentsProject(r.Context(), projectID, id)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.OK(w, r, h.toBrandingResponse(r.Context(), ws))
 }
 
 // UpdateSettings handles PATCH /admin/settings.

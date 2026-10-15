@@ -79,6 +79,16 @@ const (
 	CodeTaskTitleInvalid Code = "TASK_TITLE_INVALID"
 	// CodeEpicCannotHaveParent indicates an attempt to set a parent on an epic task.
 	CodeEpicCannotHaveParent Code = "TASK_EPIC_CANNOT_HAVE_PARENT"
+	// CodeProjectWorkstreamInvalid: settings.default_workstream is not "delivery", "platform" or "internal".
+	CodeProjectWorkstreamInvalid Code = "PROJECT_WORKSTREAM_INVALID"
+	// CodeCommitmentNotFound: commitment_task_id names no live task.
+	CodeCommitmentNotFound Code = "COMMITMENT_NOT_FOUND"
+	// CodeCommitmentInvalid: the attachment breaks a membership rule (self, child ticket, not a Commitment, outside the catalog).
+	CodeCommitmentInvalid Code = "COMMITMENT_INVALID"
+	// CodeCommitmentClosed: the commitment is in a done-category status and accepts no new tickets.
+	CodeCommitmentClosed Code = "COMMITMENT_CLOSED"
+	// CodeCommitmentsProjectNotConfigured: workspace_settings.commitments_project_id is unset.
+	CodeCommitmentsProjectNotConfigured Code = "COMMITMENTS_PROJECT_NOT_CONFIGURED"
 	// CodeTaskCannotBeOwnParent indicates an attempt to set a task as its own parent.
 	CodeTaskCannotBeOwnParent Code = "TASK_CANNOT_BE_OWN_PARENT"
 	// CodeTaskParentCycleDetected indicates the requested parent assignment would create a cycle.

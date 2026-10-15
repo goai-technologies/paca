@@ -4141,3 +4141,7 @@ func taskListItemIDs(t *testing.T, body []byte) []string {
 	}
 	return ids
 }
+
+func (r *fakeTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
+	return nil, nil
+}

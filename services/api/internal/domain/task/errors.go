@@ -37,6 +37,16 @@ var (
 	ErrTaskLinkTypeInvalid  = errors.New("task link: invalid link type")
 	ErrTaskLinkCrossProject = errors.New("task link: cannot link tasks from different projects")
 
+	// Commitment membership (tasks.commitment_task_id).
+	ErrCommitmentNotFound              = errors.New("commitment: not found")
+	ErrCommitmentSelf                  = errors.New("commitment: a task cannot be its own commitment")
+	ErrCommitmentOnChildTask           = errors.New("commitment: set the commitment on the top-level ticket; children inherit it")
+	ErrCommitmentOnCommitment          = errors.New("commitment: a commitment cannot belong to another commitment")
+	ErrCommitmentTargetNotCommitment   = errors.New("commitment: target task is not of type Commitment")
+	ErrCommitmentOutsideCatalog        = errors.New("commitment: target is not in the Commitments project")
+	ErrCommitmentClosed                = errors.New("commitment: this commitment is closed and accepts no new tickets")
+	ErrCommitmentsProjectNotConfigured = errors.New("commitment: no Commitments project is configured in workspace settings")
+
 	// Activity / comment errors.
 	ErrActivityNotFound      = errors.New("activity: not found")
 	ErrActivityForbidden     = errors.New("activity: only the author can modify this comment")

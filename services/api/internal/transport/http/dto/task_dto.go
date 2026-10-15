@@ -312,20 +312,21 @@ func TaskStatusFromEntity(s *taskdom.TaskStatus) TaskStatusResponse {
 
 // CreateTaskRequest is the body for POST /projects/:projectId/tasks.
 type CreateTaskRequest struct {
-	Title        string           `json:"title"`
-	TaskTypeID   *uuid.UUID       `json:"task_type_id"`
-	StatusID     *uuid.UUID       `json:"status_id"`
-	SprintID     *uuid.UUID       `json:"sprint_id"`
-	ParentTaskID *uuid.UUID       `json:"parent_task_id"`
-	Description  *json.RawMessage `json:"description"`
-	Importance   int              `json:"importance"`
-	StoryPoints  *int             `json:"story_points"`
-	AssigneeIDs  []uuid.UUID      `json:"assignee_ids"`
-	ReporterID   *uuid.UUID       `json:"reporter_id"`
-	CustomFields map[string]any   `json:"custom_fields"`
-	StartDate    *time.Time       `json:"start_date"`
-	DueDate      *time.Time       `json:"due_date"`
-	Tags         []string         `json:"tags"`
+	Title            string           `json:"title"`
+	TaskTypeID       *uuid.UUID       `json:"task_type_id"`
+	StatusID         *uuid.UUID       `json:"status_id"`
+	SprintID         *uuid.UUID       `json:"sprint_id"`
+	ParentTaskID     *uuid.UUID       `json:"parent_task_id"`
+	CommitmentTaskID *uuid.UUID       `json:"commitment_task_id"`
+	Description      *json.RawMessage `json:"description"`
+	Importance       int              `json:"importance"`
+	StoryPoints      *int             `json:"story_points"`
+	AssigneeIDs      []uuid.UUID      `json:"assignee_ids"`
+	ReporterID       *uuid.UUID       `json:"reporter_id"`
+	CustomFields     map[string]any   `json:"custom_fields"`
+	StartDate        *time.Time       `json:"start_date"`
+	DueDate          *time.Time       `json:"due_date"`
+	Tags             []string         `json:"tags"`
 	// AssignmentMode: omit for the default ("manual"). "auto" asks
 	// worker.TaskAutofillConsumer to resolve AssigneeIDs via Jev — see
 	// taskdom.Task.AssignmentMode's doc comment.
@@ -347,20 +348,21 @@ func (r CreateTaskRequest) NormalizedDescription() json.RawMessage {
 // For Tags and CustomFields, a nil pointer means absent (don't update); a non-nil
 // pointer (even to an empty slice/map) means the field was explicitly set.
 type UpdateTaskRequest struct {
-	Title        string            `json:"title"`
-	TaskTypeID   OptionalUUID      `json:"task_type_id"`
-	StatusID     OptionalUUID      `json:"status_id"`
-	SprintID     OptionalUUID      `json:"sprint_id"`
-	ParentTaskID OptionalUUID      `json:"parent_task_id"`
-	Description  OptionalJSON      `json:"description"`
-	Importance   *int              `json:"importance"`
-	StoryPoints  OptionalInt       `json:"story_points"`
-	AssigneeIDs  OptionalUUIDSlice `json:"assignee_ids"`
-	ReporterID   OptionalUUID      `json:"reporter_id"`
-	CustomFields *map[string]any   `json:"custom_fields"`
-	StartDate    OptionalTime      `json:"start_date"`
-	DueDate      OptionalTime      `json:"due_date"`
-	Tags         *[]string         `json:"tags"`
+	Title            string            `json:"title"`
+	TaskTypeID       OptionalUUID      `json:"task_type_id"`
+	StatusID         OptionalUUID      `json:"status_id"`
+	SprintID         OptionalUUID      `json:"sprint_id"`
+	ParentTaskID     OptionalUUID      `json:"parent_task_id"`
+	CommitmentTaskID OptionalUUID      `json:"commitment_task_id"`
+	Description      OptionalJSON      `json:"description"`
+	Importance       *int              `json:"importance"`
+	StoryPoints      OptionalInt       `json:"story_points"`
+	AssigneeIDs      OptionalUUIDSlice `json:"assignee_ids"`
+	ReporterID       OptionalUUID      `json:"reporter_id"`
+	CustomFields     *map[string]any   `json:"custom_fields"`
+	StartDate        OptionalTime      `json:"start_date"`
+	DueDate          OptionalTime      `json:"due_date"`
+	Tags             *[]string         `json:"tags"`
 	// AssignmentMode: nil means unchanged. See CreateTaskRequest's own doc
 	// comment.
 	AssignmentMode *string `json:"assignment_mode"`
@@ -371,27 +373,28 @@ type UpdateTaskRequest struct {
 // valid view_id query parameter on list endpoints; they reflect the task's
 // manual position within that view.
 type TaskResponse struct {
-	ID           uuid.UUID       `json:"id"`
-	ProjectID    uuid.UUID       `json:"project_id"`
-	TaskNumber   int64           `json:"task_number"`
-	Title        string          `json:"title"`
-	TaskTypeID   *uuid.UUID      `json:"task_type_id,omitempty"`
-	StatusID     *uuid.UUID      `json:"status_id,omitempty"`
-	SprintID     *uuid.UUID      `json:"sprint_id,omitempty"`
-	ParentTaskID *uuid.UUID      `json:"parent_task_id,omitempty"`
-	Description  json.RawMessage `json:"description,omitempty"`
-	Importance   int             `json:"importance"`
-	StoryPoints  *int            `json:"story_points,omitempty"`
-	AssigneeIDs  []uuid.UUID     `json:"assignee_ids"`
-	ReporterID   *uuid.UUID      `json:"reporter_id,omitempty"`
-	CustomFields map[string]any  `json:"custom_fields"`
-	StartDate    *time.Time      `json:"start_date,omitempty"`
-	DueDate      *time.Time      `json:"due_date,omitempty"`
-	Tags         []string        `json:"tags"`
-	ViewPosition *float64        `json:"view_position,omitempty"`
-	ViewGroupKey *string         `json:"view_group_key,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	ID               uuid.UUID       `json:"id"`
+	ProjectID        uuid.UUID       `json:"project_id"`
+	TaskNumber       int64           `json:"task_number"`
+	Title            string          `json:"title"`
+	TaskTypeID       *uuid.UUID      `json:"task_type_id,omitempty"`
+	StatusID         *uuid.UUID      `json:"status_id,omitempty"`
+	SprintID         *uuid.UUID      `json:"sprint_id,omitempty"`
+	ParentTaskID     *uuid.UUID      `json:"parent_task_id,omitempty"`
+	CommitmentTaskID *uuid.UUID      `json:"commitment_task_id,omitempty"`
+	Description      json.RawMessage `json:"description,omitempty"`
+	Importance       int             `json:"importance"`
+	StoryPoints      *int            `json:"story_points,omitempty"`
+	AssigneeIDs      []uuid.UUID     `json:"assignee_ids"`
+	ReporterID       *uuid.UUID      `json:"reporter_id,omitempty"`
+	CustomFields     map[string]any  `json:"custom_fields"`
+	StartDate        *time.Time      `json:"start_date,omitempty"`
+	DueDate          *time.Time      `json:"due_date,omitempty"`
+	Tags             []string        `json:"tags"`
+	ViewPosition     *float64        `json:"view_position,omitempty"`
+	ViewGroupKey     *string         `json:"view_group_key,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 	// AssignmentMode is "manual" or "auto" — see taskdom.Task.AssignmentMode's
 	// doc comment.
 	AssignmentMode string `json:"assignment_mode"`
@@ -418,26 +421,27 @@ func TaskFromEntity(t *taskdom.Task) TaskResponse {
 		assigneeIDs = []uuid.UUID{}
 	}
 	return TaskResponse{
-		ID:             t.ID,
-		ProjectID:      t.ProjectID,
-		TaskNumber:     t.TaskNumber,
-		Title:          t.Title,
-		TaskTypeID:     t.TaskTypeID,
-		StatusID:       t.StatusID,
-		SprintID:       t.SprintID,
-		ParentTaskID:   t.ParentTaskID,
-		Description:    t.Description,
-		Importance:     t.Importance,
-		StoryPoints:    t.StoryPoints,
-		AssigneeIDs:    assigneeIDs,
-		ReporterID:     t.ReporterID,
-		CustomFields:   cf,
-		StartDate:      t.StartDate,
-		DueDate:        t.DueDate,
-		Tags:           tags,
-		CreatedAt:      t.CreatedAt,
-		UpdatedAt:      t.UpdatedAt,
-		AssignmentMode: t.AssignmentMode,
+		ID:               t.ID,
+		ProjectID:        t.ProjectID,
+		TaskNumber:       t.TaskNumber,
+		Title:            t.Title,
+		TaskTypeID:       t.TaskTypeID,
+		StatusID:         t.StatusID,
+		SprintID:         t.SprintID,
+		ParentTaskID:     t.ParentTaskID,
+		CommitmentTaskID: t.CommitmentTaskID,
+		Description:      t.Description,
+		Importance:       t.Importance,
+		StoryPoints:      t.StoryPoints,
+		AssigneeIDs:      assigneeIDs,
+		ReporterID:       t.ReporterID,
+		CustomFields:     cf,
+		StartDate:        t.StartDate,
+		DueDate:          t.DueDate,
+		Tags:             tags,
+		CreatedAt:        t.CreatedAt,
+		UpdatedAt:        t.UpdatedAt,
+		AssignmentMode:   t.AssignmentMode,
 	}
 }
 

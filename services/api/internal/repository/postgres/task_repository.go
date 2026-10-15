@@ -45,26 +45,27 @@ type taskStatusRecord struct {
 }
 
 type taskRecord struct {
-	ID             string           `db:"id"`
-	ProjectID      string           `db:"project_id"`
-	TaskNumber     int64            `db:"task_number"`
-	TaskTypeID     *string          `db:"task_type_id"`
-	StatusID       *string          `db:"status_id"`
-	SprintID       *string          `db:"sprint_id"`
-	ParentTaskID   *string          `db:"parent_task_id"`
-	Title          string           `db:"title"`
-	Description    *json.RawMessage `db:"description"`
-	Importance     int              `db:"importance"`
-	StoryPoints    *int             `db:"story_points"`
-	ReporterID     *string          `db:"reporter_id"`
-	CustomFields   []byte           `db:"custom_fields"`
-	StartDate      *time.Time       `db:"start_date"`
-	DueDate        *time.Time       `db:"due_date"`
-	Tags           []byte           `db:"tags"`
-	CreatedAt      time.Time        `db:"created_at"`
-	UpdatedAt      time.Time        `db:"updated_at"`
-	DeletedAt      *time.Time       `db:"deleted_at"`
-	AssignmentMode string           `db:"assignment_mode"`
+	ID               string           `db:"id"`
+	ProjectID        string           `db:"project_id"`
+	TaskNumber       int64            `db:"task_number"`
+	TaskTypeID       *string          `db:"task_type_id"`
+	StatusID         *string          `db:"status_id"`
+	SprintID         *string          `db:"sprint_id"`
+	ParentTaskID     *string          `db:"parent_task_id"`
+	CommitmentTaskID *string          `db:"commitment_task_id"`
+	Title            string           `db:"title"`
+	Description      *json.RawMessage `db:"description"`
+	Importance       int              `db:"importance"`
+	StoryPoints      *int             `db:"story_points"`
+	ReporterID       *string          `db:"reporter_id"`
+	CustomFields     []byte           `db:"custom_fields"`
+	StartDate        *time.Time       `db:"start_date"`
+	DueDate          *time.Time       `db:"due_date"`
+	Tags             []byte           `db:"tags"`
+	CreatedAt        time.Time        `db:"created_at"`
+	UpdatedAt        time.Time        `db:"updated_at"`
+	DeletedAt        *time.Time       `db:"deleted_at"`
+	AssignmentMode   string           `db:"assignment_mode"`
 }
 
 // taskCounterRecord mirrors the task_counters table used for atomic
@@ -76,51 +77,53 @@ type taskCounterRecord struct {
 
 // taskWithPositionRow is a flat struct for scanning the view_position LEFT JOIN result.
 type taskWithPositionRow struct {
-	ID             string           `db:"id"`
-	ProjectID      string           `db:"project_id"`
-	TaskNumber     int64            `db:"task_number"`
-	TaskTypeID     *string          `db:"task_type_id"`
-	StatusID       *string          `db:"status_id"`
-	SprintID       *string          `db:"sprint_id"`
-	ParentTaskID   *string          `db:"parent_task_id"`
-	Title          string           `db:"title"`
-	Description    *json.RawMessage `db:"description"`
-	Importance     int              `db:"importance"`
-	StoryPoints    *int             `db:"story_points"`
-	ReporterID     *string          `db:"reporter_id"`
-	CustomFields   []byte           `db:"custom_fields"`
-	StartDate      *time.Time       `db:"start_date"`
-	DueDate        *time.Time       `db:"due_date"`
-	Tags           []byte           `db:"tags"`
-	CreatedAt      time.Time        `db:"created_at"`
-	UpdatedAt      time.Time        `db:"updated_at"`
-	DeletedAt      *time.Time       `db:"deleted_at"`
-	AssignmentMode string           `db:"assignment_mode"`
-	VTPPosition    *float64         `db:"vtp_position"`
+	ID               string           `db:"id"`
+	ProjectID        string           `db:"project_id"`
+	TaskNumber       int64            `db:"task_number"`
+	TaskTypeID       *string          `db:"task_type_id"`
+	StatusID         *string          `db:"status_id"`
+	SprintID         *string          `db:"sprint_id"`
+	ParentTaskID     *string          `db:"parent_task_id"`
+	CommitmentTaskID *string          `db:"commitment_task_id"`
+	Title            string           `db:"title"`
+	Description      *json.RawMessage `db:"description"`
+	Importance       int              `db:"importance"`
+	StoryPoints      *int             `db:"story_points"`
+	ReporterID       *string          `db:"reporter_id"`
+	CustomFields     []byte           `db:"custom_fields"`
+	StartDate        *time.Time       `db:"start_date"`
+	DueDate          *time.Time       `db:"due_date"`
+	Tags             []byte           `db:"tags"`
+	CreatedAt        time.Time        `db:"created_at"`
+	UpdatedAt        time.Time        `db:"updated_at"`
+	DeletedAt        *time.Time       `db:"deleted_at"`
+	AssignmentMode   string           `db:"assignment_mode"`
+	VTPPosition      *float64         `db:"vtp_position"`
 }
 
 func (r *taskWithPositionRow) asTaskRecord() taskRecord {
 	return taskRecord{
-		ID:             r.ID,
-		ProjectID:      r.ProjectID,
-		TaskNumber:     r.TaskNumber,
-		TaskTypeID:     r.TaskTypeID,
-		StatusID:       r.StatusID,
-		SprintID:       r.SprintID,
-		ParentTaskID:   r.ParentTaskID,
-		Title:          r.Title,
-		Description:    r.Description,
-		Importance:     r.Importance,
-		StoryPoints:    r.StoryPoints,
-		ReporterID:     r.ReporterID,
-		CustomFields:   r.CustomFields,
-		StartDate:      r.StartDate,
-		DueDate:        r.DueDate,
-		Tags:           r.Tags,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
-		DeletedAt:      r.DeletedAt,
-		AssignmentMode: r.AssignmentMode,
+		ID:               r.ID,
+		ProjectID:        r.ProjectID,
+		TaskNumber:       r.TaskNumber,
+		TaskTypeID:       r.TaskTypeID,
+		StatusID:         r.StatusID,
+		SprintID:         r.SprintID,
+		ParentTaskID:     r.ParentTaskID,
+		CommitmentTaskID: r.CommitmentTaskID,
+		Title:            r.Title,
+		Description:      r.Description,
+		Importance:       r.Importance,
+		StoryPoints:      r.StoryPoints,
+		ReporterID:       r.ReporterID,
+		CustomFields:     r.CustomFields,
+		StartDate:        r.StartDate,
+		DueDate:          r.DueDate,
+		Tags:             r.Tags,
+		CreatedAt:        r.CreatedAt,
+		UpdatedAt:        r.UpdatedAt,
+		DeletedAt:        r.DeletedAt,
+		AssignmentMode:   r.AssignmentMode,
 	}
 }
 
@@ -469,7 +472,7 @@ func (r *TaskRepository) FindDefaultTaskStatus(ctx context.Context, projectID uu
 
 const taskCols = `id, project_id, task_number, task_type_id, status_id, sprint_id, parent_task_id,
 	title, description, importance, story_points, reporter_id,
-	custom_fields, start_date, due_date, tags, created_at, updated_at, deleted_at, assignment_mode`
+	custom_fields, start_date, due_date, tags, created_at, updated_at, deleted_at, assignment_mode, commitment_task_id`
 
 // applyTaskFilter adds WHERE predicates for all TaskFilter fields.
 // b is the shared queryBuilder; the base "project_id = $1 AND deleted_at IS NULL" clause is already set.
@@ -1399,15 +1402,15 @@ func (r *TaskRepository) CreateTask(ctx context.Context, t *taskdom.Task) error 
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO tasks (id, project_id, task_number, task_type_id, status_id, sprint_id, parent_task_id,
 			  title, description, importance, story_points, reporter_id,
-			  custom_fields, start_date, due_date, tags, created_at, updated_at, assignment_mode)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+			  custom_fields, start_date, due_date, tags, created_at, updated_at, assignment_mode, commitment_task_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
 			t.ID.String(), t.ProjectID.String(), t.TaskNumber,
 			uuidPtrToStrPtr(t.TaskTypeID), uuidPtrToStrPtr(t.StatusID),
 			uuidPtrToStrPtr(t.SprintID), uuidPtrToStrPtr(t.ParentTaskID),
 			t.Title, t.Description, t.Importance, t.StoryPoints,
 			uuidPtrToStrPtr(t.ReporterID),
 			cf, t.StartDate, t.DueDate, tagsJSON, t.CreatedAt, t.UpdatedAt,
-			assignmentModeOrDefault(t.AssignmentMode),
+			assignmentModeOrDefault(t.AssignmentMode), uuidPtrToStrPtr(t.CommitmentTaskID),
 		)
 		if err != nil {
 			return fmt.Errorf("task repo: create: %w", err)
@@ -1424,6 +1427,26 @@ func (r *TaskRepository) UpdateTask(ctx context.Context, t *taskdom.Task) error 
 	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
 		return updateTaskTx(ctx, tx, t)
 	})
+}
+
+// ListCommitmentWork implements taskdom.Repository — every live task, in any
+// project, attached to commitmentID. Cross-project by design: that is the
+// whole point of the column.
+func (r *TaskRepository) ListCommitmentWork(ctx context.Context, commitmentID uuid.UUID) ([]*taskdom.Task, error) {
+	var recs []taskRecord
+	q := `SELECT ` + taskCols + ` FROM tasks WHERE commitment_task_id = $1 AND deleted_at IS NULL ORDER BY project_id, task_number`
+	if err := r.db.SelectContext(ctx, &recs, q, commitmentID.String()); err != nil {
+		return nil, fmt.Errorf("task repo: list commitment work: %w", err)
+	}
+	out := make([]*taskdom.Task, 0, len(recs))
+	for i := range recs {
+		t, err := toTaskEntity(&recs[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 // UpdateTaskFields implements taskdom.Repository — see its doc comment.
@@ -1445,6 +1468,8 @@ func (r *TaskRepository) UpdateTaskFields(ctx context.Context, t *taskdom.Task, 
 			add("sprint_id", uuidPtrToStrPtr(t.SprintID))
 		case taskdom.TaskFieldParentTask:
 			add("parent_task_id", uuidPtrToStrPtr(t.ParentTaskID))
+		case taskdom.TaskFieldCommitment:
+			add("commitment_task_id", uuidPtrToStrPtr(t.CommitmentTaskID))
 		case taskdom.TaskFieldTitle:
 			add("title", t.Title)
 		case taskdom.TaskFieldDescription:
@@ -1532,14 +1557,15 @@ func updateTaskTx(ctx context.Context, tx *sqlx.Tx, t *taskdom.Task) error {
 		  task_type_id=$1, status_id=$2, sprint_id=$3, parent_task_id=$4,
 		  title=$5, description=$6, importance=$7, story_points=$8,
 		  reporter_id=$9, custom_fields=$10,
-		  start_date=$11, due_date=$12, tags=$13, updated_at=$14, assignment_mode=$15
-		WHERE id=$16`,
+		  start_date=$11, due_date=$12, tags=$13, updated_at=$14, assignment_mode=$15,
+		  commitment_task_id=$16
+		WHERE id=$17`,
 		uuidPtrToStrPtr(t.TaskTypeID), uuidPtrToStrPtr(t.StatusID),
 		uuidPtrToStrPtr(t.SprintID), uuidPtrToStrPtr(t.ParentTaskID),
 		t.Title, t.Description, t.Importance, t.StoryPoints,
 		uuidPtrToStrPtr(t.ReporterID),
 		cf, t.StartDate, t.DueDate, tagsJSON, t.UpdatedAt,
-		assignmentModeOrDefault(t.AssignmentMode), t.ID.String(),
+		assignmentModeOrDefault(t.AssignmentMode), uuidPtrToStrPtr(t.CommitmentTaskID), t.ID.String(),
 	)
 	if err != nil {
 		return fmt.Errorf("task repo: update: %w", err)
@@ -1822,26 +1848,27 @@ func toTaskEntity(r *taskRecord) (*taskdom.Task, error) {
 	}
 
 	return &taskdom.Task{
-		ID:             id,
-		ProjectID:      pid,
-		TaskNumber:     r.TaskNumber,
-		TaskTypeID:     strPtrToUUIDPtr(r.TaskTypeID),
-		StatusID:       strPtrToUUIDPtr(r.StatusID),
-		SprintID:       strPtrToUUIDPtr(r.SprintID),
-		ParentTaskID:   strPtrToUUIDPtr(r.ParentTaskID),
-		Title:          r.Title,
-		Description:    desc,
-		Importance:     r.Importance,
-		StoryPoints:    r.StoryPoints,
-		ReporterID:     strPtrToUUIDPtr(r.ReporterID),
-		CustomFields:   cf,
-		StartDate:      r.StartDate,
-		DueDate:        r.DueDate,
-		Tags:           tags,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
-		DeletedAt:      r.DeletedAt,
-		AssignmentMode: r.AssignmentMode,
+		ID:               id,
+		ProjectID:        pid,
+		TaskNumber:       r.TaskNumber,
+		TaskTypeID:       strPtrToUUIDPtr(r.TaskTypeID),
+		StatusID:         strPtrToUUIDPtr(r.StatusID),
+		SprintID:         strPtrToUUIDPtr(r.SprintID),
+		ParentTaskID:     strPtrToUUIDPtr(r.ParentTaskID),
+		CommitmentTaskID: strPtrToUUIDPtr(r.CommitmentTaskID),
+		Title:            r.Title,
+		Description:      desc,
+		Importance:       r.Importance,
+		StoryPoints:      r.StoryPoints,
+		ReporterID:       strPtrToUUIDPtr(r.ReporterID),
+		CustomFields:     cf,
+		StartDate:        r.StartDate,
+		DueDate:          r.DueDate,
+		Tags:             tags,
+		CreatedAt:        r.CreatedAt,
+		UpdatedAt:        r.UpdatedAt,
+		DeletedAt:        r.DeletedAt,
+		AssignmentMode:   r.AssignmentMode,
 	}, nil
 }
 
