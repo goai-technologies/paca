@@ -1614,6 +1614,21 @@
 		"searchableList": {
 			"searchPlaceholder": "Rechercher…",
 			"noResults": "Aucun résultat"
+		},
+		"commitment": {
+			"label": "Engagement",
+			"inherited": "hérité",
+			"inheritedHint": "Défini sur le ticket de premier niveau ; ce ticket en hérite.",
+			"searchPlaceholder": "Rechercher des engagements…",
+			"open": "Ouvrir l'engagement",
+			"remove": "Retirer de l'engagement",
+			"loading": "Chargement…",
+			"empty": "Aucun engagement ouvert",
+			"workTitle": "Travail dans cet engagement",
+			"workEmpty": "Aucun ticket n'est encore rattaché à cet engagement.",
+			"workError": "Impossible de charger le travail rattaché.",
+			"hiddenProjects_one": "{{count}} projet que vous ne pouvez pas voir n'est pas affiché.",
+			"hiddenProjects_other": "{{count}} projets que vous ne pouvez pas voir ne sont pas affichés."
 		}
 	},
 	"portForwardDetail": {
@@ -2520,5 +2535,12 @@
 			"comment": "a commenté",
 			"fallback": "a effectué {{type}} sur"
 		}
+	},
+	"workstream": {
+		"label": "Filière",
+		"hint": "Le tableau de bord par défaut des engagements de ce projet. Le champ Filière de l'engagement lui-même a priorité.",
+		"delivery": "Livraison",
+		"platform": "Plateforme",
+		"internal": "Interne"
 	}
 }

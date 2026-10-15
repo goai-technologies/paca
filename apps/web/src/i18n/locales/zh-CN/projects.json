@@ -1614,6 +1614,20 @@
 		"searchableList": {
 			"searchPlaceholder": "搜索…",
 			"noResults": "没有匹配项"
+		},
+		"commitment": {
+			"label": "承诺",
+			"inherited": "继承",
+			"inheritedHint": "在顶层工单上设置；此工单继承该值。",
+			"searchPlaceholder": "搜索承诺…",
+			"open": "打开承诺",
+			"remove": "从承诺中移除",
+			"loading": "加载中…",
+			"empty": "没有进行中的承诺",
+			"workTitle": "此承诺中的工作",
+			"workEmpty": "此承诺下还没有关联的工单。",
+			"workError": "无法加载关联的工作。",
+			"hiddenProjects_other": "有 {{count}} 个你无权查看的项目未显示。"
 		}
 	},
 	"portForwardDetail": {
@@ -2520,5 +2534,12 @@
 			"comment": "评论了",
 			"fallback": "执行了 {{type}}："
 		}
+	},
+	"workstream": {
+		"label": "工作流",
+		"hint": "此项目的承诺默认显示在哪个看板。承诺自身的工作流字段优先。",
+		"delivery": "交付",
+		"platform": "平台",
+		"internal": "内部"
 	}
 }

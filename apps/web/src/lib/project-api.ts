@@ -103,6 +103,7 @@ export async function createProject(payload: {
 	name: string;
 	description?: string;
 	task_id_prefix?: string;
+	settings?: Record<string, unknown>;
 }): Promise<Project> {
 	const { data } = await apiClient.instance.post<SuccessEnvelope<Project>>(
 		"/projects",

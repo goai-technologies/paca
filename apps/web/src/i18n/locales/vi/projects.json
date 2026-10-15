@@ -1614,6 +1614,20 @@
 		"searchableList": {
 			"searchPlaceholder": "Tìm kiếm…",
 			"noResults": "Không có kết quả"
+		},
+		"commitment": {
+			"label": "Cam kết",
+			"inherited": "kế thừa",
+			"inheritedHint": "Được đặt ở ticket cấp cao nhất; ticket này kế thừa.",
+			"searchPlaceholder": "Tìm cam kết…",
+			"open": "Mở cam kết",
+			"remove": "Gỡ khỏi cam kết",
+			"loading": "Đang tải…",
+			"empty": "Không có cam kết đang mở",
+			"workTitle": "Công việc trong cam kết này",
+			"workEmpty": "Chưa có ticket nào thuộc cam kết này.",
+			"workError": "Không thể tải công việc liên quan.",
+			"hiddenProjects_other": "{{count}} dự án bạn không thể xem không được hiển thị."
 		}
 	},
 	"portForwardDetail": {
@@ -2520,5 +2534,12 @@
 			"comment": "đã bình luận về",
 			"fallback": "đã thực hiện {{type}} trên"
 		}
+	},
+	"workstream": {
+		"label": "Mảng công việc",
+		"hint": "Bảng điều khiển mặc định cho các cam kết của dự án này. Trường Mảng công việc của chính cam kết sẽ được ưu tiên.",
+		"delivery": "Delivery",
+		"platform": "Platform",
+		"internal": "Internal"
 	}
 }

@@ -8,6 +8,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { AlertCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { isCommitmentType } from "@/lib/commitment-api";
 import {
 	createTask,
 	epicTasksInfiniteQueryOptions,
@@ -32,6 +33,7 @@ import { getPriority } from "../priority";
 import type { EpicsPagination } from "../view-utils";
 import { TaskActivityPane as ActivityPane } from "./activity-pane";
 import { AttachmentsSection } from "./attachments-section";
+import { CommitmentWorkSection } from "./commitment-work-section";
 import { DescriptionSection } from "./description-section";
 import { mapApiFieldToUi } from "./helpers";
 import { PropertiesPanel } from "./properties-panel";
@@ -490,6 +492,11 @@ export function TaskDetailModal({
 								});
 							}}
 						/>
+
+						{/* Work attached to this commitment, from every project */}
+						{isCommitmentType(taskType) && (
+							<CommitmentWorkSection commitmentId={task.id} />
+						)}
 
 						{/* Linked tasks */}
 						{projectId && (

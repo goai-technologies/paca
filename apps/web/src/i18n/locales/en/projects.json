@@ -1614,6 +1614,21 @@
 		"searchableList": {
 			"searchPlaceholder": "Search…",
 			"noResults": "No matches"
+		},
+		"commitment": {
+			"label": "Commitment",
+			"inherited": "inherited",
+			"inheritedHint": "Set on the top-level ticket; this ticket inherits it.",
+			"searchPlaceholder": "Search commitments…",
+			"open": "Open commitment",
+			"remove": "Remove from commitment",
+			"loading": "Loading…",
+			"empty": "No open commitments",
+			"workTitle": "Work in this commitment",
+			"workEmpty": "No tickets are attached to this commitment yet.",
+			"workError": "Could not load the attached work.",
+			"hiddenProjects_one": "{{count}} project you cannot view is not shown.",
+			"hiddenProjects_other": "{{count}} projects you cannot view are not shown."
 		}
 	},
 	"portForwardDetail": {
@@ -2520,5 +2535,12 @@
 			"comment": "commented on",
 			"fallback": "did {{type}} on"
 		}
+	},
+	"workstream": {
+		"label": "Workstream",
+		"hint": "Which dashboard this project's commitments default to. A commitment's own Workstream field overrides it.",
+		"delivery": "Delivery",
+		"platform": "Platform",
+		"internal": "Internal"
 	}
 }
