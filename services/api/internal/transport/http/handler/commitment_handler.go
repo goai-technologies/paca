@@ -34,7 +34,7 @@ type commitmentSettingsService interface {
 // commitments any signed-in user may attach a ticket to, and the work
 // attached to one commitment across every project.
 //
-// Both routes are deliberately NOT project-scoped. A ticket in the Infra
+// Both routes are deliberately NOT project-scoped. A ticket in any other
 // project is attached to a commitment that lives in the Commitments project,
 // and the person doing the attaching is usually not a member there — they
 // need the catalog, not the project.

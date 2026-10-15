@@ -361,7 +361,7 @@ func New(deps Deps) http.Handler {
 				r.Get("/projects", deps.Project.ListProjects)
 				r.Get("/projects/workspace-stats", deps.Project.GetWorkspaceStats)
 				// The commitment catalog is workspace-wide on purpose: the
-				// person attaching an Infra ticket is rarely a member of the
+				// person attaching a ticket from another project is rarely a member of the
 				// Commitments project. See handler.CommitmentHandler.
 				if deps.Commitment != nil {
 					r.Get("/commitments", deps.Commitment.List)

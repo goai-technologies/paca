@@ -187,7 +187,7 @@ type Task struct {
 	// CommitmentTaskID is the commitment this ticket belongs to — a
 	// Commitment-typed task in the workspace's Commitments project, which may
 	// be a different project from this task's. At most one per ticket, set only
-	// on top-level tickets; descendants inherit it. See migration 000064.
+	// on top-level tickets; descendants inherit it. See migration 900001.
 	CommitmentTaskID *uuid.UUID
 	Title            string
 	Description      json.RawMessage

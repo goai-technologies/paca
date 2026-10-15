@@ -8,8 +8,8 @@ import type { TaskType } from "./project-api";
 // A commitment is a Commitment-typed task in the one Commitments project the
 // workspace admin designates. Any ticket, in any project, can belong to
 // exactly one commitment (tasks.commitment_task_id); its children inherit it.
-// These calls are workspace-wide on purpose: the person attaching an Infra
-// ticket is rarely a member of the Commitments project.
+// These calls are workspace-wide on purpose: the person attaching a
+// ticket from another project is rarely a member of the Commitments project.
 
 export interface CommitmentCatalogItem {
 	id: string;
