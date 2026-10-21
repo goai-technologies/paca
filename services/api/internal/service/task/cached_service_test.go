@@ -667,3 +667,5 @@ func TestCachedTask_SumTaskField_DelegatesToUnderlying(t *testing.T) {
 func (s *stubTaskSvc) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
 	return nil, nil
 }
+
+func (s *stubTaskSvc) PrepareCommitmentsProject(context.Context, uuid.UUID) error { return nil }

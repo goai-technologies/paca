@@ -119,6 +119,7 @@ func (h *CommitmentHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]dto.CommitmentResponse, 0, len(items))
+	homes := map[uuid.UUID]*projectdom.Project{} // home projects, looked up once each
 	for _, t := range items {
 		var st *taskdom.TaskStatus
 		if t.StatusID != nil {
@@ -128,7 +129,16 @@ func (h *CommitmentHandler) List(w http.ResponseWriter, r *http.Request) {
 		if closed && !includeClosed {
 			continue
 		}
-		out = append(out, dto.CommitmentFromEntity(t, project, st))
+		row := dto.CommitmentFromEntity(t, project, st)
+		if t.HomeProjectID != nil {
+			if hp, ok := homes[*t.HomeProjectID]; ok {
+				row.HomeProjectName, row.HomeProjectTaskIDPrefix = hp.Name, hp.TaskIDPrefix
+			} else if hp, err := h.projects.GetByID(r.Context(), *t.HomeProjectID); err == nil {
+				homes[hp.ID] = hp
+				row.HomeProjectName, row.HomeProjectTaskIDPrefix = hp.Name, hp.TaskIDPrefix
+			}
+		}
+		out = append(out, row)
 	}
 	presenter.OK(w, r, dto.CommitmentListResponse{
 		Items:                out,

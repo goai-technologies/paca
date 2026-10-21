@@ -47,6 +47,14 @@ var (
 	ErrCommitmentClosed                = errors.New("commitment: this commitment is closed and accepts no new tickets")
 	ErrCommitmentsProjectNotConfigured = errors.New("commitment: no Commitments project is configured in workspace settings")
 
+	// The project a commitment is for (tasks.home_project_id).
+	ErrHomeProjectNotFound = errors.New("commitment project: the chosen project does not exist")
+	ErrHomeProjectInvalid  = errors.New("commitment project: only a commitment in the Commitments project has a project, and it cannot be the Commitments project itself")
+
+	// The Commitments project holds commitments and nothing else.
+	ErrCommitmentsProjectOnlyCommitments = errors.New("commitments project: only Commitment tasks can be created here, and the Commitment type cannot be changed or removed")
+	ErrCommitmentsProjectTypeInUse       = errors.New("commitments project: the project still has tasks of another type; move or delete them first")
+
 	// Activity / comment errors.
 	ErrActivityNotFound      = errors.New("activity: not found")
 	ErrActivityForbidden     = errors.New("activity: only the author can modify this comment")

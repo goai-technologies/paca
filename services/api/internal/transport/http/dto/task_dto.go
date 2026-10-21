@@ -318,6 +318,7 @@ type CreateTaskRequest struct {
 	SprintID         *uuid.UUID       `json:"sprint_id"`
 	ParentTaskID     *uuid.UUID       `json:"parent_task_id"`
 	CommitmentTaskID *uuid.UUID       `json:"commitment_task_id"`
+	HomeProjectID    *uuid.UUID       `json:"home_project_id"`
 	Description      *json.RawMessage `json:"description"`
 	Importance       int              `json:"importance"`
 	StoryPoints      *int             `json:"story_points"`
@@ -354,6 +355,7 @@ type UpdateTaskRequest struct {
 	SprintID         OptionalUUID      `json:"sprint_id"`
 	ParentTaskID     OptionalUUID      `json:"parent_task_id"`
 	CommitmentTaskID OptionalUUID      `json:"commitment_task_id"`
+	HomeProjectID    OptionalUUID      `json:"home_project_id"`
 	Description      OptionalJSON      `json:"description"`
 	Importance       *int              `json:"importance"`
 	StoryPoints      OptionalInt       `json:"story_points"`
@@ -382,6 +384,7 @@ type TaskResponse struct {
 	SprintID         *uuid.UUID      `json:"sprint_id,omitempty"`
 	ParentTaskID     *uuid.UUID      `json:"parent_task_id,omitempty"`
 	CommitmentTaskID *uuid.UUID      `json:"commitment_task_id,omitempty"`
+	HomeProjectID    *uuid.UUID      `json:"home_project_id,omitempty"`
 	Description      json.RawMessage `json:"description,omitempty"`
 	Importance       int             `json:"importance"`
 	StoryPoints      *int            `json:"story_points,omitempty"`
@@ -430,6 +433,7 @@ func TaskFromEntity(t *taskdom.Task) TaskResponse {
 		SprintID:         t.SprintID,
 		ParentTaskID:     t.ParentTaskID,
 		CommitmentTaskID: t.CommitmentTaskID,
+		HomeProjectID:    t.HomeProjectID,
 		Description:      t.Description,
 		Importance:       t.Importance,
 		StoryPoints:      t.StoryPoints,

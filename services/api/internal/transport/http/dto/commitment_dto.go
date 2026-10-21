@@ -28,6 +28,11 @@ type CommitmentResponse struct {
 	IsClosed       bool           `json:"is_closed"`
 	DueDate        *time.Time     `json:"due_date,omitempty"`
 	CustomFields   map[string]any `json:"custom_fields"`
+	// The project the commitment is for (its Project dropdown); absent
+	// when none is chosen.
+	HomeProjectID           *uuid.UUID `json:"home_project_id,omitempty"`
+	HomeProjectName         string     `json:"home_project_name,omitempty"`
+	HomeProjectTaskIDPrefix string     `json:"home_project_task_id_prefix,omitempty"`
 }
 
 // CommitmentListResponse is the body for GET /commitments.
@@ -92,6 +97,9 @@ func CommitmentFromEntity(t *taskdom.Task, p *projectdom.Project, st *taskdom.Ta
 		StatusID:     t.StatusID,
 		DueDate:      t.DueDate,
 		CustomFields: cf,
+	}
+	if t.HomeProjectID != nil {
+		out.HomeProjectID = t.HomeProjectID
 	}
 	if st != nil {
 		out.StatusName = st.Name

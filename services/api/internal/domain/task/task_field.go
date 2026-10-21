@@ -12,6 +12,7 @@ const (
 	TaskFieldSprint         TaskField = "sprint_id"
 	TaskFieldParentTask     TaskField = "parent_task_id"
 	TaskFieldCommitment     TaskField = "commitment_task_id"
+	TaskFieldHomeProject    TaskField = "home_project_id"
 	TaskFieldTitle          TaskField = "title"
 	TaskFieldDescription    TaskField = "description"
 	TaskFieldImportance     TaskField = "importance"

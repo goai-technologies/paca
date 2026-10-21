@@ -89,6 +89,14 @@ const (
 	CodeCommitmentClosed Code = "COMMITMENT_CLOSED"
 	// CodeCommitmentsProjectNotConfigured: workspace_settings.commitments_project_id is unset.
 	CodeCommitmentsProjectNotConfigured Code = "COMMITMENTS_PROJECT_NOT_CONFIGURED"
+	// CodeHomeProjectInvalid: home_project_id is set where it is not allowed, or names the Commitments project.
+	CodeHomeProjectInvalid Code = "COMMITMENT_PROJECT_INVALID"
+	// CodeHomeProjectNotFound: home_project_id names no live project.
+	CodeHomeProjectNotFound Code = "COMMITMENT_PROJECT_NOT_FOUND"
+	// CodeCommitmentsProjectOnlyCommitments: the Commitments project holds Commitment tasks only.
+	CodeCommitmentsProjectOnlyCommitments Code = "COMMITMENTS_PROJECT_ONLY_COMMITMENTS"
+	// CodeCommitmentsProjectTypeInUse: a project cannot become the Commitments project while it has tasks of another type.
+	CodeCommitmentsProjectTypeInUse Code = "COMMITMENTS_PROJECT_TYPE_IN_USE"
 	// CodeTaskCannotBeOwnParent indicates an attempt to set a task as its own parent.
 	CodeTaskCannotBeOwnParent Code = "TASK_CANNOT_BE_OWN_PARENT"
 	// CodeTaskParentCycleDetected indicates the requested parent assignment would create a cycle.

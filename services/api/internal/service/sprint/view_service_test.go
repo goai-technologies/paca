@@ -1647,3 +1647,7 @@ func TestViewService_BulkMoveTasks_WrongProject_ReturnsNotFound(t *testing.T) {
 func (permissiveTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
 	return nil, nil
 }
+
+func (permissiveTaskRepo) ProjectIsLive(context.Context, uuid.UUID) (bool, error) { return true, nil }
+
+func (permissiveTaskRepo) CountTasksOfType(context.Context, uuid.UUID) (int, error) { return 0, nil }

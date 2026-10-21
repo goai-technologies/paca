@@ -53,6 +53,7 @@ type taskRecord struct {
 	SprintID         *string          `db:"sprint_id"`
 	ParentTaskID     *string          `db:"parent_task_id"`
 	CommitmentTaskID *string          `db:"commitment_task_id"`
+	HomeProjectID    *string          `db:"home_project_id"`
 	Title            string           `db:"title"`
 	Description      *json.RawMessage `db:"description"`
 	Importance       int              `db:"importance"`
@@ -85,6 +86,7 @@ type taskWithPositionRow struct {
 	SprintID         *string          `db:"sprint_id"`
 	ParentTaskID     *string          `db:"parent_task_id"`
 	CommitmentTaskID *string          `db:"commitment_task_id"`
+	HomeProjectID    *string          `db:"home_project_id"`
 	Title            string           `db:"title"`
 	Description      *json.RawMessage `db:"description"`
 	Importance       int              `db:"importance"`
@@ -111,6 +113,7 @@ func (r *taskWithPositionRow) asTaskRecord() taskRecord {
 		SprintID:         r.SprintID,
 		ParentTaskID:     r.ParentTaskID,
 		CommitmentTaskID: r.CommitmentTaskID,
+		HomeProjectID:    r.HomeProjectID,
 		Title:            r.Title,
 		Description:      r.Description,
 		Importance:       r.Importance,
@@ -472,7 +475,7 @@ func (r *TaskRepository) FindDefaultTaskStatus(ctx context.Context, projectID uu
 
 const taskCols = `id, project_id, task_number, task_type_id, status_id, sprint_id, parent_task_id,
 	title, description, importance, story_points, reporter_id,
-	custom_fields, start_date, due_date, tags, created_at, updated_at, deleted_at, assignment_mode, commitment_task_id`
+	custom_fields, start_date, due_date, tags, created_at, updated_at, deleted_at, assignment_mode, commitment_task_id, home_project_id`
 
 // applyTaskFilter adds WHERE predicates for all TaskFilter fields.
 // b is the shared queryBuilder; the base "project_id = $1 AND deleted_at IS NULL" clause is already set.
@@ -1402,8 +1405,8 @@ func (r *TaskRepository) CreateTask(ctx context.Context, t *taskdom.Task) error 
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO tasks (id, project_id, task_number, task_type_id, status_id, sprint_id, parent_task_id,
 			  title, description, importance, story_points, reporter_id,
-			  custom_fields, start_date, due_date, tags, created_at, updated_at, assignment_mode, commitment_task_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+			  custom_fields, start_date, due_date, tags, created_at, updated_at, assignment_mode, commitment_task_id, home_project_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
 			t.ID.String(), t.ProjectID.String(), t.TaskNumber,
 			uuidPtrToStrPtr(t.TaskTypeID), uuidPtrToStrPtr(t.StatusID),
 			uuidPtrToStrPtr(t.SprintID), uuidPtrToStrPtr(t.ParentTaskID),
@@ -1411,6 +1414,7 @@ func (r *TaskRepository) CreateTask(ctx context.Context, t *taskdom.Task) error 
 			uuidPtrToStrPtr(t.ReporterID),
 			cf, t.StartDate, t.DueDate, tagsJSON, t.CreatedAt, t.UpdatedAt,
 			assignmentModeOrDefault(t.AssignmentMode), uuidPtrToStrPtr(t.CommitmentTaskID),
+			uuidPtrToStrPtr(t.HomeProjectID),
 		)
 		if err != nil {
 			return fmt.Errorf("task repo: create: %w", err)
@@ -1449,6 +1453,26 @@ func (r *TaskRepository) ListCommitmentWork(ctx context.Context, commitmentID uu
 	return out, nil
 }
 
+// ProjectIsLive implements taskdom.Repository.
+func (r *TaskRepository) ProjectIsLive(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	var live bool
+	if err := r.db.GetContext(ctx, &live,
+		`SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND deleted_at IS NULL)`, projectID.String()); err != nil {
+		return false, fmt.Errorf("task repo: project is live: %w", err)
+	}
+	return live, nil
+}
+
+// CountTasksOfType implements taskdom.Repository. Deleted tasks count: they
+// still reference the type.
+func (r *TaskRepository) CountTasksOfType(ctx context.Context, typeID uuid.UUID) (int, error) {
+	var n int
+	if err := r.db.GetContext(ctx, &n, `SELECT count(*) FROM tasks WHERE task_type_id = $1`, typeID.String()); err != nil {
+		return 0, fmt.Errorf("task repo: count tasks of type: %w", err)
+	}
+	return n, nil
+}
+
 // UpdateTaskFields implements taskdom.Repository — see its doc comment.
 func (r *TaskRepository) UpdateTaskFields(ctx context.Context, t *taskdom.Task, fields []taskdom.TaskField, customFieldsPatch map[string]any) error {
 	sets := []string{"updated_at=$1"}
@@ -1470,6 +1494,8 @@ func (r *TaskRepository) UpdateTaskFields(ctx context.Context, t *taskdom.Task, 
 			add("parent_task_id", uuidPtrToStrPtr(t.ParentTaskID))
 		case taskdom.TaskFieldCommitment:
 			add("commitment_task_id", uuidPtrToStrPtr(t.CommitmentTaskID))
+		case taskdom.TaskFieldHomeProject:
+			add("home_project_id", uuidPtrToStrPtr(t.HomeProjectID))
 		case taskdom.TaskFieldTitle:
 			add("title", t.Title)
 		case taskdom.TaskFieldDescription:
@@ -1558,14 +1584,15 @@ func updateTaskTx(ctx context.Context, tx *sqlx.Tx, t *taskdom.Task) error {
 		  title=$5, description=$6, importance=$7, story_points=$8,
 		  reporter_id=$9, custom_fields=$10,
 		  start_date=$11, due_date=$12, tags=$13, updated_at=$14, assignment_mode=$15,
-		  commitment_task_id=$16
-		WHERE id=$17`,
+		  commitment_task_id=$16, home_project_id=$17
+		WHERE id=$18`,
 		uuidPtrToStrPtr(t.TaskTypeID), uuidPtrToStrPtr(t.StatusID),
 		uuidPtrToStrPtr(t.SprintID), uuidPtrToStrPtr(t.ParentTaskID),
 		t.Title, t.Description, t.Importance, t.StoryPoints,
 		uuidPtrToStrPtr(t.ReporterID),
 		cf, t.StartDate, t.DueDate, tagsJSON, t.UpdatedAt,
-		assignmentModeOrDefault(t.AssignmentMode), uuidPtrToStrPtr(t.CommitmentTaskID), t.ID.String(),
+		assignmentModeOrDefault(t.AssignmentMode), uuidPtrToStrPtr(t.CommitmentTaskID),
+		uuidPtrToStrPtr(t.HomeProjectID), t.ID.String(),
 	)
 	if err != nil {
 		return fmt.Errorf("task repo: update: %w", err)
@@ -1856,6 +1883,7 @@ func toTaskEntity(r *taskRecord) (*taskdom.Task, error) {
 		SprintID:         strPtrToUUIDPtr(r.SprintID),
 		ParentTaskID:     strPtrToUUIDPtr(r.ParentTaskID),
 		CommitmentTaskID: strPtrToUUIDPtr(r.CommitmentTaskID),
+		HomeProjectID:    strPtrToUUIDPtr(r.HomeProjectID),
 		Title:            r.Title,
 		Description:      desc,
 		Importance:       r.Importance,

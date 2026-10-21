@@ -1,4 +1,4 @@
-package main
+package commitmentmigration
 
 import (
 	"encoding/json"
@@ -79,10 +79,10 @@ type task struct {
 }
 
 type taskLink struct {
-	ID           string `json:"id"`
-	SourceTaskID string `json:"source_task_id"`
-	TargetTaskID string `json:"target_task_id"`
-	LinkType     string `json:"link_type"`
+	ID           string `json:"id" db:"id"`
+	SourceTaskID string `json:"source_task_id" db:"source_task_id"`
+	TargetTaskID string `json:"target_task_id" db:"target_task_id"`
+	LinkType     string `json:"link_type" db:"link_type"`
 }
 
 type activity struct {

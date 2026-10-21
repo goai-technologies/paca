@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Paca-AI/api/internal/bootstrap/defaultroles"
+	"github.com/Paca-AI/api/internal/commitmentmigration"
 	"github.com/Paca-AI/api/internal/config"
 	userdom "github.com/Paca-AI/api/internal/domain/user"
 	"github.com/Paca-AI/api/internal/platform/authz/iam"
@@ -180,6 +182,8 @@ func New(cfg *config.Config) (*App, error) {
 	roleService = roleService.WithMembersCache(projectService)
 	settingsService := settingssvc.New(settingsRepo)
 	taskService := tasksvc.NewCachedService(tasksvc.New(taskRepo).WithAutomationStatusChecker(rawAutomationRepo).WithActivityRecorder(activityRecorder).WithCommitmentCatalog(commitmentCatalog{settingsService}), cacheStore, cfg.Cache.ConfigTTL, log)
+	// Designating the Commitments project first readies its task types.
+	settingsService.WithCommitmentsProjectPreparer(taskService)
 	sprintService := sprintsvc.NewCachedSprintService(sprintsvc.New(sprintRepo, taskRepo, publisher), cacheStore, cfg.Cache.SprintTTL, log)
 	viewService := sprintsvc.NewCachedViewService(sprintsvc.NewViewService(viewRepo, sprintRepo, taskRepo, publisher), cacheStore, cfg.Cache.SprintTTL, log)
 	notificationService := notificationsvc.New(notificationRepo, projectRepo, publisher).
@@ -311,6 +315,27 @@ func New(cfg *config.Config) (*App, error) {
 	// is never read again after this line.
 	projectServiceBase.WithAvatarService(attachmentService)
 	settingsService.WithAvatarService(attachmentService)
+
+	// --- Central commitments: one-off move -----------------------------------
+	// Moves existing commitments into the Commitments project the first time
+	// this version starts (see package commitmentmigration). It never blocks
+	// startup: on failure it logs and is retried on the next start.
+	if res, err := commitmentmigration.Run(context.Background(), commitmentmigration.Deps{
+		DB:            db,
+		Tasks:         taskService,
+		Projects:      projectService,
+		Settings:      settingsService,
+		AdminUsername: cfg.Admin.Username,
+		Mode:          os.Getenv("PACA_COMMITMENTS_MIGRATION"),
+		Log:           log,
+	}); err != nil {
+		log.Error("commitment migration did not finish; the API starts anyway", "err", err)
+	} else if res.Skipped != "" {
+		log.Info("commitment migration skipped", "reason", res.Skipped)
+	} else {
+		log.Info("commitment migration finished", "target", res.TargetPrefix, "moved", len(res.Moved),
+			"attached", res.Attached, "links_removed", res.LinksRemoved, "links_kept", res.LinksKept, "issues", len(res.Issues))
+	}
 
 	// --- API Key management -------------------------------------------------
 	apiKeyRepo := pgRepo.NewAPIKeyRepository(db)

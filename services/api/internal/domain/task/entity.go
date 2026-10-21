@@ -189,19 +189,24 @@ type Task struct {
 	// be a different project from this task's. At most one per ticket, set only
 	// on top-level tickets; descendants inherit it. See migration 900001.
 	CommitmentTaskID *uuid.UUID
-	Title            string
-	Description      json.RawMessage
-	Importance       int
-	StoryPoints      *int
-	AssigneeIDs      []uuid.UUID
-	ReporterID       *uuid.UUID
-	CustomFields     map[string]any
-	StartDate        *time.Time
-	DueDate          *time.Time
-	Tags             []string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	DeletedAt        *time.Time
+	// HomeProjectID is, on a commitment, the project it was made for —
+	// chosen from a dropdown, since every commitment lives in the
+	// Commitments project. Only Commitment-typed tasks in the Commitments
+	// project carry it. See migration 900002.
+	HomeProjectID *uuid.UUID
+	Title         string
+	Description   json.RawMessage
+	Importance    int
+	StoryPoints   *int
+	AssigneeIDs   []uuid.UUID
+	ReporterID    *uuid.UUID
+	CustomFields  map[string]any
+	StartDate     *time.Time
+	DueDate       *time.Time
+	Tags          []string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time
 	// AssignmentMode is AssignmentModeManual (default) or AssignmentModeAuto.
 	// When "auto", worker.TaskAutofillConsumer resolves AssigneeIDs via Jev
 	// whenever it's empty — see that consumer's own doc comment. A human

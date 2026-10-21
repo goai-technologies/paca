@@ -1923,3 +1923,5 @@ func TestTaskHandler_ListTaskActivities_PagedMode(t *testing.T) {
 		t.Fatalf("default page size: %d limit=%d", w.Code, act.pageLimit)
 	}
 }
+
+func (f *fakeTaskSvc) PrepareCommitmentsProject(context.Context, uuid.UUID) error { return nil }

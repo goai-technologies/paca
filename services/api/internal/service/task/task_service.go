@@ -4,6 +4,7 @@ package tasksvc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"strings"
 	"time"
@@ -118,6 +119,11 @@ func (s *Service) CreateTaskType(ctx context.Context, in taskdom.CreateTaskTypeI
 	if reservedSystemTypeNames[name] {
 		return nil, taskdom.ErrTypeNameReserved
 	}
+	if locked, err := s.isCommitmentsProject(ctx, in.ProjectID); err != nil {
+		return nil, err
+	} else if locked {
+		return nil, taskdom.ErrCommitmentsProjectOnlyCommitments
+	}
 
 	now := time.Now()
 	t := &taskdom.TaskType{
@@ -149,6 +155,14 @@ func (s *Service) UpdateTaskType(ctx context.Context, projectID, id uuid.UUID, i
 	}
 	if t.IsSystem {
 		return nil, taskdom.ErrTypeIsSystem
+	}
+	if name := strings.TrimSpace(in.Name); name != "" && !strings.EqualFold(name, taskdom.CommitmentTypeName) &&
+		strings.EqualFold(strings.TrimSpace(t.Name), taskdom.CommitmentTypeName) {
+		if locked, err := s.isCommitmentsProject(ctx, projectID); err != nil {
+			return nil, err
+		} else if locked {
+			return nil, taskdom.ErrCommitmentsProjectOnlyCommitments
+		}
 	}
 
 	if name := strings.TrimSpace(in.Name); name != "" {
@@ -184,6 +198,13 @@ func (s *Service) DeleteTaskType(ctx context.Context, projectID, id uuid.UUID) e
 	if t.IsSystem {
 		return taskdom.ErrTypeIsSystem
 	}
+	if strings.EqualFold(strings.TrimSpace(t.Name), taskdom.CommitmentTypeName) {
+		if locked, err := s.isCommitmentsProject(ctx, projectID); err != nil {
+			return err
+		} else if locked {
+			return taskdom.ErrCommitmentsProjectOnlyCommitments
+		}
+	}
 	// New tasks without a type start as the default one, so it has to stay
 	// until another type is made the default.
 	if t.IsDefault {
@@ -199,6 +220,17 @@ func (s *Service) DeleteTaskType(ctx context.Context, projectID, id uuid.UUID) e
 // SetDefaultTaskType marks typeID as the project's default task type,
 // clearing the flag on all other types in the same project.
 func (s *Service) SetDefaultTaskType(ctx context.Context, projectID, typeID uuid.UUID) (*taskdom.TaskType, error) {
+	if locked, err := s.isCommitmentsProject(ctx, projectID); err != nil {
+		return nil, err
+	} else if locked {
+		isCommitment, err := s.isCommitmentTaskType(ctx, &typeID)
+		if err != nil {
+			return nil, err
+		}
+		if !isCommitment {
+			return nil, taskdom.ErrCommitmentsProjectOnlyCommitments
+		}
+	}
 	if err := s.repo.SetDefaultTaskType(ctx, projectID, typeID); err != nil {
 		return nil, err
 	}
@@ -445,6 +477,126 @@ func (s *Service) ListCommitmentWork(ctx context.Context, commitmentID uuid.UUID
 	return s.repo.ListCommitmentWork(ctx, commitmentID)
 }
 
+// isCommitmentsProject reports whether projectID is the configured
+// Commitments project.
+func (s *Service) isCommitmentsProject(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	if s.catalog == nil {
+		return false, nil
+	}
+	id, err := s.catalog.CommitmentsProjectID(ctx)
+	if err != nil {
+		return false, err
+	}
+	return id != nil && *id == projectID, nil
+}
+
+// validateCommitmentsProjectType keeps the Commitments project to
+// commitments: any task created there, or retyped there, must be a
+// Commitment.
+func (s *Service) validateCommitmentsProjectType(ctx context.Context, projectID uuid.UUID, typeID *uuid.UUID) error {
+	locked, err := s.isCommitmentsProject(ctx, projectID)
+	if err != nil || !locked {
+		return err
+	}
+	isCommitment, err := s.isCommitmentTaskType(ctx, typeID)
+	if err != nil {
+		return err
+	}
+	if !isCommitment {
+		return taskdom.ErrCommitmentsProjectOnlyCommitments
+	}
+	return nil
+}
+
+// validateHomeProject checks the project a commitment is for: only a
+// Commitment in the Commitments project carries one, and it must name a live
+// project other than the Commitments project. nil is always allowed.
+func (s *Service) validateHomeProject(ctx context.Context, taskProjectID uuid.UUID, typeID, homeID *uuid.UUID) error {
+	if homeID == nil {
+		return nil
+	}
+	locked, err := s.isCommitmentsProject(ctx, taskProjectID)
+	if err != nil {
+		return err
+	}
+	if !locked || *homeID == taskProjectID {
+		return taskdom.ErrHomeProjectInvalid
+	}
+	isCommitment, err := s.isCommitmentTaskType(ctx, typeID)
+	if err != nil {
+		return err
+	}
+	if !isCommitment {
+		return taskdom.ErrHomeProjectInvalid
+	}
+	live, err := s.repo.ProjectIsLive(ctx, *homeID)
+	if err != nil {
+		return err
+	}
+	if !live {
+		return taskdom.ErrHomeProjectNotFound
+	}
+	return nil
+}
+
+// PrepareCommitmentsProject implements taskdom.Service. It runs before a
+// project is designated the Commitments project: a Commitment type must
+// exist and be the default, and every other type goes (system Epic included,
+// which only this path may remove). Nothing is removed while any other type
+// still has tasks.
+func (s *Service) PrepareCommitmentsProject(ctx context.Context, projectID uuid.UUID) error {
+	types, err := s.repo.ListTaskTypes(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	var commitment *taskdom.TaskType
+	var others []*taskdom.TaskType
+	for _, t := range types {
+		if commitment == nil && strings.EqualFold(strings.TrimSpace(t.Name), taskdom.CommitmentTypeName) {
+			commitment = t
+			continue
+		}
+		others = append(others, t)
+	}
+	var inUse []string
+	for _, t := range others {
+		n, err := s.repo.CountTasksOfType(ctx, t.ID)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			inUse = append(inUse, fmt.Sprintf("%s (%d)", t.Name, n))
+		}
+	}
+	if len(inUse) > 0 {
+		return fmt.Errorf("%w: %s", taskdom.ErrCommitmentsProjectTypeInUse, strings.Join(inUse, ", "))
+	}
+	if commitment == nil {
+		now := time.Now()
+		icon, color := "Flag", "#f59e0b"
+		desc := "A promise made to a customer or to the business"
+		commitment = &taskdom.TaskType{ID: uuid.New(), ProjectID: projectID, Name: taskdom.CommitmentTypeName,
+			Icon: &icon, Color: &color, Description: &desc, CreatedAt: now, UpdatedAt: now}
+		if err := s.repo.CreateTaskType(ctx, commitment); err != nil {
+			return err
+		}
+		s.recordSchema(ctx, projectID, TopicTaskTypeCreated, commitment.Name)
+	}
+	if !commitment.IsDefault {
+		if err := s.repo.SetDefaultTaskType(ctx, projectID, commitment.ID); err != nil {
+			return err
+		}
+		s.recordSchema(ctx, projectID, TopicTaskTypeDefaultSet, commitment.Name)
+	}
+	for _, t := range others {
+		if err := s.repo.DeleteTaskType(ctx, t.ID); err != nil {
+			return fmt.Errorf("remove task type %s: %w", t.Name, err)
+		}
+		s.recordSchema(ctx, projectID, TopicTaskTypeDeleted, t.Name)
+	}
+	return nil
+}
+
 // wouldCreateCycle reports whether making proposedParentID the parent of taskID
 // would introduce a directed cycle in the task hierarchy.
 func (s *Service) wouldCreateCycle(ctx context.Context, taskID, proposedParentID uuid.UUID) bool {
@@ -553,6 +705,12 @@ func (s *Service) CreateTask(ctx context.Context, in taskdom.CreateTaskInput) (*
 	if err := s.validateCommitment(ctx, uuid.Nil, in.CommitmentTaskID, in.ParentTaskID, taskTypeID, true); err != nil {
 		return nil, err
 	}
+	if err := s.validateCommitmentsProjectType(ctx, in.ProjectID, taskTypeID); err != nil {
+		return nil, err
+	}
+	if err := s.validateHomeProject(ctx, in.ProjectID, taskTypeID, in.HomeProjectID); err != nil {
+		return nil, err
+	}
 
 	statusID := in.StatusID
 	if statusID == nil {
@@ -591,6 +749,7 @@ func (s *Service) CreateTask(ctx context.Context, in taskdom.CreateTaskInput) (*
 		SprintID:         in.SprintID,
 		ParentTaskID:     in.ParentTaskID,
 		CommitmentTaskID: in.CommitmentTaskID,
+		HomeProjectID:    in.HomeProjectID,
 		Title:            title,
 		Description:      in.Description,
 		Importance:       in.Importance,
@@ -618,7 +777,7 @@ func (s *Service) UpdateTask(ctx context.Context, projectID, id uuid.UUID, in ta
 	// on both fields together, so a save touching either must read and check
 	// them under the row lock — otherwise two concurrent saves each validate
 	// against the old value of the other's field and both write.
-	if in.ParentTaskID != nil || in.TaskTypeID != nil || in.CommitmentTaskID != nil {
+	if in.ParentTaskID != nil || in.TaskTypeID != nil || in.CommitmentTaskID != nil || in.HomeProjectID != nil {
 		return s.UpdateTaskAtomic(ctx, projectID, id, func(*taskdom.Task) (taskdom.UpdateTaskInput, bool) {
 			return in, true
 		})
@@ -718,6 +877,23 @@ func (s *Service) applyTaskUpdate(ctx context.Context, t *taskdom.Task, in taskd
 	if err := s.validateCommitment(ctx, t.ID, effectiveCommitmentID, effectiveParentID, effectiveTypeID, commitmentChanged); err != nil {
 		return nil, err
 	}
+	typeChanged := in.TaskTypeID != nil && !uuidPtrEqual(t.TaskTypeID, effectiveTypeID)
+	if typeChanged {
+		if err := s.validateCommitmentsProjectType(ctx, t.ProjectID, effectiveTypeID); err != nil {
+			return nil, err
+		}
+	}
+	effectiveHomeID := t.HomeProjectID
+	homeChanged := false
+	if in.HomeProjectID != nil {
+		effectiveHomeID = *in.HomeProjectID
+		homeChanged = !uuidPtrEqual(t.HomeProjectID, effectiveHomeID)
+	}
+	if homeChanged || typeChanged {
+		if err := s.validateHomeProject(ctx, t.ProjectID, effectiveTypeID, effectiveHomeID); err != nil {
+			return nil, err
+		}
+	}
 
 	if in.TaskTypeID != nil {
 		t.TaskTypeID = *in.TaskTypeID
@@ -726,6 +902,10 @@ func (s *Service) applyTaskUpdate(ctx context.Context, t *taskdom.Task, in taskd
 	if in.CommitmentTaskID != nil {
 		t.CommitmentTaskID = *in.CommitmentTaskID
 		fields = append(fields, taskdom.TaskFieldCommitment)
+	}
+	if in.HomeProjectID != nil {
+		t.HomeProjectID = *in.HomeProjectID
+		fields = append(fields, taskdom.TaskFieldHomeProject)
 	}
 	if in.StatusID != nil {
 		t.StatusID = *in.StatusID

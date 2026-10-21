@@ -127,6 +127,10 @@ type TaskService interface {
 	// ListCommitmentWork returns every live task, in any project, attached to
 	// the commitment — see Task.CommitmentTaskID.
 	ListCommitmentWork(ctx context.Context, commitmentID uuid.UUID) ([]*Task, error)
+	// PrepareCommitmentsProject makes projectID fit to be the Commitments
+	// project: a Commitment type exists and is the default, and every other
+	// type is removed. It refuses when another type is still in use there.
+	PrepareCommitmentsProject(ctx context.Context, projectID uuid.UUID) error
 	GetTaskByNumber(ctx context.Context, projectID uuid.UUID, taskNumber int64) (*Task, error)
 	CreateTask(ctx context.Context, in CreateTaskInput) (*Task, error)
 	// UpdateTask updates the task identified by id, verifying it belongs to projectID.
@@ -165,16 +169,18 @@ type CreateTaskInput struct {
 	ParentTaskID *uuid.UUID
 	// CommitmentTaskID attaches the new ticket to a commitment — see Task.CommitmentTaskID.
 	CommitmentTaskID *uuid.UUID
-	Title            string
-	Description      json.RawMessage
-	Importance       int
-	StoryPoints      *int
-	AssigneeIDs      []uuid.UUID
-	ReporterID       *uuid.UUID
-	CustomFields     map[string]any
-	StartDate        *time.Time
-	DueDate          *time.Time
-	Tags             []string
+	// HomeProjectID is the project a commitment is for — see Task.HomeProjectID.
+	HomeProjectID *uuid.UUID
+	Title         string
+	Description   json.RawMessage
+	Importance    int
+	StoryPoints   *int
+	AssigneeIDs   []uuid.UUID
+	ReporterID    *uuid.UUID
+	CustomFields  map[string]any
+	StartDate     *time.Time
+	DueDate       *time.Time
+	Tags          []string
 	// AssignmentMode: empty defaults to AssignmentModeManual, unless
 	// AssigneeIDs is empty and it's explicitly AssignmentModeAuto (see
 	// CreateTask) — see Task.AssignmentMode's doc comment.
@@ -202,16 +208,18 @@ type UpdateTaskInput struct {
 	ParentTaskID **uuid.UUID
 	// CommitmentTaskID follows the same three-state encoding as ParentTaskID.
 	CommitmentTaskID **uuid.UUID
-	Title            string
-	Description      *json.RawMessage
-	Importance       *int
-	StoryPoints      **int
-	AssigneeIDs      *[]uuid.UUID
-	ReporterID       **uuid.UUID
-	CustomFields     *map[string]any
-	StartDate        **time.Time
-	DueDate          **time.Time
-	Tags             *[]string
+	// HomeProjectID follows the same three-state encoding as ParentTaskID.
+	HomeProjectID **uuid.UUID
+	Title         string
+	Description   *json.RawMessage
+	Importance    *int
+	StoryPoints   **int
+	AssigneeIDs   *[]uuid.UUID
+	ReporterID    **uuid.UUID
+	CustomFields  *map[string]any
+	StartDate     **time.Time
+	DueDate       **time.Time
+	Tags          *[]string
 	// AssignmentMode: nil means unchanged. When explicitly set to
 	// AssignmentModeManual, also fully overrides AssigneeIDs (even if
 	// AssigneeIDs itself is nil/absent in the same request) — see UpdateTask's

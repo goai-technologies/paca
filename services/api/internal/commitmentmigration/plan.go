@@ -1,4 +1,4 @@
-package main
+package commitmentmigration
 
 import (
 	"fmt"
@@ -255,7 +255,7 @@ func buildPlan(inv *inventory, opt options) *plan {
 	}
 	if _, ok := fieldSeen["workstream"]; !ok {
 		fieldSeen["workstream"] = customField{FieldKey: "workstream", DisplayName: "Workstream", FieldType: "select",
-			Options: []fieldOption{{Value: "Delivery"}, {Value: "Platform"}, {Value: "Internal"}}}
+			Options: []fieldOption{{Value: "Delivery"}, {Value: "PPE"}, {Value: "Internal"}}}
 	}
 	for k := range fieldKeys {
 		if _, ok := fieldSeen[k]; !ok {
