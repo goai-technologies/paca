@@ -160,3 +160,28 @@ func TestPrepareCommitmentsProject(t *testing.T) {
 		t.Fatalf("types after second run = %d", len(types))
 	}
 }
+
+func TestCommitmentsAreCreatedOnlyInTheCommitmentsProject(t *testing.T) {
+	w := newCommitmentsWorld(t)
+	ctx := context.Background()
+	legacy := uuid.New()
+	w.repo.types[legacy] = &taskdom.TaskType{ID: legacy, ProjectID: w.other, Name: "Commitment"}
+
+	if _, err := w.svc.CreateTask(ctx, taskdom.CreateTaskInput{ProjectID: w.other, Title: "x", TaskTypeID: &legacy}); !errors.Is(err, taskdom.ErrCommitmentOutsideCommitmentsProject) {
+		t.Fatalf("Commitment outside the Commitments project: err = %v", err)
+	}
+	ticket, err := w.svc.CreateTask(ctx, taskdom.CreateTaskInput{ProjectID: w.other, Title: "ticket"})
+	if err != nil {
+		t.Fatalf("ordinary ticket: %v", err)
+	}
+	to := &legacy
+	if _, err := w.svc.UpdateTask(ctx, w.other, ticket.ID, taskdom.UpdateTaskInput{TaskTypeID: &to}); !errors.Is(err, taskdom.ErrCommitmentOutsideCommitmentsProject) {
+		t.Fatalf("retype to Commitment outside: err = %v", err)
+	}
+
+	// Before any Commitments project exists, nothing changes for anyone.
+	free := tasksvc.New(w.repo)
+	if _, err := free.CreateTask(ctx, taskdom.CreateTaskInput{ProjectID: w.other, Title: "legacy", TaskTypeID: &legacy}); err != nil {
+		t.Fatalf("no Commitments project configured: %v", err)
+	}
+}

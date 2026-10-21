@@ -52,8 +52,9 @@ var (
 	ErrHomeProjectInvalid  = errors.New("commitment project: only a commitment in the Commitments project has a project, and it cannot be the Commitments project itself")
 
 	// The Commitments project holds commitments and nothing else.
-	ErrCommitmentsProjectOnlyCommitments = errors.New("commitments project: only Commitment tasks can be created here, and the Commitment type cannot be changed or removed")
-	ErrCommitmentsProjectTypeInUse       = errors.New("commitments project: the project still has tasks of another type; move or delete them first")
+	ErrCommitmentsProjectOnlyCommitments   = errors.New("commitments project: only Commitment tasks can be created here, and the Commitment type cannot be changed or removed")
+	ErrCommitmentOutsideCommitmentsProject = errors.New("commitments project: commitments are created in the Commitments project only")
+	ErrCommitmentsProjectTypeInUse         = errors.New("commitments project: the project still has tasks of another type; move or delete them first")
 
 	// Activity / comment errors.
 	ErrActivityNotFound      = errors.New("activity: not found")

@@ -151,6 +151,11 @@ func Run(ctx context.Context, d Deps) (*Result, error) {
 	if len(p.Commitments) == 0 {
 		res.Skipped = "no commitments outside the Commitments project"
 		if mode == ModeAuto {
+			if target != nil {
+				if tid, err := uuid.Parse(target.ID); err == nil {
+					retireCommitmentTypes(ctx, d, tid)
+				}
+			}
 			if err := markDone(ctx, d.DB); err != nil {
 				return res, err
 			}
@@ -193,11 +198,53 @@ func Run(ctx context.Context, d Deps) (*Result, error) {
 	if failed > 0 {
 		return res, fmt.Errorf("commitment migration: %d of %d commitments not moved; see errors above", failed, len(p.Commitments))
 	}
+	retireCommitmentTypes(ctx, d, tgt.ID)
 	if err := markDone(ctx, d.DB); err != nil {
 		return res, err
 	}
 	res.Completed = true
 	return res, nil
+}
+
+// retireCommitmentTypes removes the Commitment task type from every other
+// project once its commitments have moved, so new ones can only be made in
+// the Commitments project. A type still referenced by any task (a deleted
+// one included) or set as a project's default is left alone and logged.
+func retireCommitmentTypes(ctx context.Context, d Deps, target uuid.UUID) {
+	var rows []struct {
+		ID        string `db:"id"`
+		ProjectID string `db:"project_id"`
+		InUse     bool   `db:"in_use"`
+		IsDefault bool   `db:"is_default"`
+	}
+	if err := d.DB.SelectContext(ctx, &rows, `
+		SELECT tt.id, tt.project_id, tt.is_default,
+		  EXISTS (SELECT 1 FROM tasks t WHERE t.task_type_id = tt.id) AS in_use
+		FROM task_types tt JOIN projects p ON p.id = tt.project_id AND p.deleted_at IS NULL
+		WHERE lower(trim(tt.name)) = 'commitment' AND tt.project_id <> $1`, target.String()); err != nil {
+		d.Log.WarnContext(ctx, "commitment migration: could not list leftover Commitment types", "err", err)
+		return
+	}
+	removed := 0
+	for _, r := range rows {
+		if r.InUse || r.IsDefault {
+			d.Log.InfoContext(ctx, "commitment migration: kept a Commitment type still in use elsewhere", "project", r.ProjectID, "in_use", r.InUse, "default", r.IsDefault)
+			continue
+		}
+		pid, err1 := uuid.Parse(r.ProjectID)
+		tid, err2 := uuid.Parse(r.ID)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		if err := d.Tasks.DeleteTaskType(ctx, pid, tid); err != nil {
+			d.Log.WarnContext(ctx, "commitment migration: could not remove a leftover Commitment type", "project", r.ProjectID, "err", err)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		d.Log.InfoContext(ctx, "commitment migration: removed the Commitment type from other projects", "projects", removed)
+	}
 }
 
 func markDone(ctx context.Context, db *sqlx.DB) error {

@@ -490,20 +490,27 @@ func (s *Service) isCommitmentsProject(ctx context.Context, projectID uuid.UUID)
 	return id != nil && *id == projectID, nil
 }
 
-// validateCommitmentsProjectType keeps the Commitments project to
-// commitments: any task created there, or retyped there, must be a
-// Commitment.
+// validateCommitmentsProjectType keeps commitments and the Commitments
+// project together once one is configured: a task created or retyped there
+// must be a Commitment, and a Commitment cannot be created or retyped
+// anywhere else.
 func (s *Service) validateCommitmentsProjectType(ctx context.Context, projectID uuid.UUID, typeID *uuid.UUID) error {
-	locked, err := s.isCommitmentsProject(ctx, projectID)
-	if err != nil || !locked {
+	if s.catalog == nil {
+		return nil
+	}
+	catalogID, err := s.catalog.CommitmentsProjectID(ctx)
+	if err != nil || catalogID == nil {
 		return err
 	}
 	isCommitment, err := s.isCommitmentTaskType(ctx, typeID)
 	if err != nil {
 		return err
 	}
-	if !isCommitment {
+	switch {
+	case projectID == *catalogID && !isCommitment:
 		return taskdom.ErrCommitmentsProjectOnlyCommitments
+	case projectID != *catalogID && isCommitment:
+		return taskdom.ErrCommitmentOutsideCommitmentsProject
 	}
 	return nil
 }

@@ -95,6 +95,8 @@ const (
 	CodeHomeProjectNotFound Code = "COMMITMENT_PROJECT_NOT_FOUND"
 	// CodeCommitmentsProjectOnlyCommitments: the Commitments project holds Commitment tasks only.
 	CodeCommitmentsProjectOnlyCommitments Code = "COMMITMENTS_PROJECT_ONLY_COMMITMENTS"
+	// CodeCommitmentOutsideCommitmentsProject: a Commitment task outside the Commitments project, once one exists.
+	CodeCommitmentOutsideCommitmentsProject Code = "COMMITMENT_OUTSIDE_COMMITMENTS_PROJECT"
 	// CodeCommitmentsProjectTypeInUse: a project cannot become the Commitments project while it has tasks of another type.
 	CodeCommitmentsProjectTypeInUse Code = "COMMITMENTS_PROJECT_TYPE_IN_USE"
 	// CodeTaskCannotBeOwnParent indicates an attempt to set a task as its own parent.

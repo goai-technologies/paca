@@ -241,6 +241,8 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusUnprocessableEntity, apierr.CodeHomeProjectNotFound
 	case errors.Is(err, taskdom.ErrCommitmentsProjectOnlyCommitments):
 		return http.StatusConflict, apierr.CodeCommitmentsProjectOnlyCommitments
+	case errors.Is(err, taskdom.ErrCommitmentOutsideCommitmentsProject):
+		return http.StatusConflict, apierr.CodeCommitmentOutsideCommitmentsProject
 	case errors.Is(err, taskdom.ErrCommitmentsProjectTypeInUse):
 		return http.StatusConflict, apierr.CodeCommitmentsProjectTypeInUse
 	case errors.Is(err, taskdom.ErrTaskCannotBeOwnParent):
