@@ -97,6 +97,10 @@ export function TaskTypeFormDialog({
 				setError(t("taskTypes.formDialog.errors.isSystem"));
 				return;
 			}
+			if (code === ApiErrorCode.CommitmentsProjectOnlyCommitments) {
+				setError(t("taskTypes.formDialog.errors.commitmentsProjectOnly"));
+				return;
+			}
 			setError(t("taskTypes.formDialog.errors.saveFailed"));
 		},
 	});

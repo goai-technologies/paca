@@ -65,6 +65,10 @@ export const ApiErrorCode = {
 	TaskTypeIsSystem: "TASK_TYPE_IS_SYSTEM",
 	TaskTypeNameReserved: "TASK_TYPE_NAME_RESERVED",
 	TaskTypeIsDefault: "TASK_TYPE_IS_DEFAULT",
+	// The Commitments project holds Commitment tasks only: no other type can
+	// be added there, and its Commitment type cannot be renamed or removed.
+	// See TaskTypeFormDialog and DeleteTaskTypeDialog.
+	CommitmentsProjectOnlyCommitments: "COMMITMENTS_PROJECT_ONLY_COMMITMENTS",
 
 	// Task status domain errors.
 	TaskStatusNotFound: "TASK_STATUS_NOT_FOUND",

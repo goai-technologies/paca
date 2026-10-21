@@ -24,6 +24,10 @@ export interface CommitmentCatalogItem {
 	is_closed: boolean;
 	due_date?: string | null;
 	custom_fields: Record<string, unknown>;
+	/** The project this commitment is for (its Project field); absent when none is chosen. */
+	home_project_id?: string | null;
+	home_project_name?: string;
+	home_project_task_id_prefix?: string;
 }
 
 export interface CommitmentCatalog {
@@ -101,6 +105,49 @@ export const commitmentCatalogAllQueryOptions = () =>
 		queryFn: () => listCommitments({ includeClosed: true }),
 		staleTime: 30_000,
 	});
+
+/**
+ * The id of the workspace's Commitments project. Read from the full catalog
+ * (same cache entry as commitmentCatalogAllQueryOptions), so a page that
+ * already labels commitments does not fetch twice. Errors when no
+ * Commitments project is configured.
+ */
+export const commitmentsProjectIdQueryOptions = () =>
+	queryOptions({
+		...commitmentCatalogAllQueryOptions(),
+		select: (catalog) => catalog.commitments_project_id,
+	});
+
+/**
+ * Orders catalog rows for a ticket in `projectId`: commitments FOR that
+ * project first, then the rest, each group keeping the catalog's order.
+ */
+export function partitionCommitmentsByProject(
+	items: CommitmentCatalogItem[],
+	projectId: string,
+): {
+	thisProject: CommitmentCatalogItem[];
+	otherProjects: CommitmentCatalogItem[];
+} {
+	const thisProject: CommitmentCatalogItem[] = [];
+	const otherProjects: CommitmentCatalogItem[] = [];
+	for (const c of items) {
+		(c.home_project_id === projectId ? thisProject : otherProjects).push(c);
+	}
+	return { thisProject, otherProjects };
+}
+
+/** True when the commitment's ref, title or project (name or prefix) contains the query, ignoring case. */
+export function commitmentMatchesSearch(
+	c: CommitmentCatalogItem,
+	query: string,
+): boolean {
+	const q = query.trim().toLowerCase();
+	if (!q) return true;
+	return [c.ref, c.title, c.home_project_name, c.home_project_task_id_prefix]
+		.filter((v): v is string => !!v)
+		.some((v) => v.toLowerCase().includes(q));
+}
 
 export const commitmentWorkQueryOptions = (commitmentId: string) =>
 	queryOptions({

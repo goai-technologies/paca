@@ -1342,6 +1342,7 @@
 			"deleteFailed": "Failed to delete task type. Please try again.",
 			"isDefault": "The default type can't be deleted. Make another type the default first.",
 			"isSystem": "System types can't be deleted.",
+			"commitmentsProjectOnly": "The commitment type can't be deleted: this project holds commitments only.",
 			"cancel": "Cancel",
 			"deleteType": "Delete type"
 		},
@@ -1366,7 +1367,8 @@
 				"nameInvalid": "Type name is empty or invalid.",
 				"nameReserved": "That name is reserved for a built-in type.",
 				"saveFailed": "Failed to save task type. Please try again.",
-				"isSystem": "System types can't be edited."
+				"isSystem": "System types can't be edited.",
+				"commitmentsProjectOnly": "This project holds commitments only: other task types can't be added, and the commitment type can't be renamed."
 			}
 		}
 	},
@@ -1628,7 +1630,15 @@
 			"workEmpty": "No tickets are attached to this commitment yet.",
 			"workError": "Could not load the attached work.",
 			"hiddenProjects_one": "{{count}} project you cannot view is not shown.",
-			"hiddenProjects_other": "{{count}} projects you cannot view are not shown."
+			"hiddenProjects_other": "{{count}} projects you cannot view are not shown.",
+			"groupThisProject": "This project",
+			"groupOtherProjects": "Other projects",
+			"projectLabel": "Project",
+			"projectHint": "Which project this commitment is for",
+			"projectSearchPlaceholder": "Search projects…",
+			"projectClear": "Clear project",
+			"projectEmpty": "No projects to choose from",
+			"projectUnknown": "Unknown project"
 		}
 	},
 	"portForwardDetail": {
@@ -2540,7 +2550,7 @@
 		"label": "Workstream",
 		"hint": "Which dashboard this project's commitments default to. A commitment's own Workstream field overrides it.",
 		"delivery": "Delivery",
-		"platform": "Platform",
+		"platform": "PPE",
 		"internal": "Internal"
 	}
 }

@@ -1342,6 +1342,7 @@
 			"deleteFailed": "Falha ao excluir o tipo de tarefa. Tente novamente.",
 			"isDefault": "O tipo padrão não pode ser excluído. Defina primeiro outro tipo como padrão.",
 			"isSystem": "Tipos do sistema não podem ser excluídos.",
+			"commitmentsProjectOnly": "O tipo de compromisso não pode ser excluído: este projeto contém apenas compromissos.",
 			"cancel": "Cancelar",
 			"deleteType": "Excluir tipo"
 		},
@@ -1366,7 +1367,8 @@
 				"nameInvalid": "O nome do tipo está vazio ou inválido.",
 				"nameReserved": "Esse nome está reservado para um tipo integrado.",
 				"saveFailed": "Falha ao salvar o tipo de tarefa. Tente novamente.",
-				"isSystem": "Tipos do sistema não podem ser editados."
+				"isSystem": "Tipos do sistema não podem ser editados.",
+				"commitmentsProjectOnly": "Este projeto contém apenas compromissos: não é possível adicionar outros tipos de tarefa nem renomear o tipo de compromisso."
 			}
 		}
 	},
@@ -1628,7 +1630,15 @@
 			"workEmpty": "Ainda não há tickets vinculados a este compromisso.",
 			"workError": "Não foi possível carregar o trabalho vinculado.",
 			"hiddenProjects_one": "{{count}} projeto que você não pode ver não é mostrado.",
-			"hiddenProjects_other": "{{count}} projetos que você não pode ver não são mostrados."
+			"hiddenProjects_other": "{{count}} projetos que você não pode ver não são mostrados.",
+			"groupThisProject": "Este projeto",
+			"groupOtherProjects": "Outros projetos",
+			"projectLabel": "Projeto",
+			"projectHint": "Para qual projeto é este compromisso",
+			"projectSearchPlaceholder": "Buscar projetos…",
+			"projectClear": "Remover projeto",
+			"projectEmpty": "Nenhum projeto para escolher",
+			"projectUnknown": "Projeto desconhecido"
 		}
 	},
 	"portForwardDetail": {
@@ -2540,7 +2550,7 @@
 		"label": "Frente de trabalho",
 		"hint": "Em qual painel os compromissos deste projeto aparecem por padrão. O campo Frente de trabalho do próprio compromisso tem prioridade.",
 		"delivery": "Entrega",
-		"platform": "Plataforma",
+		"platform": "PPE",
 		"internal": "Interno"
 	}
 }

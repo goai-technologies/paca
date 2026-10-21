@@ -1342,6 +1342,7 @@
 			"deleteFailed": "Échec de la suppression du type de tâche. Veuillez réessayer.",
 			"isDefault": "Le type par défaut ne peut pas être supprimé. Définissez d'abord un autre type par défaut.",
 			"isSystem": "Les types système ne peuvent pas être supprimés.",
+			"commitmentsProjectOnly": "Le type d'engagement ne peut pas être supprimé : ce projet ne contient que des engagements.",
 			"cancel": "Annuler",
 			"deleteType": "Supprimer le type"
 		},
@@ -1366,7 +1367,8 @@
 				"nameInvalid": "Le nom du type est vide ou invalide.",
 				"nameReserved": "Ce nom est réservé à un type intégré.",
 				"saveFailed": "Échec de l'enregistrement du type de tâche. Veuillez réessayer.",
-				"isSystem": "Les types système ne peuvent pas être modifiés."
+				"isSystem": "Les types système ne peuvent pas être modifiés.",
+				"commitmentsProjectOnly": "Ce projet ne contient que des engagements : impossible d'y ajouter d'autres types de tâche ou de renommer le type d'engagement."
 			}
 		}
 	},
@@ -1628,7 +1630,15 @@
 			"workEmpty": "Aucun ticket n'est encore rattaché à cet engagement.",
 			"workError": "Impossible de charger le travail rattaché.",
 			"hiddenProjects_one": "{{count}} projet que vous ne pouvez pas voir n'est pas affiché.",
-			"hiddenProjects_other": "{{count}} projets que vous ne pouvez pas voir ne sont pas affichés."
+			"hiddenProjects_other": "{{count}} projets que vous ne pouvez pas voir ne sont pas affichés.",
+			"groupThisProject": "Ce projet",
+			"groupOtherProjects": "Autres projets",
+			"projectLabel": "Projet",
+			"projectHint": "Le projet auquel cet engagement est destiné",
+			"projectSearchPlaceholder": "Rechercher des projets…",
+			"projectClear": "Retirer le projet",
+			"projectEmpty": "Aucun projet à choisir",
+			"projectUnknown": "Projet inconnu"
 		}
 	},
 	"portForwardDetail": {
@@ -2540,7 +2550,7 @@
 		"label": "Filière",
 		"hint": "Le tableau de bord par défaut des engagements de ce projet. Le champ Filière de l'engagement lui-même a priorité.",
 		"delivery": "Livraison",
-		"platform": "Plateforme",
+		"platform": "PPE",
 		"internal": "Interne"
 	}
 }

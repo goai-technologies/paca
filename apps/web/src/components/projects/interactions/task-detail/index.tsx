@@ -259,6 +259,11 @@ export function TaskDetailModal({
 					return key.includes("tasks") || key.includes("backlog-tasks");
 				},
 			});
+			// A commitment's title, status or project shows in every ticket's
+			// Commitment picker.
+			if (isCommitmentType(taskType)) {
+				qc.invalidateQueries({ queryKey: ["commitments", "catalog"] });
+			}
 		},
 	});
 

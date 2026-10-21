@@ -1,7 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
-/** The project-level default workstream, stored in projects.settings. */
+/**
+ * The project-level default workstream, stored in projects.settings.
+ * "platform" is shown as "PPE"; only the label changed, the stored value
+ * did not.
+ */
 export type Workstream = "delivery" | "platform" | "internal";
 
 /** The three, in the order the picker draws them. */
@@ -48,7 +52,7 @@ interface WorkstreamPickerProps {
 }
 
 /**
- * Delivery / Platform / Internal — which dashboard this project's
+ * Delivery / PPE / Internal — which dashboard this project's
  * commitments default to. A commitment's own Workstream field wins over this;
  * the project value is only the default.
  */
