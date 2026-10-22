@@ -1342,6 +1342,7 @@
 			"deleteFailed": "タスクタイプの削除に失敗しました。もう一度お試しください。",
 			"isDefault": "既定のタイプは削除できません。先に別のタイプを既定に設定してください。",
 			"isSystem": "システムタイプは削除できません。",
+			"commitmentsProjectOnly": "コミットメントタイプは削除できません。このプロジェクトにはコミットメントのみを置けます。",
 			"cancel": "キャンセル",
 			"deleteType": "タイプを削除"
 		},
@@ -1366,7 +1367,8 @@
 				"nameInvalid": "タイプ名が空か無効です。",
 				"nameReserved": "その名前は組み込みタイプ用に予約されています。",
 				"saveFailed": "タスクタイプの保存に失敗しました。もう一度お試しください。",
-				"isSystem": "システムタイプは編集できません。"
+				"isSystem": "システムタイプは編集できません。",
+				"commitmentsProjectOnly": "このプロジェクトにはコミットメントのみを置けます。他のタスクタイプの追加や、コミットメントタイプの名前変更はできません。"
 			}
 		}
 	},
@@ -1614,6 +1616,29 @@
 		"searchableList": {
 			"searchPlaceholder": "検索…",
 			"noResults": "一致なし"
+		},
+		"commitment": {
+			"label": "コミットメント",
+			"inherited": "継承",
+			"inheritedHint": "最上位のチケットで設定されます。このチケットはそれを継承します。",
+			"searchPlaceholder": "コミットメントを検索…",
+			"open": "コミットメントを開く",
+			"remove": "コミットメントから外す",
+			"loading": "読み込み中…",
+			"empty": "オープンなコミットメントはありません",
+			"workTitle": "このコミットメントの作業",
+			"workEmpty": "このコミットメントにはまだチケットがありません。",
+			"workError": "関連する作業を読み込めませんでした。",
+			"hiddenProjects_one": "閲覧できない {{count}} 件のプロジェクトは表示されていません。",
+			"hiddenProjects_other": "閲覧できない {{count}} 件のプロジェクトは表示されていません。",
+			"groupThisProject": "このプロジェクト",
+			"groupOtherProjects": "その他のプロジェクト",
+			"projectLabel": "プロジェクト",
+			"projectHint": "このコミットメントの対象プロジェクト",
+			"projectSearchPlaceholder": "プロジェクトを検索…",
+			"projectClear": "プロジェクトをクリア",
+			"projectEmpty": "選択できるプロジェクトがありません",
+			"projectUnknown": "不明なプロジェクト"
 		}
 	},
 	"portForwardDetail": {
@@ -2520,5 +2545,12 @@
 			"comment": "コメント:",
 			"fallback": "{{type}}:"
 		}
+	},
+	"workstream": {
+		"label": "ワークストリーム",
+		"hint": "このプロジェクトのコミットメントが既定で表示されるダッシュボード。コミットメント自身のワークストリーム欄が優先されます。",
+		"delivery": "デリバリー",
+		"platform": "PPE",
+		"internal": "内部"
 	}
 }

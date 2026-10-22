@@ -1342,6 +1342,7 @@
 			"deleteFailed": "删除任务类型失败，请重试。",
 			"isDefault": "无法删除默认类型。请先将其他类型设为默认。",
 			"isSystem": "系统类型无法删除。",
+			"commitmentsProjectOnly": "无法删除承诺类型：此项目只能包含承诺。",
 			"cancel": "取消",
 			"deleteType": "删除类型"
 		},
@@ -1366,7 +1367,8 @@
 				"nameInvalid": "类型名称为空或无效。",
 				"nameReserved": "该名称已被内置类型保留。",
 				"saveFailed": "保存任务类型失败，请重试。",
-				"isSystem": "系统类型无法编辑。"
+				"isSystem": "系统类型无法编辑。",
+				"commitmentsProjectOnly": "此项目只能包含承诺：无法添加其他任务类型，也无法重命名承诺类型。"
 			}
 		}
 	},
@@ -1614,6 +1616,28 @@
 		"searchableList": {
 			"searchPlaceholder": "搜索…",
 			"noResults": "没有匹配项"
+		},
+		"commitment": {
+			"label": "承诺",
+			"inherited": "继承",
+			"inheritedHint": "在顶层工单上设置；此工单继承该值。",
+			"searchPlaceholder": "搜索承诺…",
+			"open": "打开承诺",
+			"remove": "从承诺中移除",
+			"loading": "加载中…",
+			"empty": "没有进行中的承诺",
+			"workTitle": "此承诺中的工作",
+			"workEmpty": "此承诺下还没有关联的工单。",
+			"workError": "无法加载关联的工作。",
+			"hiddenProjects_other": "有 {{count}} 个你无权查看的项目未显示。",
+			"groupThisProject": "本项目",
+			"groupOtherProjects": "其他项目",
+			"projectLabel": "项目",
+			"projectHint": "此承诺面向哪个项目",
+			"projectSearchPlaceholder": "搜索项目…",
+			"projectClear": "清除项目",
+			"projectEmpty": "没有可选择的项目",
+			"projectUnknown": "未知项目"
 		}
 	},
 	"portForwardDetail": {
@@ -2520,5 +2544,12 @@
 			"comment": "评论了",
 			"fallback": "执行了 {{type}}："
 		}
+	},
+	"workstream": {
+		"label": "工作流",
+		"hint": "此项目的承诺默认显示在哪个看板。承诺自身的工作流字段优先。",
+		"delivery": "交付",
+		"platform": "PPE",
+		"internal": "内部"
 	}
 }

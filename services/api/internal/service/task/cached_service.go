@@ -266,6 +266,21 @@ func (c *CachedService) GetTaskByNumber(ctx context.Context, projectID uuid.UUID
 }
 
 // CreateTask delegates directly to the underlying service (not cached).
+// ListCommitmentWork passes through: the result spans projects, so no
+// project-scoped cache entry applies.
+func (c *CachedService) ListCommitmentWork(ctx context.Context, commitmentID uuid.UUID) ([]*taskdom.Task, error) {
+	return c.svc.ListCommitmentWork(ctx, commitmentID)
+}
+
+// PrepareCommitmentsProject delegates and drops the project's cached task types.
+func (c *CachedService) PrepareCommitmentsProject(ctx context.Context, projectID uuid.UUID) error {
+	err := c.svc.PrepareCommitmentsProject(ctx, projectID)
+	if derr := c.st.Delete(ctx, taskTypesKey(projectID)); derr != nil {
+		c.log.WarnContext(ctx, "cache: PrepareCommitmentsProject delete", "err", derr)
+	}
+	return err
+}
+
 func (c *CachedService) CreateTask(ctx context.Context, in taskdom.CreateTaskInput) (*taskdom.Task, error) {
 	return c.svc.CreateTask(ctx, in)
 }

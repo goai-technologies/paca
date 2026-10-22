@@ -34,6 +34,14 @@ export interface Task {
 	status_id?: string | null;
 	sprint_id?: string | null;
 	parent_task_id?: string | null;
+	// The commitment this ticket belongs to (a Commitment-typed task in the
+	// Commitments project, possibly in another project). Children inherit
+	// their top-level ticket's value — see lib/commitment-api.ts.
+	commitment_task_id?: string | null;
+	// On a commitment only: the project the commitment is for. The API
+	// accepts it only on a Commitment-typed task in the Commitments project;
+	// absent when none is chosen.
+	home_project_id?: string | null;
 	description?: unknown[] | null;
 	importance: number;
 	story_points?: number | null;
@@ -726,6 +734,8 @@ export async function createTask(
 		task_type_id?: string | null;
 		assignee_ids?: string[];
 		parent_task_id?: string | null;
+		commitment_task_id?: string | null;
+		home_project_id?: string | null;
 	},
 ): Promise<Task> {
 	const { data } = await apiClient.instance.post<SuccessEnvelope<Task>>(
@@ -756,6 +766,8 @@ export async function updateTask(
 		assignee_ids: string[];
 		reporter_id: string | null;
 		parent_task_id: string | null;
+		commitment_task_id: string | null;
+		home_project_id: string | null;
 		description: unknown[] | null;
 		importance: number;
 		story_points?: number | null;

@@ -10,6 +10,12 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
 import { projectQueryOptions, updateProject } from "@/lib/project-api";
+import {
+	readWorkstream,
+	type Workstream,
+	WorkstreamPicker,
+	withWorkstream,
+} from "./workstream-picker";
 
 export function GeneralSettings({
 	projectId,
@@ -25,6 +31,9 @@ export function GeneralSettings({
 	const [name, setName] = useState(project?.name ?? "");
 	const [description, setDescription] = useState(project?.description ?? "");
 	const [prefix, setPrefix] = useState(project?.task_id_prefix ?? "");
+	const [workstream, setWorkstream] = useState<Workstream>(
+		readWorkstream(project?.settings),
+	);
 	const [nameError, setNameError] = useState<string | null>(null);
 	const [prefixError, setPrefixError] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -36,6 +45,8 @@ export function GeneralSettings({
 				name: name.trim(),
 				description: description.trim(),
 				task_id_prefix: prefix.trim() || undefined,
+				// Merged, never replaced: the endpoint overwrites the whole map.
+				settings: withWorkstream(project?.settings, workstream),
 			}),
 		onSuccess: async (updated) => {
 			await queryClient.invalidateQueries({
@@ -46,6 +57,7 @@ export function GeneralSettings({
 			setName(updated.name);
 			setDescription(updated.description);
 			setPrefix(updated.task_id_prefix);
+			setWorkstream(readWorkstream(updated.settings));
 			setError(null);
 			setNameError(null);
 			setPrefixError(null);
@@ -73,7 +85,8 @@ export function GeneralSettings({
 	const isDirty =
 		name.trim() !== (project?.name ?? "") ||
 		description.trim() !== (project?.description ?? "") ||
-		prefix.trim() !== (project?.task_id_prefix ?? "");
+		prefix.trim() !== (project?.task_id_prefix ?? "") ||
+		workstream !== readWorkstream(project?.settings);
 
 	return (
 		<div className="rounded-xl border border-border/60 bg-card p-6">
@@ -193,6 +206,12 @@ export function GeneralSettings({
 						className="resize-none"
 					/>
 				</div>
+
+				<WorkstreamPicker
+					value={workstream}
+					onChange={setWorkstream}
+					disabled={!canEdit}
+				/>
 
 				{error ? (
 					<p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">

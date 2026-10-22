@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
 	ArrowRight,
 	BookOpen,
@@ -20,6 +21,10 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useJevEnabled } from "@/hooks/use-jev-enabled";
+import {
+	commitmentsProjectIdQueryOptions,
+	isCommitmentType,
+} from "@/lib/commitment-api";
 import type { Sprint, Task } from "@/lib/interaction-api";
 import {
 	findEpicType,
@@ -45,6 +50,8 @@ import {
 	isAutoAssignPending,
 } from "../view-utils";
 import { AddFieldDialog } from "./add-field-dialog";
+import { CommitmentField } from "./commitment-field";
+import { CommitmentProjectField } from "./commitment-project-field";
 import { FieldRow } from "./primitives";
 import type { SelectOption, UserOption } from "./property-field";
 import { PropertyField } from "./property-field";
@@ -64,6 +71,8 @@ type UpdatePayload = Partial<{
 	tags: string[];
 	sprint_id: string | null;
 	parent_task_id: string | null;
+	commitment_task_id: string | null;
+	home_project_id: string | null;
 	custom_fields: Record<string, unknown>;
 	assignment_mode: "manual" | "auto";
 }>;
@@ -137,6 +146,14 @@ export function PropertiesPanel({
 		isLoading: epicSearchLoading,
 		pagination: epicSearchPagination,
 	} = useEpicSearch(task.project_id, epicTypeId, epicMenuOpen);
+
+	// A commitment in the Commitments project says which project it is for.
+	// Only commitments ask for the Commitments project id.
+	const isCommitment = isCommitmentType(taskType);
+	const { data: commitmentsProjectId } = useQuery({
+		...commitmentsProjectIdQueryOptions(),
+		enabled: isCommitment,
+	});
 
 	useEffect(() => {
 		setLocalCustomFields(initialCustomFields);
@@ -354,6 +371,26 @@ export function PropertiesPanel({
 					canEdit={canEdit && selectableSprints.length > 0}
 					hidden={!task.sprint_id && !(canEdit && selectableSprints.length > 0)}
 				/>
+
+				{/* Commitment – any ticket except a commitment itself; children inherit.
+				 * A commitment gets the Project field instead: which project it is for. */}
+				{isCommitment ? (
+					commitmentsProjectId === task.project_id && (
+						<CommitmentProjectField
+							task={task}
+							commitmentsProjectId={task.project_id}
+							canEdit={canEdit}
+							onChange={(id) => onUpdate?.({ home_project_id: id })}
+						/>
+					)
+				) : (
+					<CommitmentField
+						task={task}
+						canEdit={canEdit}
+						inherited={!!task.parent_task_id}
+						onChange={(id) => onUpdate?.({ commitment_task_id: id })}
+					/>
+				)}
 
 				{/* Epic field – normal tasks only */}
 				{taskRole === "normal" &&

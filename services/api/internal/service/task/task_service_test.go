@@ -27,6 +27,7 @@ import (
 
 type fakeTaskRepo struct {
 	mu                   sync.RWMutex
+	atomicMu             sync.Mutex
 	types                map[uuid.UUID]*taskdom.TaskType
 	statuses             map[uuid.UUID]*taskdom.TaskStatus
 	tasks                map[uuid.UUID]*taskdom.Task
@@ -35,6 +36,19 @@ type fakeTaskRepo struct {
 	findDefaultTypeErr   error               // injected error for FindDefaultTaskType
 	findDefaultStatusErr error               // injected error for FindDefaultTaskStatus
 	setDefaultStatusErr  error               // injected error for SetDefaultTaskStatus
+	deadProjects         map[uuid.UUID]bool  // projects ProjectIsLive reports as gone
+}
+
+func (f *fakeTaskRepo) ListCommitmentWork(_ context.Context, commitmentID uuid.UUID) ([]*taskdom.Task, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	var out []*taskdom.Task
+	for _, t := range f.tasks {
+		if t.CommitmentTaskID != nil && *t.CommitmentTaskID == commitmentID && t.DeletedAt == nil {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 // taskMatchesSearch mirrors the postgres repo's title / "#<task_number>" ILIKE
@@ -412,13 +426,21 @@ func (r *fakeTaskRepo) UpdateTaskFields(_ context.Context, t *taskdom.Task, fiel
 }
 
 func (r *fakeTaskRepo) UpdateTaskAtomic(_ context.Context, id uuid.UUID, decide func(current *taskdom.Task) (*taskdom.Task, error)) (*taskdom.Task, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	// atomicMu serialises atomic updates the way the real repository's row
+	// lock does, while r.mu stays free for the lookups decide makes (type and
+	// project checks), which would otherwise deadlock on a held write lock.
+	r.atomicMu.Lock()
+	defer r.atomicMu.Unlock()
+	r.mu.RLock()
 	t, ok := r.tasks[id]
-	if !ok || t.DeletedAt != nil {
+	var cp taskdom.Task
+	if ok {
+		cp = *t
+	}
+	r.mu.RUnlock()
+	if !ok || cp.DeletedAt != nil {
 		return nil, taskdom.ErrTaskNotFound
 	}
-	cp := *t
 	next, err := decide(&cp)
 	if err != nil {
 		return nil, err
@@ -427,7 +449,9 @@ func (r *fakeTaskRepo) UpdateTaskAtomic(_ context.Context, id uuid.UUID, decide 
 		return &cp, nil
 	}
 	nc := *next
+	r.mu.Lock()
 	r.tasks[id] = &nc
+	r.mu.Unlock()
 	return next, nil
 }
 
@@ -2716,4 +2740,21 @@ func TestUpdateTask_CustomFieldsMergeByKey(t *testing.T) {
 	if !maps.Equal(updated.CustomFields, want) {
 		t.Errorf("custom_fields = %v, want %v", updated.CustomFields, want)
 	}
+}
+
+func (f *fakeTaskRepo) ProjectIsLive(_ context.Context, projectID uuid.UUID) (bool, error) {
+	if f.deadProjects != nil && f.deadProjects[projectID] {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (f *fakeTaskRepo) CountTasksOfType(_ context.Context, typeID uuid.UUID) (int, error) {
+	n := 0
+	for _, t := range f.tasks {
+		if t.TaskTypeID != nil && *t.TaskTypeID == typeID {
+			n++
+		}
+	}
+	return n, nil
 }

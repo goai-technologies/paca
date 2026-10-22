@@ -22,6 +22,12 @@ import { useTranslation } from "react-i18next";
 import { AssignedTasksList } from "@/components/home/assigned-tasks-list";
 import { LegacyPluginsBanner } from "@/components/home/LegacyPluginsBanner";
 import { UpdateBanner } from "@/components/home/UpdateBanner";
+import {
+	DEFAULT_WORKSTREAM,
+	type Workstream,
+	WorkstreamPicker,
+	withWorkstream,
+} from "@/components/projects/settings/workstream-picker";
 import { EntityAvatar } from "@/components/shared/entity-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -91,6 +97,7 @@ function CreateProjectDialog({
 	const [name, setName] = useState("");
 	const [description, setDescription] = useState("");
 	const [prefix, setPrefix] = useState("");
+	const [workstream, setWorkstream] = useState<Workstream>(DEFAULT_WORKSTREAM);
 	const [prefixTouched, setPrefixTouched] = useState(false);
 	const [nameError, setNameError] = useState<string | null>(null);
 	const [prefixError, setPrefixError] = useState<string | null>(null);
@@ -100,6 +107,7 @@ function CreateProjectDialog({
 		setName("");
 		setDescription("");
 		setPrefix("");
+		setWorkstream(DEFAULT_WORKSTREAM);
 		setPrefixTouched(false);
 		setNameError(null);
 		setPrefixError(null);
@@ -113,6 +121,7 @@ function CreateProjectDialog({
 				name: name.trim(),
 				description: description.trim() || undefined,
 				task_id_prefix: prefix.trim() || undefined,
+				settings: withWorkstream(undefined, workstream),
 			});
 		},
 		onSuccess: async () => {
@@ -260,6 +269,7 @@ function CreateProjectDialog({
 							className="resize-none"
 						/>
 					</div>
+					<WorkstreamPicker value={workstream} onChange={setWorkstream} />
 					{error ? (
 						<p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
 							{error}

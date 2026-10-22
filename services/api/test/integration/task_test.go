@@ -4141,3 +4141,11 @@ func taskListItemIDs(t *testing.T, body []byte) []string {
 	}
 	return ids
 }
+
+func (r *fakeTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
+	return nil, nil
+}
+
+func (r *fakeTaskRepo) ProjectIsLive(context.Context, uuid.UUID) (bool, error) { return true, nil }
+
+func (r *fakeTaskRepo) CountTasksOfType(context.Context, uuid.UUID) (int, error) { return 0, nil }

@@ -60,6 +60,7 @@ type Deps struct {
 	Conversation        *handler.ConversationHandler
 	Automation          *handler.AutomationHandler
 	Settings            *handler.SettingsHandler
+	Commitment          *handler.CommitmentHandler
 	SSO                 *handler.SSOHandler
 	ProjectActivity     *handler.ProjectActivityHandler
 	ProjectExport       *handler.ProjectExportHandler
@@ -310,6 +311,7 @@ func New(deps Deps) http.Handler {
 				if deps.Settings != nil {
 					write := require.Global(iam.ActionSettingsWrite)
 					r.With(write).Patch("/settings", deps.Settings.UpdateSettings)
+					r.With(write).Put("/settings/commitments-project", deps.Settings.SetCommitmentsProject)
 					r.With(write).Post("/settings/logo/avatar/initiate-upload", deps.Settings.InitiateLogoUpload)
 					r.With(write).Post("/settings/logo/avatar/complete-upload", deps.Settings.CompleteLogoUpload)
 					r.With(write).Delete("/settings/logo/avatar", deps.Settings.DeleteLogo)
@@ -358,6 +360,13 @@ func New(deps Deps) http.Handler {
 				r.Use(httpmw.RequireFreshPassword())
 				r.Get("/projects", deps.Project.ListProjects)
 				r.Get("/projects/workspace-stats", deps.Project.GetWorkspaceStats)
+				// The commitment catalog is workspace-wide on purpose: the
+				// person attaching a ticket from another project is rarely a member of the
+				// Commitments project. See handler.CommitmentHandler.
+				if deps.Commitment != nil {
+					r.Get("/commitments", deps.Commitment.List)
+					r.Get("/commitments/{commitmentId}/work", deps.Commitment.Work)
+				}
 				r.With(require.Global(iam.ActionProjectsCreate)).Post("/projects", deps.Project.CreateProject)
 			})
 

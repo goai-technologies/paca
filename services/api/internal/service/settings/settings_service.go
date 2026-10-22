@@ -31,6 +31,19 @@ var workspaceOwnerID = uuid.Nil
 type Service struct {
 	repo      settingsdom.Repository
 	avatarSvc attachmentdom.AvatarService
+	preparer  CommitmentsProjectPreparer
+}
+
+// CommitmentsProjectPreparer readies a project to become the Commitments
+// project (task types) before the setting is saved.
+type CommitmentsProjectPreparer interface {
+	PrepareCommitmentsProject(ctx context.Context, projectID uuid.UUID) error
+}
+
+// WithCommitmentsProjectPreparer sets the hook SetCommitmentsProject runs first.
+func (s *Service) WithCommitmentsProjectPreparer(p CommitmentsProjectPreparer) *Service {
+	s.preparer = p
+	return s
 }
 
 // New returns a configured settings service.
@@ -172,6 +185,22 @@ func (s *Service) UpdateSettings(ctx context.Context, brandName, light, dark *st
 		ws.BrandName = brandName
 		ws.PrimaryColorLight = light
 		ws.PrimaryColorDark = dark
+		ws.UpdatedAt = time.Now().UTC()
+		ws.UpdatedBy = &updatedBy
+		return ws, nil
+	})
+}
+
+// SetCommitmentsProject records which project is the commitment catalog —
+// nil clears it. Runs under the same lock as the other settings writes.
+func (s *Service) SetCommitmentsProject(ctx context.Context, projectID *uuid.UUID, updatedBy uuid.UUID) (*settingsdom.WorkspaceSettings, error) {
+	if projectID != nil && s.preparer != nil {
+		if err := s.preparer.PrepareCommitmentsProject(ctx, *projectID); err != nil {
+			return nil, err
+		}
+	}
+	return s.repo.WithLock(ctx, func(ws *settingsdom.WorkspaceSettings) (*settingsdom.WorkspaceSettings, error) {
+		ws.CommitmentsProjectID = projectID
 		ws.UpdatedAt = time.Now().UTC()
 		ws.UpdatedBy = &updatedBy
 		return ws, nil

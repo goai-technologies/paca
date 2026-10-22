@@ -37,6 +37,25 @@ var (
 	ErrTaskLinkTypeInvalid  = errors.New("task link: invalid link type")
 	ErrTaskLinkCrossProject = errors.New("task link: cannot link tasks from different projects")
 
+	// Commitment membership (tasks.commitment_task_id).
+	ErrCommitmentNotFound              = errors.New("commitment: not found")
+	ErrCommitmentSelf                  = errors.New("commitment: a task cannot be its own commitment")
+	ErrCommitmentOnChildTask           = errors.New("commitment: set the commitment on the top-level ticket; children inherit it")
+	ErrCommitmentOnCommitment          = errors.New("commitment: a commitment cannot belong to another commitment")
+	ErrCommitmentTargetNotCommitment   = errors.New("commitment: target task is not of type Commitment")
+	ErrCommitmentOutsideCatalog        = errors.New("commitment: target is not in the Commitments project")
+	ErrCommitmentClosed                = errors.New("commitment: this commitment is closed and accepts no new tickets")
+	ErrCommitmentsProjectNotConfigured = errors.New("commitment: no Commitments project is configured in workspace settings")
+
+	// The project a commitment is for (tasks.home_project_id).
+	ErrHomeProjectNotFound = errors.New("commitment project: the chosen project does not exist")
+	ErrHomeProjectInvalid  = errors.New("commitment project: only a commitment in the Commitments project has a project, and it cannot be the Commitments project itself")
+
+	// The Commitments project holds commitments and nothing else.
+	ErrCommitmentsProjectOnlyCommitments   = errors.New("commitments project: only Commitment tasks can be created here, and the Commitment type cannot be changed or removed")
+	ErrCommitmentOutsideCommitmentsProject = errors.New("commitments project: commitments are created in the Commitments project only")
+	ErrCommitmentsProjectTypeInUse         = errors.New("commitments project: the project still has tasks of another type; move or delete them first")
+
 	// Activity / comment errors.
 	ErrActivityNotFound      = errors.New("activity: not found")
 	ErrActivityForbidden     = errors.New("activity: only the author can modify this comment")
