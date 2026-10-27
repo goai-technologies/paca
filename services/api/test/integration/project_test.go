@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,7 +138,8 @@ func (r *fakeProjectRepo) Create(_ context.Context, p *projectdom.Project, setup
 		roles := make([]roledom.Summary, 0, 1)
 		roles = append(roles, roledom.Summary{ID: uuid.New(), Name: setup.CreatorRole})
 		r.members[memberKey(p.ID, *setup.Creator)] = &projectdom.ProjectMember{
-			ID: uuid.New(), ProjectID: p.ID, UserID: *setup.Creator, Roles: roles,
+			ID: uuid.New(), ProjectID: p.ID, AccountID: *setup.Creator, UserID: *setup.Creator,
+			MemberType: "human", Roles: roles,
 		}
 	}
 	return nil
@@ -189,12 +191,55 @@ func (r *fakeProjectRepo) Delete(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (r *fakeProjectRepo) CountMembers(context.Context, uuid.UUID, projectdom.MemberFilter) (int64, error) {
-	return 0, nil
+func (r *fakeProjectRepo) CountMembers(_ context.Context, projectID uuid.UUID, filter projectdom.MemberFilter) (int64, error) {
+	ms, _, err := r.ListMembers(context.Background(), projectID, 0, nil, filter)
+	return int64(len(ms)), err
 }
 
-func (r *fakeProjectRepo) ListMembers(context.Context, uuid.UUID, int, *string, projectdom.MemberFilter) ([]*projectdom.ProjectMember, bool, error) {
-	return nil, false, nil
+func (r *fakeProjectRepo) ListMembers(_ context.Context, projectID uuid.UUID, limit int, _ *string, filter projectdom.MemberFilter) ([]*projectdom.ProjectMember, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make([]*projectdom.ProjectMember, 0)
+	for _, m := range r.members {
+		if m.ProjectID != projectID {
+			continue
+		}
+		if filter.MemberType != "" {
+			mt := m.MemberType
+			if mt == "" {
+				mt = "human"
+			}
+			if mt != filter.MemberType {
+				continue
+			}
+		}
+		if len(filter.AccountIDs) > 0 {
+			matched := false
+			for _, id := range filter.AccountIDs {
+				if m.AccountID == id || m.UserID == id || m.ID == id {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		if filter.Search != "" {
+			// Minimal search: skip unless username/full name contains the term.
+			q := strings.ToLower(filter.Search)
+			hay := strings.ToLower(m.Username + " " + m.FullName + " " + m.AgentHandle)
+			if !strings.Contains(hay, q) {
+				continue
+			}
+		}
+		out = append(out, cloneMember(m))
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, false, nil
 }
 
 func (r *fakeProjectRepo) ListAllMembers(_ context.Context, projectID uuid.UUID) ([]*projectdom.ProjectMember, error) {

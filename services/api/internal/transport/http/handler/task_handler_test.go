@@ -349,6 +349,8 @@ type fakeActivitySvc struct {
 	nextCursor *string
 	mu         sync.RWMutex
 	activities map[uuid.UUID]*taskdom.Activity
+	// lastRecorded is the most recent RecordActivity input (for create-attribution tests).
+	lastRecorded *taskdom.RecordActivityInput
 }
 
 func newFakeActivitySvc() *fakeActivitySvc {
@@ -365,8 +367,10 @@ func (f *fakeActivitySvc) RecordActivity(_ context.Context, in taskdom.RecordAct
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
+	cp := in
 	f.mu.Lock()
 	f.activities[a.ID] = a
+	f.lastRecorded = &cp
 	f.mu.Unlock()
 	return nil
 }
@@ -1169,6 +1173,206 @@ func TestTaskHandler_CreateTask_Returns201(t *testing.T) {
 	id := decodeTaskID(t, w.Body.Bytes())
 	if id == "" {
 		t.Error("expected non-empty id in response")
+	}
+}
+
+func TestTaskHandler_CreateTask_OmitsCreatedBy_UsesAuthActor(t *testing.T) {
+	svc := newFakeTaskSvc()
+	actSvc := newFakeActivitySvc()
+	authActor := uuid.New()
+	h := handler.NewTaskHandler(svc, &fakeViewSvcTask{}, actSvc)
+	r := chi.NewRouter()
+	r.Post("/projects/{projectId}/tasks", h.CreateTask)
+	projectID := uuid.New()
+
+	w := doTaskRequestWithActor(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID),
+		map[string]any{"title": "Auth-attributed task"},
+		authActor,
+	)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	actSvc.mu.RLock()
+	defer actSvc.mu.RUnlock()
+	if actSvc.lastRecorded == nil {
+		t.Fatal("expected RecordActivity to be called")
+	}
+	if actSvc.lastRecorded.ActorID == nil || *actSvc.lastRecorded.ActorID != authActor {
+		t.Fatalf("ActorID = %v, want %s", actSvc.lastRecorded.ActorID, authActor)
+	}
+	if actSvc.lastRecorded.ActorAgentID != nil {
+		t.Fatalf("ActorAgentID = %v, want nil", actSvc.lastRecorded.ActorAgentID)
+	}
+	if actSvc.lastRecorded.ActivityType != taskdom.ActivityTypeTaskCreated {
+		t.Fatalf("ActivityType = %q, want task.created", actSvc.lastRecorded.ActivityType)
+	}
+}
+
+func TestTaskHandler_CreateTask_CreatedByUserID_OverridesActor(t *testing.T) {
+	svc := newFakeTaskSvc()
+	actSvc := newFakeActivitySvc()
+	authActor := uuid.New()
+	alice := uuid.New()
+	projectID := uuid.New()
+	var gotFilter projectdom.MemberFilter
+	projectSvc := &mockProjectSvc{
+		listMembers: func(_ context.Context, pid uuid.UUID, _ int, _ *string, f projectdom.MemberFilter) ([]*projectdom.ProjectMember, bool, error) {
+			gotFilter = f
+			if pid != projectID {
+				t.Fatalf("ListMembers projectID = %s, want %s", pid, projectID)
+			}
+			return []*projectdom.ProjectMember{{
+				ID: uuid.New(), ProjectID: pid, AccountID: alice, UserID: alice,
+				MemberType: "human", Username: "alice", FullName: "Alice",
+			}}, false, nil
+		},
+	}
+	h := handler.NewTaskHandler(svc, &fakeViewSvcTask{}, actSvc,
+		handler.WithTaskAssignedProjectService(projectSvc))
+	r := chi.NewRouter()
+	r.Post("/projects/{projectId}/tasks", h.CreateTask)
+
+	w := doTaskRequestWithActor(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID),
+		map[string]any{
+			"title":               "Garuda-attributed task",
+			"created_by_user_id":  alice.String(),
+			"assignee_ids":        []string{uuid.New().String()},
+		},
+		authActor,
+	)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(gotFilter.AccountIDs) != 1 || gotFilter.AccountIDs[0] != alice {
+		t.Fatalf("AccountIDs filter = %v, want [%s]", gotFilter.AccountIDs, alice)
+	}
+	if gotFilter.MemberType != "human" {
+		t.Fatalf("MemberType filter = %q, want human", gotFilter.MemberType)
+	}
+	actSvc.mu.RLock()
+	defer actSvc.mu.RUnlock()
+	if actSvc.lastRecorded == nil {
+		t.Fatal("expected RecordActivity to be called")
+	}
+	if actSvc.lastRecorded.ActorID == nil || *actSvc.lastRecorded.ActorID != alice {
+		t.Fatalf("ActorID = %v, want attributed user %s (not auth %s)", actSvc.lastRecorded.ActorID, alice, authActor)
+	}
+	if actSvc.lastRecorded.ActorAgentID != nil {
+		t.Fatalf("ActorAgentID = %v, want nil when created_by_user_id is set", actSvc.lastRecorded.ActorAgentID)
+	}
+}
+
+func TestTaskHandler_CreateTask_CreatedByUserID_NonMemberReturns404(t *testing.T) {
+	svc := newFakeTaskSvc()
+	actSvc := newFakeActivitySvc()
+	projectID := uuid.New()
+	unknown := uuid.New()
+	projectSvc := &mockProjectSvc{
+		listMembers: func(context.Context, uuid.UUID, int, *string, projectdom.MemberFilter) ([]*projectdom.ProjectMember, bool, error) {
+			return nil, false, nil
+		},
+	}
+	h := handler.NewTaskHandler(svc, &fakeViewSvcTask{}, actSvc,
+		handler.WithTaskAssignedProjectService(projectSvc))
+	r := chi.NewRouter()
+	r.Post("/projects/{projectId}/tasks", h.CreateTask)
+
+	w := doTaskRequestWithActor(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID),
+		map[string]any{
+			"title":              "Should not create",
+			"created_by_user_id": unknown.String(),
+		},
+		uuid.New(),
+	)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+	var env struct {
+		ErrorCode string `json:"error_code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if env.ErrorCode != "PROJECT_MEMBER_NOT_FOUND" {
+		t.Fatalf("error_code = %q, want PROJECT_MEMBER_NOT_FOUND", env.ErrorCode)
+	}
+	svc.mu.RLock()
+	defer svc.mu.RUnlock()
+	if len(svc.tasks) != 0 {
+		t.Fatalf("expected no task created, got %d", len(svc.tasks))
+	}
+	actSvc.mu.RLock()
+	defer actSvc.mu.RUnlock()
+	if actSvc.lastRecorded != nil {
+		t.Fatal("expected RecordActivity not to be called")
+	}
+}
+
+func TestTaskHandler_CreateTask_CreatedByUserID_InvalidUUIDReturns400(t *testing.T) {
+	svc := newFakeTaskSvc()
+	r := buildTaskHandlerRouter(svc)
+	projectID := uuid.New()
+	w := doTaskRequest(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID),
+		map[string]any{
+			"title":              "Bad UUID",
+			"created_by_user_id": "not-a-uuid",
+		},
+	)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	svc.mu.RLock()
+	defer svc.mu.RUnlock()
+	if len(svc.tasks) != 0 {
+		t.Fatalf("expected no task created, got %d", len(svc.tasks))
+	}
+}
+
+func TestTaskHandler_CreateTask_CreatedByUserID_ClearsAgentActor(t *testing.T) {
+	svc := newFakeTaskSvc()
+	actSvc := newFakeActivitySvc()
+	alice := uuid.New()
+	agentID := uuid.New()
+	projectID := uuid.New()
+	projectSvc := &mockProjectSvc{
+		listMembers: func(context.Context, uuid.UUID, int, *string, projectdom.MemberFilter) ([]*projectdom.ProjectMember, bool, error) {
+			return []*projectdom.ProjectMember{{
+				ID: uuid.New(), ProjectID: projectID, AccountID: alice, UserID: alice, MemberType: "human",
+			}}, false, nil
+		},
+	}
+	h := handler.NewTaskHandler(svc, &fakeViewSvcTask{}, actSvc,
+		handler.WithTaskAssignedProjectService(projectSvc))
+	r := chi.NewRouter()
+	r.Post("/projects/{projectId}/tasks", h.CreateTask)
+
+	body, _ := json.Marshal(map[string]any{
+		"title":              "Agent key creating for human",
+		"created_by_user_id": alice.String(),
+	})
+	req := httptest.NewRequestWithContext(
+		middleware.WithAgentID(context.Background(), agentID),
+		http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID),
+		bytes.NewBuffer(body),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	actSvc.mu.RLock()
+	defer actSvc.mu.RUnlock()
+	if actSvc.lastRecorded == nil || actSvc.lastRecorded.ActorID == nil || *actSvc.lastRecorded.ActorID != alice {
+		t.Fatalf("ActorID = %v, want %s", actSvc.lastRecorded, alice)
+	}
+	if actSvc.lastRecorded.ActorAgentID != nil {
+		t.Fatalf("ActorAgentID = %v, want nil when created_by_user_id overrides agent auth", actSvc.lastRecorded.ActorAgentID)
 	}
 }
 

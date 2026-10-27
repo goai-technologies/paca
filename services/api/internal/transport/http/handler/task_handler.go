@@ -1034,6 +1034,14 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Resolve the activity/assignment actor before creating so an invalid
+	// created_by_user_id fails without persisting a task.
+	activityActorID, activityAgentID, haveActor, err := h.resolveCreateActivityActor(r.Context(), projectID, req.CreatedByUserID)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+
 	t, err := h.svc.CreateTask(r.Context(), taskdom.CreateTaskInput{
 		ProjectID:        projectID,
 		TaskTypeID:       req.TaskTypeID,
@@ -1093,18 +1101,13 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Record creation activity (best-effort).
-	if actorID, ok := middleware.ActorIDFromContext(r.Context()); ok {
-		agentID, _ := middleware.AgentIDFromContext(r.Context())
-		var agentIDPtr *uuid.UUID
-		if agentID != uuid.Nil {
-			agentIDPtr = &agentID
-		}
+	if haveActor {
 		content, _ := json.Marshal(map[string]any{"title": t.Title})
 		_ = h.activitySvc.RecordActivity(r.Context(), taskdom.RecordActivityInput{
 			TaskID:       t.ID,
 			ProjectID:    projectID,
-			ActorID:      &actorID,
-			ActorAgentID: agentIDPtr,
+			ActorID:      &activityActorID,
+			ActorAgentID: activityAgentID,
 			ActivityType: taskdom.ActivityTypeTaskCreated,
 			Content:      content,
 		})
@@ -1112,11 +1115,45 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		// Enqueue one assignment event per assignee so the NotificationConsumer
 		// can create the in-app notification asynchronously (best-effort).
 		for _, memberID := range req.AssigneeIDs {
-			_ = events.PublishAssignmentChanged(r.Context(), h.publisher, t.ID, projectID, memberID, nil, actorID, agentIDPtr, nil)
+			_ = events.PublishAssignmentChanged(r.Context(), h.publisher, t.ID, projectID, memberID, nil, activityActorID, activityAgentID, nil)
 		}
 	}
 
 	presenter.Created(w, r, dto.TaskFromEntity(t))
+}
+
+// resolveCreateActivityActor returns who should be recorded on task.created
+// (and create-time assignment notifications). When createdByUserID is set it
+// must name a human project member; otherwise the authenticated principal is
+// used. haveActor is false when neither an override nor an auth principal is
+// available (activity is skipped, matching prior create behavior).
+func (h *TaskHandler) resolveCreateActivityActor(ctx context.Context, projectID uuid.UUID, createdByUserID *uuid.UUID) (actorID uuid.UUID, agentID *uuid.UUID, haveActor bool, err error) {
+	if createdByUserID != nil {
+		if h.projectSvc == nil {
+			return uuid.Nil, nil, false, apierr.New(apierr.CodeInternalError, "member resolver not available")
+		}
+		members, _, listErr := h.projectSvc.ListMembers(ctx, projectID, 1, nil, projectdom.MemberFilter{
+			AccountIDs: []uuid.UUID{*createdByUserID},
+			MemberType: "human",
+			SkipRoles:  true,
+		})
+		if listErr != nil {
+			return uuid.Nil, nil, false, listErr
+		}
+		if len(members) == 0 {
+			return uuid.Nil, nil, false, apierr.New(apierr.CodeProjectMemberNotFound, "created_by_user_id is not a human member of this project")
+		}
+		return *createdByUserID, nil, true, nil
+	}
+
+	authActorID, ok := middleware.ActorIDFromContext(ctx)
+	if !ok {
+		return uuid.Nil, nil, false, nil
+	}
+	if agent, ok := middleware.AgentIDFromContext(ctx); ok && agent != uuid.Nil {
+		agentID = &agent
+	}
+	return authActorID, agentID, true, nil
 }
 
 // UpdateTask handles PATCH /projects/:projectId/tasks/:taskId.

@@ -324,10 +324,16 @@ type CreateTaskRequest struct {
 	StoryPoints      *int             `json:"story_points"`
 	AssigneeIDs      []uuid.UUID      `json:"assignee_ids"`
 	ReporterID       *uuid.UUID       `json:"reporter_id"`
-	CustomFields     map[string]any   `json:"custom_fields"`
-	StartDate        *time.Time       `json:"start_date"`
-	DueDate          *time.Time       `json:"due_date"`
-	Tags             []string         `json:"tags"`
+	// CreatedByUserID, when set, attributes the task.created activity (and
+	// create-time assignment notifications) to this PACA user/account id
+	// instead of the authenticated principal. The id must name a human
+	// member of the project; otherwise create fails with
+	// PROJECT_MEMBER_NOT_FOUND before the task is persisted.
+	CreatedByUserID *uuid.UUID     `json:"created_by_user_id"`
+	CustomFields    map[string]any `json:"custom_fields"`
+	StartDate       *time.Time     `json:"start_date"`
+	DueDate         *time.Time     `json:"due_date"`
+	Tags            []string       `json:"tags"`
 	// AssignmentMode: omit for the default ("manual"). "auto" asks
 	// worker.TaskAutofillConsumer to resolve AssigneeIDs via Jev — see
 	// taskdom.Task.AssignmentMode's doc comment.
