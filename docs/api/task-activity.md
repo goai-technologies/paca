@@ -34,6 +34,11 @@ CREATE TABLE activities (
 > the user UUID to the corresponding `project_members.id` at consume-time before writing to
 > the database. If the member has been removed from the project by the time the message is
 > processed, `actor_id` is stored as `NULL`.
+>
+> **Create-time override:** `POST …/tasks` accepts optional `created_by_user_id`. When
+> provided and valid (a human project member), that user UUID is published as the actor for
+> the `task.created` activity (and create-time assignment notifications) instead of the
+> authenticated principal. See the create-task contract in `http-design.md`.
 
 Indexes: `(task_id, created_at)` for efficient chronological listing.
 
