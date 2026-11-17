@@ -1369,24 +1369,18 @@ func (h *TaskHandler) taskChangedFields(ctx context.Context, old *taskdom.Task, 
 	}
 
 	if req.CustomFields != nil {
-		cfs, _ := h.svc.ListCustomFieldDefinitions(ctx, old.ProjectID)
+		cfs, err := h.svc.ListCustomFieldDefinitions(ctx, old.ProjectID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to list custom field definitions for activity log", "error", err, "project_id", old.ProjectID)
+		}
 		displayNameMap := make(map[string]string, len(cfs))
 		for _, cf := range cfs {
 			displayNameMap[cf.FieldKey] = cf.DisplayName
 		}
 
-		allKeys := make(map[string]struct{})
-		if old.CustomFields != nil {
-			for k := range old.CustomFields {
-				allKeys[k] = struct{}{}
-			}
-		}
+		// custom_fields is merged key by key, so only the submitted keys can change.
+		sortedKeys := make([]string, 0, len(*req.CustomFields))
 		for k := range *req.CustomFields {
-			allKeys[k] = struct{}{}
-		}
-
-		sortedKeys := make([]string, 0, len(allKeys))
-		for k := range allKeys {
 			sortedKeys = append(sortedKeys, k)
 		}
 		sort.Strings(sortedKeys)
@@ -1397,9 +1391,9 @@ func (h *TaskHandler) taskChangedFields(ctx context.Context, old *taskdom.Task, 
 			if old.CustomFields != nil {
 				oldVal, hadOld = old.CustomFields[k]
 			}
-			newVal, hadNew := (*req.CustomFields)[k]
+			newVal := (*req.CustomFields)[k]
 
-			if isCustomFieldEmpty(hadOld, oldVal) && isCustomFieldEmpty(hadNew, newVal) {
+			if isCustomFieldEmpty(hadOld, oldVal) && isCustomFieldEmpty(true, newVal) {
 				continue
 			}
 
@@ -1413,7 +1407,7 @@ func (h *TaskHandler) taskChangedFields(ctx context.Context, old *taskdom.Task, 
 					finalOld = oldVal
 				}
 				var finalNew any
-				if hadNew && !isCustomFieldEmpty(hadNew, newVal) {
+				if !isCustomFieldEmpty(true, newVal) {
 					finalNew = newVal
 				}
 				changes = append(changes, taskdom.FieldChange{

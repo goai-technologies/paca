@@ -18,7 +18,7 @@ function mockT(key: string, options?: Record<string, unknown>): string {
 	return res;
 }
 
-const emptyNames = { members: {}, sprints: {} };
+const emptyNames = { members: () => undefined, sprints: {} };
 
 describe("describeTaskChange with custom fields", () => {
 	it("describes numeric custom field update with before and after numbers", () => {
