@@ -47,6 +47,7 @@ interface BoardViewProps {
 	statuses: TaskStatus[];
 	taskTypes: TaskType[];
 	members?: ProjectMember[];
+	reporters?: ProjectMember[];
 	customFields?: CustomFieldDefinition[];
 	sprints?: Sprint[];
 	viewConfig?: ViewConfig;
@@ -194,6 +195,7 @@ export function BoardView({
 	statuses,
 	taskTypes,
 	members = [],
+	reporters,
 	customFields = [],
 	sprints = [],
 	viewConfig,
@@ -275,8 +277,8 @@ export function BoardView({
 			: DEFAULT_VISIBLE_FIELDS;
 
 	const viewCtx = useMemo(
-		() => ({ statuses, taskTypes, members, customFields, sprints }),
-		[statuses, taskTypes, members, customFields, sprints],
+		() => ({ statuses, taskTypes, members, reporters, customFields, sprints }),
+		[statuses, taskTypes, members, reporters, customFields, sprints],
 	);
 
 	// Static column definitions (all possible values)
@@ -740,7 +742,6 @@ export function BoardView({
 							task={task}
 							statuses={statuses}
 							taskTypes={taskTypes}
-							members={members}
 							epics={epics}
 							epicsPagination={epicsPagination}
 							canEdit={!!canEdit}
@@ -757,7 +758,6 @@ export function BoardView({
 								taskIdPrefix={taskIdPrefix}
 								statuses={statuses}
 								taskTypes={taskTypes}
-								members={members}
 								customFields={customFields}
 								epics={epics}
 								epicsPagination={epicsPagination}

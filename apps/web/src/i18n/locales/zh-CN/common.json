@@ -3,7 +3,9 @@
 		"notFound": "Not found",
 		"somethingWentWrong": "Something went wrong",
 		"retry": "Retry",
-		"noPermissionToView": "You don't have permission to view this"
+		"noPermissionToView": "You don't have permission to view this",
+		"loadMore": "加载更多",
+		"loadingMore": "正在加载更多…"
 	},
 	"dialog": {
 		"closeLabel": "关闭",

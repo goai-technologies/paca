@@ -384,7 +384,10 @@ export async function handleAttachmentTool(
 			if (data.byteLength === 0) {
 				return {
 					content: [
-						{ type: "text", text: `File "${filePath}" is empty; nothing to upload.` },
+						{
+							type: "text",
+							text: `File "${filePath}" is empty; nothing to upload.`,
+						},
 					],
 					isError: true,
 				};

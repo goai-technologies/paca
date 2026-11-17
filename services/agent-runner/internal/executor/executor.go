@@ -75,6 +75,14 @@ const sandboxWorkdir = "/home/goose"
 // have something to find after a recreate.
 const environmentGooseDataDir = "/home/paca/workspaces/.goose"
 
+// AgentKeyIssuer provides the API key an agent's Paca MCP server presents to
+// services/api. The key authenticates as the agent's own account and is the
+// same on every call for that agent (a sandbox bakes it into its environment, so
+// a key that changed per conversation would force a recreate each time).
+type AgentKeyIssuer interface {
+	APIKeyFor(ctx context.Context, agentID uuid.UUID) (string, error)
+}
+
 // Options holds service-level settings shared across every conversation
 // this process runs — the Go analog of services/ai-agent's config.Settings,
 // scoped to just the fields the executor itself needs.
@@ -82,12 +90,12 @@ type Options struct {
 	// Image is the pinned goose image reference; callers should pass a
 	// digest- or tag-pinned reference, not a floating one.
 	Image string
-	// PacaAPIKey/PacaAPIURL/PacaGatewayURL configure the built-in Paca MCP
-	// server appended to every conversation's MCP server list — mirrors
-	// build_mcp_config's "paca" entry in builder.py. Leave PacaAPIKey empty
-	// to omit the Paca MCP server entirely (matches builder.py's
-	// `if settings.paca_api_key:` gate).
-	PacaAPIKey     string
+	// AgentKeys/PacaAPIURL/PacaGatewayURL configure the built-in Paca MCP
+	// server appended to every conversation's MCP server list. The server
+	// authenticates as the agent itself, with an API key AgentKeys issues for
+	// it (there is no shared key). Leave AgentKeys nil, or PacaAPIURL empty,
+	// to omit the Paca MCP server entirely.
+	AgentKeys      AgentKeyIssuer
 	PacaAPIURL     string
 	PacaGatewayURL string
 	// MCPDevSourceDir, when set, is forwarded to every sandbox.Config so the
@@ -884,20 +892,41 @@ func (e *Executor) coldStartEnvironment(ctx, turnCtx context.Context, cfg agent.
 	return client, sessionID, envNote, nil
 }
 
-// providerCLIHomeRoot is where syncProviderCLIConfig points each CLI's own
-// config/home directory — a dot-prefixed subdirectory of the same
-// persisted workspace mount environmentGooseDataDir uses above, keyed by
-// cli_provider so each provider gets its own isolated subtree. A CLI's own
-// login credentials, written under its home dir (~/.claude, ~/.codex,
-// etc.), must survive environment container recreation exactly the same
-// way goose's own session store does — see environmentGooseDataDir's doc
-// comment for the underlying "only /home/paca/workspaces persists across
-// a recreate" fact this relies on.
-const providerCLIHomeRoot = "/home/paca/workspaces/.cli-home"
+// cliHomeBootstrapScript returns the idempotent sh script that makes
+// ~/<HomeDirName> a symlink onto the provider's persisted volume directory
+// without ever discarding data. See syncProviderCLIConfig step 1.
+func cliHomeBootstrapScript(adapter providercli.Adapter, provider string) string {
+	persistDir := providercli.HomeRoot + "/" + provider
+	link := sandboxWorkdir + "/" + adapter.HomeDirName()
+	script := fmt.Sprintf(`set -e
+mkdir -p "%[1]s"
+if [ -L "%[2]s" ]; then
+  if [ "$(readlink -f "%[2]s")" != "$(readlink -f "%[1]s")" ]; then ln -sfn "%[1]s" "%[2]s"; fi
+elif [ -d "%[2]s" ]; then
+  cp -an "%[2]s"/. "%[1]s"/ && rm -rf "%[2]s" && ln -s "%[1]s" "%[2]s"
+elif [ -e "%[2]s" ]; then
+  echo "%[2]s exists and is not a directory" >&2; exit 1
+else
+  ln -s "%[1]s" "%[2]s"
+fi
+`, persistDir, link)
+	if provider == "claude-code" {
+		// Older images don't set CLAUDE_CONFIG_DIR, so Claude Code reads
+		// ~/.claude.json rather than <home dir>/.claude.json — the file the
+		// MCP sync writes. Point the legacy path at the same file.
+		script += fmt.Sprintf(`if [ -z "$CLAUDE_CONFIG_DIR" ]; then
+  legacy="%[1]s/.claude.json"; new="%[2]s/.claude.json"
+  if [ -f "$legacy" ] && [ ! -L "$legacy" ] && [ ! -e "$new" ]; then mv "$legacy" "$new"; fi
+  if [ ! -e "$legacy" ] && [ ! -L "$legacy" ]; then ln -s "$new" "$legacy"; fi
+fi
+`, sandboxWorkdir, persistDir)
+	}
+	return script
+}
 
 // syncProviderCLIConfig bootstraps a provider_cli agent's CLI home
-// directory onto the environment's persistent volume (idempotent, safe to
-// re-run on every attach — same contract environmentssh.go's
+// directory's persistent-volume target (idempotent, safe to re-run on
+// every attach — same contract environmentssh.go's
 // BootstrapEnvironmentSSH already relies on for the SSH host key) and
 // syncs its configured MCP servers (and, for adapters that support it,
 // skills — see providercli.Adapter.SupportsSkillSync) into the CLI's own
@@ -911,27 +940,19 @@ func (e *Executor) syncProviderCLIConfig(ctx context.Context, backendRef string,
 		return fmt.Errorf("unknown cli_provider %q", cfg.CLIProvider)
 	}
 
-	// 1. Symlink bootstrap: point ~/<HomeDirName> at this provider's own
-	// subtree of the persistent volume. Idempotent — a target that's
-	// already the correct symlink is left alone; anything else (missing,
-	// a stale symlink, or a real file/dir the CLI itself created before
-	// this ever ran) is replaced. One uniform mechanism for every
-	// provider rather than relying on each CLI's own (inconsistent,
-	// not-fully-confirmed) config-dir override env var.
-	persistDir := providerCLIHomeRoot + "/" + cfg.CLIProvider
-	target := sandboxWorkdir + "/" + adapter.HomeDirName()
-	bootstrapCmd := fmt.Sprintf(`mkdir -p "%[1]s"
-if [ -L "%[2]s" ]; then
-  cur=$(readlink -f "%[2]s")
-  want=$(readlink -f "%[1]s")
-  if [ "$cur" != "$want" ]; then rm -f "%[2]s"; ln -s "%[1]s" "%[2]s"; fi
-elif [ -e "%[2]s" ]; then
-  rm -rf "%[2]s"; ln -s "%[1]s" "%[2]s"
-else
-  ln -s "%[1]s" "%[2]s"
-fi`, persistDir, target)
-	if out, code, err := e.sandboxMgr.ExecEnvironment(ctx, backendRef, []string{"/bin/sh", "-c", bootstrapCmd}); err != nil || code != 0 {
-		return fmt.Errorf("bootstrap cli home symlink: exit %d: %s: %w", code, out, err)
+	// 1. Ensure this provider's persisted home directory exists and that
+	// ~/<HomeDirName> points at it. Current agent-server images bake the
+	// symlink in (services/agent-server/Dockerfile), so a login made before
+	// this ever runs (e.g. from the environment terminal, before the first
+	// conversation) already lands on the persistent volume; only the
+	// symlink's target, which lives on the runtime-mounted volume, has to be
+	// created here. Environments created from an OLDER image have a real
+	// ~/<HomeDirName> instead: it is migrated non-destructively (contents
+	// copied without overwriting what is already on the volume, and the
+	// directory removed only after the copy succeeded) so a login made
+	// before this ran is never lost. Idempotent.
+	if out, code, err := e.sandboxMgr.ExecEnvironment(ctx, backendRef, []string{"/bin/sh", "-c", cliHomeBootstrapScript(adapter, cfg.CLIProvider)}); err != nil || code != 0 {
+		return fmt.Errorf("bootstrap cli home: exit %d: %s: %w", code, out, err)
 	}
 
 	// 2. Read the current content of every file the adapter wants to merge
@@ -978,10 +999,10 @@ fi`, persistDir, target)
 		entries = append(entries, fileEntry{RelPath: f.RelPath, Content: f.Content})
 	}
 	// adapter.HomeDirName() (e.g. ".claude") is excluded from the tar's
-	// auto-generated directory entries — the bootstrap step above already
-	// made it a symlink onto the persistent volume, and a literal
-	// directory header at that exact path conflicts with the symlink
-	// already there (see buildFileTar's own doc comment on this).
+	// auto-generated directory entries — the image makes it a symlink onto
+	// the persistent volume, and a literal directory header at that exact
+	// path conflicts with the symlink already there (see buildFileTar's own
+	// doc comment on this).
 	tarBuf, err := buildFileTar(entries, map[string]bool{adapter.HomeDirName(): true})
 	if err != nil {
 		return fmt.Errorf("build cli config tar: %w", err)
@@ -1166,16 +1187,23 @@ func (e *Executor) buildMCPServers(trigger agent.Trigger, cfg agent.Config) []ac
 // buildMCPServers' ACP-shaped entry (llm-type agents, appended to Goose's
 // own session/new MCP list) and buildPacaMCPServerForCLI's agent.MCPServer-
 // shaped entry (provider_cli agents, synced into the underlying CLI's own
-// config — see syncProviderCLIConfig). ok is false when e.opts.PacaAPIKey
-// is unset (self-hosted deployments that haven't wired the Paca MCP server
-// at all), the single condition under which neither caller should include
-// this server.
+// config — see syncProviderCLIConfig). ok is false when no AgentKeys issuer
+// or PacaAPIURL is configured, or issuing the agent's key fails: the
+// conditions under which neither caller should include this server.
 func (e *Executor) pacaMCPServerCommandAndEnv(trigger agent.Trigger, cfg agent.Config) (command string, args []string, env map[string]string, ok bool) {
-	if e.opts.PacaAPIKey == "" {
+	if e.opts.AgentKeys == nil || e.opts.PacaAPIURL == "" {
+		return "", nil, nil, false
+	}
+	keyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	apiKey, err := e.opts.AgentKeys.APIKeyFor(keyCtx, cfg.ID)
+	if err != nil {
+		e.log.Warn("executor: failed to get the agent's API key; the Paca MCP server is omitted",
+			"agent_id", cfg.ID, "error", err)
 		return "", nil, nil, false
 	}
 	env = map[string]string{
-		"PACA_API_KEY":     e.opts.PacaAPIKey,
+		"PACA_API_KEY":     apiKey,
 		"PACA_API_URL":     e.opts.PacaAPIURL,
 		"PACA_GATEWAY_URL": e.opts.PacaGatewayURL,
 		"PACA_AGENT_ID":    cfg.ID.String(),
@@ -1190,19 +1218,6 @@ func (e *Executor) pacaMCPServerCommandAndEnv(trigger agent.Trigger, cfg agent.C
 	}
 	if trigger.ProjectID != uuid.Nil {
 		env["PACA_PROJECT_ID"] = trigger.ProjectID.String()
-	}
-	// services/api's verifyAgentIdentity rejects an X-Actor-User-ID claim
-	// outright for any non-global agent ("a project-scoped agent's actions
-	// are attributed via its project_members.id, never a raw actor_user_id")
-	// — so forwarding it here for a project-scoped agent doesn't just fail
-	// to help, it 401s *every* MCP call this agent makes, including ones
-	// that never touch actor identity at all (e.g. read_conversation),
-	// because the check runs in required auth middleware before any
-	// handler-specific logic. cfg.AgentScope is the same source of truth
-	// that check uses, so gate on it here too rather than trusting
-	// trigger.ActorUserID's presence alone.
-	if trigger.ActorUserID != nil && cfg.AgentScope == agent.AgentScopeGlobal {
-		env["PACA_ACTOR_USER_ID"] = trigger.ActorUserID.String()
 	}
 	if len(trigger.RepoPluginIDs) > 0 {
 		// Read by apps/mcp's repo-tools.ts to scope list_repositories and

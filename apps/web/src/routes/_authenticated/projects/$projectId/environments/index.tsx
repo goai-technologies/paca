@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Lock, Plus, Server } from "lucide-react";
+import { Plus, Server } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { EnvironmentCreateDialog } from "@/components/projects/environments/environment-create-dialog";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { isForbiddenError } from "@/lib/api-error";
 import {
 	ENVIRONMENT_STATUS_COLORS,
-	environmentsQueryOptions,
+	environmentsInfiniteQueryOptions,
 } from "@/lib/environment-api";
 import { projectQueryOptions } from "@/lib/project-api";
 import { cn } from "@/lib/utils";
@@ -38,16 +39,24 @@ function EnvironmentsPage() {
 	const navigate = Route.useNavigate();
 	const { hasProjectPermission, isLoading: isPermissionsLoading } =
 		useProjectPermissions(projectId);
-	const canWrite = hasProjectPermission("environments.write");
-	const canRead = hasProjectPermission("environments.read");
+	const canWrite = hasProjectPermission("environments:write");
+	const canRead = hasProjectPermission("environments:read");
 
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const {
-		data: environments = [],
+		data: environmentPages,
 		isLoading: isDataLoading,
 		isError,
 		error,
-	} = useQuery({ ...environmentsQueryOptions(projectId), enabled: canRead });
+		hasNextPage,
+		isFetchingNextPage,
+		isFetchNextPageError,
+		fetchNextPage,
+	} = useInfiniteQuery({
+		...environmentsInfiniteQueryOptions(projectId),
+		enabled: canRead,
+	});
+	const environments = environmentPages?.pages.flatMap((p) => p.items) ?? [];
 	// While permissions are still loading, canRead defaults to false same as
 	// a confirmed denial — guard on isPermissionsLoading (and fold it into
 	// isLoading) so the page shows the skeleton instead of flashing
@@ -162,17 +171,6 @@ function EnvironmentsPage() {
 										</div>
 									</div>
 									<div className="flex items-center gap-1.5 shrink-0">
-										{env.access_mode === "restricted" &&
-											!env.access_granted && (
-												<Badge
-													variant="outline"
-													className="text-xs font-medium gap-1"
-													title={t("environments.page.restrictedTooltip")}
-												>
-													<Lock className="size-3" />
-													{t("environments.page.restricted")}
-												</Badge>
-											)}
 										<Badge variant="secondary" className="text-xs font-medium">
 											{env.backend}
 										</Badge>
@@ -198,6 +196,12 @@ function EnvironmentsPage() {
 						))}
 					</div>
 				)}
+				<LoadMoreSentinel
+					hasMore={hasNextPage}
+					isLoadingMore={isFetchingNextPage}
+					isError={isFetchNextPageError}
+					onLoadMore={() => void fetchNextPage()}
+				/>
 			</div>
 
 			<EnvironmentCreateDialog

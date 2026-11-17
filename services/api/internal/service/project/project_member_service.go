@@ -7,22 +7,40 @@ import (
 
 	"github.com/google/uuid"
 
+	accountdom "github.com/Paca-AI/api/internal/domain/account"
 	agentdom "github.com/Paca-AI/api/internal/domain/agent"
 	projectdom "github.com/Paca-AI/api/internal/domain/project"
+	roledom "github.com/Paca-AI/api/internal/domain/role"
 	"github.com/Paca-AI/api/internal/events"
-	"github.com/Paca-AI/api/internal/platform/authz"
 )
 
-// ListMembers returns all members of the given project.
-func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID) ([]*projectdom.ProjectMember, error) {
+// ListAllMembers returns all members of the given project.
+func (s *Service) ListAllMembers(ctx context.Context, projectID uuid.UUID) ([]*projectdom.ProjectMember, error) {
 	if _, err := s.repo.FindByID(ctx, projectID); err != nil {
 		return nil, err
 	}
-	return s.repo.ListMembers(ctx, projectID)
+	return s.repo.ListAllMembers(ctx, projectID)
+}
+
+// CountMembers returns how many of the project's members match filter.
+func (s *Service) CountMembers(ctx context.Context, projectID uuid.UUID, filter projectdom.MemberFilter) (int64, error) {
+	if _, err := s.repo.FindByID(ctx, projectID); err != nil {
+		return 0, err
+	}
+	return s.repo.CountMembers(ctx, projectID, filter)
+}
+
+// ListMembers returns a keyset-paginated, filtered page of the project's
+// members; see projectdom.MemberRepository.ListMembers.
+func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID, limit int, cursorAfter *string, filter projectdom.MemberFilter) ([]*projectdom.ProjectMember, bool, error) {
+	if _, err := s.repo.FindByID(ctx, projectID); err != nil {
+		return nil, false, err
+	}
+	return s.repo.ListMembers(ctx, projectID, limit, cursorAfter, filter)
 }
 
 // CountDistinctAgentsByProjects returns the distinct agent member count
-// across projectIDs. Unlike ListMembers, this skips the per-project
+// across projectIDs. Unlike ListAllMembers, this skips the per-project
 // FindByID existence check — it's a cross-project aggregate over a caller-
 // supplied ID set (e.g. every project a user can access), not a lookup
 // scoped to one project the caller is expected to already know exists.
@@ -30,29 +48,28 @@ func (s *Service) CountDistinctAgentsByProjects(ctx context.Context, projectIDs 
 	return s.repo.CountDistinctAgentsByProjects(ctx, projectIDs)
 }
 
-// AddMember adds a member to a project with the specified role — a human
+// AddMember adds a member to a project holding the given roles — a human
 // (in.UserID) or, when in.AgentID is set, invites an existing global agent
 // into the project (the "invite" flow: the same action as adding a human,
-// just for an agent).
+// just for an agent). The membership row and the project-scoped role
+// attachments are written in one transaction; the roles must exist and be
+// attachable in this project (checked by the repository).
 func (s *Service) AddMember(ctx context.Context, projectID uuid.UUID, in projectdom.AddMemberInput) (*projectdom.ProjectMember, error) {
 	if _, err := s.repo.FindByID(ctx, projectID); err != nil {
 		return nil, err
 	}
-
-	role, err := s.repo.FindRoleByID(ctx, in.ProjectRoleID)
-	if err != nil {
-		return nil, err
-	}
-	// Ensure the role belongs to this project (or is a template).
-	if role.ProjectID != nil && *role.ProjectID != projectID {
-		return nil, projectdom.ErrRoleNotFound
+	if len(in.RoleIDs) == 0 {
+		return nil, roledom.ErrRoleRequired
 	}
 
 	if in.AgentID != nil {
-		return s.addAgentMember(ctx, projectID, *in.AgentID, in.ProjectRoleID)
+		return s.addAgentMember(ctx, projectID, *in.AgentID, in.RoleIDs, in.CreatedBy)
+	}
+	if in.ServiceAccountID != nil {
+		return s.addServiceAccountMember(ctx, projectID, *in.ServiceAccountID, in)
 	}
 
-	_, err = s.repo.FindMember(ctx, projectID, in.UserID)
+	_, err := s.repo.FindMember(ctx, projectID, in.UserID)
 	if err == nil {
 		return nil, projectdom.ErrMemberAlreadyAdded
 	}
@@ -61,18 +78,52 @@ func (s *Service) AddMember(ctx context.Context, projectID uuid.UUID, in project
 	}
 
 	m := &projectdom.ProjectMember{
-		ID:            uuid.New(),
-		ProjectID:     projectID,
-		UserID:        in.UserID,
-		ProjectRoleID: in.ProjectRoleID,
-		Description:   strings.TrimSpace(in.Description),
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		AccountID:   in.UserID,
+		UserID:      in.UserID,
+		Description: strings.TrimSpace(in.Description),
 	}
-	if err := s.repo.AddMember(ctx, m); err != nil {
+	if err := s.repo.AddMember(ctx, m, in.RoleIDs, in.CreatedBy); err != nil {
 		return nil, err
 	}
+	s.roleGrantsChanged(in.RoleIDs)
 
-	// Re-fetch to populate username/role name via JOIN.
+	// Re-fetch to populate username and roles via JOIN.
 	added, err := s.repo.FindMember(ctx, projectID, in.UserID)
+	if err != nil {
+		return nil, err
+	}
+	s.record(ctx, projectID, events.EntityMember, added.ID, TopicMemberAdded, memberPayload(added))
+	return added, nil
+}
+
+// addServiceAccountMember invites an existing service account into a project:
+// the account must exist and not already be a member. Its project-scoped roles
+// only count while it is one.
+func (s *Service) addServiceAccountMember(ctx context.Context, projectID, accountID uuid.UUID, in projectdom.AddMemberInput) (*projectdom.ProjectMember, error) {
+	if s.serviceAccounts == nil {
+		return nil, accountdom.ErrServiceAccountNotFound
+	}
+	if _, err := s.serviceAccounts.FindByID(ctx, accountID); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.FindMember(ctx, projectID, accountID); err == nil {
+		return nil, projectdom.ErrMemberAlreadyAdded
+	} else if !errors.Is(err, projectdom.ErrMemberNotFound) {
+		return nil, err
+	}
+	m := &projectdom.ProjectMember{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		AccountID:   accountID,
+		Description: strings.TrimSpace(in.Description),
+	}
+	if err := s.repo.AddMember(ctx, m, in.RoleIDs, in.CreatedBy); err != nil {
+		return nil, err
+	}
+	s.roleGrantsChanged(in.RoleIDs)
+	added, err := s.repo.FindMember(ctx, projectID, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +138,7 @@ func (s *Service) AddMember(ctx context.Context, projectID uuid.UUID, in project
 // must not collide with any agent already visible in this project (its own
 // project-scoped agents plus any other invited global agents), since
 // @mention resolution is handle-based within a project.
-func (s *Service) addAgentMember(ctx context.Context, projectID, agentID, roleID uuid.UUID) (*projectdom.ProjectMember, error) {
+func (s *Service) addAgentMember(ctx context.Context, projectID, agentID uuid.UUID, roleIDs []uuid.UUID, createdBy *uuid.UUID) (*projectdom.ProjectMember, error) {
 	if s.agents == nil {
 		return nil, projectdom.ErrAgentNotInvitable
 	}
@@ -110,40 +161,16 @@ func (s *Service) addAgentMember(ctx context.Context, projectID, agentID, roleID
 	}
 
 	memberID := uuid.New()
-	if err := s.repo.AddAgentMember(ctx, memberID, projectID, agentID, roleID); err != nil {
+	if err := s.repo.AddAgentMember(ctx, memberID, projectID, agentID, roleIDs, createdBy); err != nil {
 		return nil, err
 	}
+	s.roleGrantsChanged(roleIDs)
 	added, err := s.repo.FindMemberByAgent(ctx, projectID, agentID)
 	if err != nil {
 		return nil, err
 	}
 	s.record(ctx, projectID, events.EntityMember, added.ID, TopicMemberAdded, memberPayload(added))
 	return added, nil
-}
-
-// UpdateMemberRole changes the role of an existing project member.
-func (s *Service) UpdateMemberRole(ctx context.Context, projectID, userID uuid.UUID, in projectdom.UpdateMemberRoleInput) (*projectdom.ProjectMember, error) {
-	if _, err := s.repo.FindByID(ctx, projectID); err != nil {
-		return nil, err
-	}
-	if _, err := s.repo.FindMember(ctx, projectID, userID); err != nil {
-		return nil, err
-	}
-
-	role, err := s.repo.FindRoleByID(ctx, in.ProjectRoleID)
-	if err != nil {
-		return nil, err
-	}
-	// Ensure the role belongs to this project (or is a template).
-	if role.ProjectID != nil && *role.ProjectID != projectID {
-		return nil, projectdom.ErrRoleNotFound
-	}
-
-	if err := s.repo.UpdateMemberRole(ctx, projectID, userID, in.ProjectRoleID); err != nil {
-		return nil, err
-	}
-
-	return s.repo.FindMember(ctx, projectID, userID)
 }
 
 // RemoveMember removes a user from the project.
@@ -157,91 +184,21 @@ func (s *Service) RemoveMember(ctx context.Context, projectID, userID uuid.UUID)
 	return s.repo.RemoveMember(ctx, projectID, userID)
 }
 
-// GetMyProjectPermissions returns the effective permission map of the calling
-// user's project role. Returns ErrMemberNotFound when the user is not a member.
-// If agentID is provided, looks up the agent's permissions instead.
-func (s *Service) GetMyProjectPermissions(ctx context.Context, projectID, userID uuid.UUID, agentID *uuid.UUID) (map[string]any, error) {
-	var member *projectdom.ProjectMember
-	var err error
-
-	if agentID != nil {
-		member, err = s.repo.FindMemberByAgent(ctx, projectID, *agentID)
-	} else {
-		member, err = s.repo.FindMember(ctx, projectID, userID)
+// AddAgentMember inserts an agent as a project member holding roleIDs.
+func (s *Service) AddAgentMember(ctx context.Context, memberID, projectID, agentID uuid.UUID, roleIDs []uuid.UUID, createdBy *uuid.UUID) error {
+	if len(roleIDs) == 0 {
+		return roledom.ErrRoleRequired
 	}
-
-	if err != nil {
-		return nil, err
+	if err := s.repo.AddAgentMember(ctx, memberID, projectID, agentID, roleIDs, createdBy); err != nil {
+		return err
 	}
-	role, err := s.repo.FindRoleByID(ctx, member.ProjectRoleID)
-	if err != nil {
-		return nil, err
-	}
-	// Copy rather than alias role.Permissions — it may be a shared/cached
-	// map — then add the same membership-implied grant
-	// AuthzPermissionStore.ListProjectPermissions applies for the backend
-	// authorizer (any active membership implies projects.read regardless of
-	// role contents; see that method's doc comment). Without this, a role
-	// whose seed no longer lists projects.read explicitly (e.g. Editor/
-	// Member/Viewer after this PR) reports it as denied here while the
-	// backend actually grants it — the two sides of the same role
-	// disagreeing in the deny direction.
-	perms := make(map[string]any, len(role.Permissions)+1)
-	for k, v := range role.Permissions {
-		perms[k] = v
-	}
-	perms[string(authz.PermissionProjectsRead)] = true
-	return perms, nil
-}
-
-// AddAgentMember inserts an agent as a project member with the given role.
-func (s *Service) AddAgentMember(ctx context.Context, memberID, projectID, agentID, roleID uuid.UUID) error {
-	return s.repo.AddAgentMember(ctx, memberID, projectID, agentID, roleID)
+	s.roleGrantsChanged(roleIDs)
+	return nil
 }
 
 // RemoveAgentMember soft-deletes the agent's membership record.
 func (s *Service) RemoveAgentMember(ctx context.Context, projectID, agentID uuid.UUID) error {
 	return s.repo.RemoveAgentMember(ctx, projectID, agentID)
-}
-
-// UpdateMemberRoleByMemberID changes the role of an existing project member by member ID.
-func (s *Service) UpdateMemberRoleByMemberID(ctx context.Context, projectID, memberID uuid.UUID, in projectdom.UpdateMemberRoleInput) (*projectdom.ProjectMember, error) {
-	if _, err := s.repo.FindByID(ctx, projectID); err != nil {
-		return nil, err
-	}
-
-	member, err := s.repo.FindMemberByID(ctx, memberID)
-	if err != nil {
-		return nil, err
-	}
-
-	if member.ProjectID != projectID {
-		return nil, projectdom.ErrMemberNotFound
-	}
-
-	role, err := s.repo.FindRoleByID(ctx, in.ProjectRoleID)
-	if err != nil {
-		return nil, err
-	}
-	// Ensure the role belongs to this project (or is a template).
-	if role.ProjectID != nil && *role.ProjectID != projectID {
-		return nil, projectdom.ErrRoleNotFound
-	}
-
-	if err := s.repo.UpdateMemberRoleByMemberID(ctx, memberID, in.ProjectRoleID); err != nil {
-		return nil, err
-	}
-
-	updated, err := s.repo.FindMemberByID(ctx, memberID)
-	if err != nil {
-		return nil, err
-	}
-	if member.ProjectRoleID != in.ProjectRoleID {
-		payload := memberPayload(updated)
-		payload["previous_role_name"] = member.RoleName
-		s.record(ctx, projectID, events.EntityMember, memberID, TopicMemberRoleChanged, payload)
-	}
-	return updated, nil
 }
 
 // UpdateMemberDescription changes a member's Jev-facing description by member ID.

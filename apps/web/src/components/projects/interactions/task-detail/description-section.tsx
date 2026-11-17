@@ -1,9 +1,12 @@
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
+import { Input } from "@/components/ui/input";
+import { useAgentSearch } from "@/hooks/use-agent-search";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/shadcn/style.css";
 
 import { SideMenuController, useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -22,15 +25,11 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { useThemeMode } from "@/hooks/use-theme-mode";
-import {
-	agentsQueryOptions,
-	writeTaskDescriptionWithAI,
-} from "@/lib/agent-api";
+import { writeTaskDescriptionWithAI } from "@/lib/agent-api";
 import {
 	getAttachmentDownloadURL,
 	uploadAttachment,
 } from "@/lib/attachment-api";
-import { useMentionData } from "@/lib/mention-api";
 import { cleanBlocks, cn } from "@/lib/utils";
 
 type UpdateFn = (payload: { description?: unknown[] | null }) => void;
@@ -55,15 +54,13 @@ export function DescriptionSection({
 }: DescriptionSectionProps) {
 	const { t } = useTranslation("projects");
 	const { resolvedMode } = useThemeMode();
-	const { teamMembers, documents } = useMentionData(projectId);
 	const qc = useQueryClient();
 	const [writeWithAIOpen, setWriteWithAIOpen] = useState(false);
 	const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
-	const { data: agents = [] } = useQuery({
-		...agentsQueryOptions(projectId ?? ""),
-		enabled: !!projectId && writeWithAIOpen,
-	});
+	// The dialog's agent list is searched and paged on the server once it opens.
+	const agentSearch = useAgentSearch(projectId, !!projectId && writeWithAIOpen);
+	const agents = agentSearch.agents;
 
 	const writeWithAIMutation = useMutation({
 		mutationFn: () => {
@@ -252,12 +249,7 @@ export function DescriptionSection({
 				>
 					<SideMenuController sideMenu={CustomSideMenu} />
 					{canEdit && (
-						<MentionSuggestionMenus
-							editor={editor}
-							teamMembers={teamMembers}
-							projectId={projectId}
-							documents={documents}
-						/>
+						<MentionSuggestionMenus editor={editor} projectId={projectId} />
 					)}
 				</BlockNoteView>
 			</div>
@@ -281,7 +273,17 @@ export function DescriptionSection({
 					</DialogHeader>
 
 					<div className="space-y-2 py-2">
-						{agents.length === 0 ? (
+						<Input
+							value={agentSearch.query}
+							onChange={(e) => agentSearch.onQueryChange(e.target.value)}
+							placeholder={t(
+								"taskDetail.description.writeWithAIDialog.searchAgents",
+							)}
+							aria-label={t(
+								"taskDetail.description.writeWithAIDialog.searchAgents",
+							)}
+						/>
+						{agents.length === 0 && !agentSearch.isLoading ? (
 							<p className="text-base text-muted-foreground text-center py-4">
 								{t("taskDetail.description.writeWithAIDialog.noAgents")}
 							</p>
@@ -312,6 +314,13 @@ export function DescriptionSection({
 								</button>
 							))
 						)}
+						<LoadMoreSentinel
+							compact
+							hasMore={agentSearch.hasMore}
+							isLoadingMore={agentSearch.isLoadingMore}
+							isError={agentSearch.isError}
+							onLoadMore={agentSearch.onLoadMore}
+						/>
 					</div>
 
 					{writeWithAIMutation.error && (

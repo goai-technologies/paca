@@ -1,7 +1,7 @@
 import { ListChecks, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Task } from "@/lib/interaction-api";
-import type { ProjectMember, TaskStatus, TaskType } from "@/lib/project-api";
+import type { TaskStatus, TaskType } from "@/lib/project-api";
 import { AddTaskRow } from "../add-task-row";
 import { SubtaskRow } from "./subtask-row";
 
@@ -11,7 +11,6 @@ interface SubtasksSectionProps {
 	subtasks: Task[];
 	statuses: TaskStatus[];
 	taskTypes?: TaskType[];
-	members?: ProjectMember[];
 	canEdit?: boolean;
 	task: Task;
 	taskIdPrefix?: string;
@@ -42,7 +41,6 @@ export function SubtasksSection({
 	subtasks,
 	statuses,
 	taskTypes = [],
-	members = [],
 	canEdit = true,
 	taskIdPrefix = "",
 	normalTaskTypes = [],
@@ -70,7 +68,6 @@ export function SubtasksSection({
 							taskIdPrefix={taskIdPrefix}
 							statuses={statuses}
 							taskTypes={taskTypes}
-							members={members}
 							showTypeField
 							canEdit={canEdit}
 							onUpdate={onSubtaskUpdate}

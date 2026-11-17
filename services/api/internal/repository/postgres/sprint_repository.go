@@ -46,8 +46,20 @@ const sprintSelectCols = `id, project_id, name, start_date, end_date, goal, stat
 
 // ListSprints returns all sprints for a project ordered by creation time.
 func (r *SprintRepository) ListSprints(ctx context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error) {
+	sink := &argList{args: []any{projectID.String()}}
+	clause, none, err := scopeSQL(ctx, "sprint", sprintScopeColumns, sink)
+	if err != nil {
+		return nil, fmt.Errorf("sprint repo: list: %w", err)
+	}
+	if none {
+		return []*sprintdom.Sprint{}, nil
+	}
+	scopeAnd := ""
+	if clause != "" {
+		scopeAnd = " AND " + clause
+	}
 	var records []sprintRecord
-	if err := r.db.SelectContext(ctx, &records, `SELECT `+sprintSelectCols+` FROM sprints WHERE project_id = $1 ORDER BY created_at ASC`, projectID.String()); err != nil {
+	if err := r.db.SelectContext(ctx, &records, `SELECT `+sprintSelectCols+` FROM sprints WHERE project_id = $1`+scopeAnd+` ORDER BY created_at ASC`, sink.args...); err != nil {
 		return nil, fmt.Errorf("sprint repo: list: %w", err)
 	}
 	out := make([]*sprintdom.Sprint, 0, len(records))
@@ -84,21 +96,36 @@ func (r *SprintRepository) CreateSprint(ctx context.Context, s *sprintdom.Sprint
 	return nil
 }
 
-// UpdateSprint persists changes to an existing sprint.
-func (r *SprintRepository) UpdateSprint(ctx context.Context, s *sprintdom.Sprint) error {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE sprints SET name = $1, start_date = $2, end_date = $3, goal = $4, status = $5, updated_at = $6
-		WHERE id = $7`,
-		s.Name, s.StartDate, s.EndDate, s.Goal, string(s.Status), s.UpdatedAt, s.ID.String(),
-	)
+// UpdateSprintAtomic implements sprintdom.SprintRepository — see its doc comment.
+func (r *SprintRepository) UpdateSprintAtomic(ctx context.Context, id uuid.UUID, decide func(current *sprintdom.Sprint) error) (*sprintdom.Sprint, error) {
+	var out *sprintdom.Sprint
+	err := WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		var rec sprintRecord
+		err := tx.GetContext(ctx, &rec, `SELECT `+sprintSelectCols+` FROM sprints WHERE id = $1 FOR UPDATE`, id.String())
+		if errors.Is(err, sql.ErrNoRows) {
+			return sprintdom.ErrSprintNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("sprint repo: find by id for update: %w", err)
+		}
+		s := toSprintEntity(&rec)
+		if err := decide(s); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE sprints SET name = $1, start_date = $2, end_date = $3, goal = $4, status = $5, updated_at = $6
+			WHERE id = $7`,
+			s.Name, s.StartDate, s.EndDate, s.Goal, string(s.Status), s.UpdatedAt, s.ID.String(),
+		); err != nil {
+			return fmt.Errorf("sprint repo: update: %w", err)
+		}
+		out = s
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("sprint repo: update: %w", err)
+		return nil, err
 	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return sprintdom.ErrSprintNotFound
-	}
-	return nil
+	return out, nil
 }
 
 // DeleteSprint removes a sprint by ID.

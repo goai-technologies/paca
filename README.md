@@ -134,6 +134,16 @@ Plan  →  Act  →  Check  →  Adapt
 
 ---
 
+## What's New in v0.19.0
+
+- **Role-based authorization (IAM-style)** — access in Paca is now controlled by **roles**: named JSON policies that allow or deny *actions* on *resources*, the same model as AWS IAM. A role is the only thing that grants access, nothing is allowed by default, and an explicit **Deny** always wins. Edits take effect on the person's next request.
+  - **Configure roles per resource** — a policy names the exact resource it covers, from a whole project (`project/<id>/*`) down to a single task, sprint, doc, view, workflow, environment, agent or conversation. Give someone read-only access to one sprint, let an agent write docs in a single folder, or keep a team away from production environments.
+  - **Conditions** — narrow a statement further by sprint, task status or type, assignee, doc folder, environment type, and more.
+  - **Simple and Advanced editors** — build a role from a permission list in the **Simple** editor, or write the policy directly in the **Advanced** JSON editor with autocomplete and validation.
+  - **Learn more** — see [Roles and policies](docs/guides/roles-and-policies.md) for worked examples, and [IAM authorization](docs/guides/iam-authorization.md) for the full model.
+
+---
+
 ## What's New in v0.17.0
 
 - **Jev AI integration** — plug [Jev](https://docs.typesafe.ai), an AI decision engine, into any project to let it make the small routing calls a team makes all day. It's opt-in and per-project: bring your own key for TypeSafe (the default) or any Jev-compatible provider such as [OpenJev](https://openjev.sh/docs) from **Settings → Jev AI**. The key is encrypted at rest and never shown again, and a project without a key behaves exactly as before.

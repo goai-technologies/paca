@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityPane } from "@/components/shared/activity-pane";
 import { textToBlocks } from "@/components/shared/comment-blocknote";
@@ -14,7 +14,7 @@ import {
 	updateDocComment,
 	updateDocument,
 } from "@/lib/doc-api";
-import { projectMembersQueryOptions } from "@/lib/project-api";
+import { useMemberDirectory } from "@/lib/member-directory";
 
 type DocActivityChange = {
 	field: string;
@@ -85,12 +85,9 @@ export function DocActivityPane({
 	const { t } = useTranslation("projects");
 	const qc = useQueryClient();
 	const { data: currentUser } = useQuery(currentUserQueryOptions);
-	const { data: membersData } = useQuery(projectMembersQueryOptions(projectId));
+	const getMember = useMemberDirectory(projectId);
 
-	const myMemberId = useMemo(() => {
-		if (!currentUser || !membersData) return undefined;
-		return membersData.find((m) => m.user_id === currentUser.id)?.id;
-	}, [currentUser, membersData]);
+	const myMemberId = currentUser ? getMember(currentUser.id)?.id : undefined;
 
 	const queryKey = docQueryKeys.activities(projectId, docId);
 
@@ -157,7 +154,7 @@ export function DocActivityPane({
 			projectId={projectId}
 			entityId={docId}
 			queryKey={queryKey}
-			queryFn={() => listActivities(projectId, docId)}
+			fetchPage={(cursor) => listActivities(projectId, docId, cursor)}
 			addComment={
 				canEdit
 					? (blocks) => addDocComment(projectId, docId, blocks)
@@ -192,7 +189,6 @@ export function DocActivityPane({
 				}
 				return [];
 			}}
-			sortAscending
 			currentUserId={myMemberId}
 		/>
 	);

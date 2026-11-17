@@ -47,6 +47,7 @@ type Notification struct {
 	ActorAgentType        string
 	ActorAgentLLMProvider string
 	ActorAgentACPProvider *string
+	ActorAgentCLIProvider *string
 	// Type is one of the NotificationType constants.
 	Type NotificationType
 	// TaskID is the task this notification is about.

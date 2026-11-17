@@ -30,7 +30,8 @@
 		"team": "チーム",
 		"settings": "設定",
 		"changelog": "新着情報",
-		"activity": "アクティビティ"
+		"activity": "アクティビティ",
+		"serviceAccounts": "サービスアカウント"
 	},
 	"projectSwitcher": {
 		"projects": "プロジェクト",

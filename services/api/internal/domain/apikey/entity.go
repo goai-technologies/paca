@@ -5,27 +5,29 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	accountdom "github.com/Paca-AI/api/internal/domain/account"
 )
 
-// APIKey represents a user-created API key used for programmatic authentication.
+// APIKey represents an API key used for programmatic authentication as an
+// account: a user's personal key, a service account's key or an agent's key.
 // The raw key value is never stored; only key_hash (SHA-256 hex) and key_prefix
 // (first 8 hex chars) are persisted.
 type APIKey struct {
-	ID         uuid.UUID
-	UserID     uuid.UUID
-	Name       string
-	KeyPrefix  string
-	LastUsedAt *time.Time
-	ExpiresAt  *time.Time
-	CreatedAt  time.Time
-	RevokedAt  *time.Time
-	// AgentID is set only for the synthetic record Authenticate returns when
-	// the presented key is a specific agent's own MCP API key (as opposed
-	// to a human's personal key, or the shared static agent key) — never
-	// persisted in the api_keys table. Its presence tells the authn
-	// middleware which agent the key already proves identity for, with no
-	// separate X-Agent-ID header claim needed or trusted.
-	AgentID *uuid.UUID
+	ID        uuid.UUID
+	AccountID uuid.UUID
+	// AccountKind is the kind of the owning account, set when the key is
+	// looked up for authentication (so the caller needs no second query).
+	AccountKind accountdom.Kind
+	Name        string
+	KeyPrefix   string
+	LastUsedAt  *time.Time
+	ExpiresAt   *time.Time
+	CreatedAt   time.Time
+	RevokedAt   *time.Time
+	// CreatedBy is the account that minted the key (the admin, for a service
+	// account's key); nil when unknown.
+	CreatedBy *uuid.UUID
 }
 
 // IsActive reports whether the key can be used for authentication.

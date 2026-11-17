@@ -1,6 +1,7 @@
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import {
@@ -8,6 +9,7 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import { useAgentSearch } from "@/hooks/use-agent-search";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import {
 	CONVERSATION_STATUS_COLORS,
@@ -17,6 +19,7 @@ import {
 	type ConversationStatus,
 	type ConversationTriggerType,
 } from "@/lib/agent-api";
+import { useAgentDirectory } from "@/lib/agent-directory";
 import { cn } from "@/lib/utils";
 
 const ALL_STATUSES: ConversationStatus[] = [
@@ -150,19 +153,25 @@ function DateRangeFilter({
 // ── Filter bar ────────────────────────────────────────────────────────────────
 
 export interface ConversationFiltersProps {
-	agents: { id: string; name: string }[];
+	/** Scopes the agent filter's list: a project's agents, or the global
+	 *  agents when undefined. */
+	projectId: string | undefined;
 	filters: ConversationFiltersState;
 	onFiltersChange: (next: ConversationFiltersState) => void;
 }
 
 export function ConversationFilters({
-	agents,
+	projectId,
 	filters,
 	onFiltersChange,
 }: ConversationFiltersProps) {
 	const { t } = useTranslation("projects");
 	const [searchInput, setSearchInput] = useState(filters.search ?? "");
 	const [filtersOpen, setFiltersOpen] = useState(false);
+	// The agent list is searched and paged on the server, only while the filter
+	// panel is open; chosen agents resolve by id so they stay listed.
+	const agentSearch = useAgentSearch(projectId, filtersOpen);
+	const getAgent = useAgentDirectory(projectId);
 
 	const debouncedSetSearch = useDebouncedCallback((value: string) => {
 		onFiltersChange({ ...filters, search: value || undefined });
@@ -240,28 +249,46 @@ export function ConversationFilters({
 						</p>
 					</div>
 					<div className="max-h-[60vh] space-y-3 overflow-y-auto p-3">
-						{agents.length > 0 && (
-							<>
-								<section>
-									<FilterSectionLabel>
-										{t("conversationsPage.filters.agent")}
-									</FilterSectionLabel>
-									<div className="flex flex-col gap-0.5">
-										{agents.map((a) => (
-											<CheckListRow
-												key={a.id}
-												label={a.name}
-												checked={filters.agentIds?.includes(a.id) ?? false}
-												onChange={() =>
-													toggle("agentIds", a.id, filters.agentIds)
-												}
-											/>
-										))}
-									</div>
-								</section>
-								<div className="border-t border-border/20" />
-							</>
-						)}
+						<section>
+							<FilterSectionLabel>
+								{t("conversationsPage.filters.agent")}
+							</FilterSectionLabel>
+							<Input
+								value={agentSearch.query}
+								onChange={(e) => agentSearch.onQueryChange(e.target.value)}
+								placeholder={t("conversationsPage.filters.searchAgents")}
+								aria-label={t("conversationsPage.filters.searchAgents")}
+								className="mb-1.5 h-7 text-xs"
+							/>
+							<div className="flex max-h-44 flex-col gap-0.5 overflow-y-auto">
+								{(filters.agentIds ?? [])
+									.filter((id) => !agentSearch.agents.some((a) => a.id === id))
+									.map((id) => (
+										<CheckListRow
+											key={id}
+											label={getAgent(id)?.name ?? id.slice(0, 8)}
+											checked
+											onChange={() => toggle("agentIds", id, filters.agentIds)}
+										/>
+									))}
+								{agentSearch.agents.map((a) => (
+									<CheckListRow
+										key={a.id}
+										label={a.name}
+										checked={filters.agentIds?.includes(a.id) ?? false}
+										onChange={() => toggle("agentIds", a.id, filters.agentIds)}
+									/>
+								))}
+								<LoadMoreSentinel
+									compact
+									hasMore={agentSearch.hasMore}
+									isLoadingMore={agentSearch.isLoadingMore}
+									isError={agentSearch.isError}
+									onLoadMore={agentSearch.onLoadMore}
+								/>
+							</div>
+						</section>
+						<div className="border-t border-border/20" />
 
 						<section>
 							<FilterSectionLabel>

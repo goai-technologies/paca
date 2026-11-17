@@ -54,7 +54,7 @@ async function listKeys(
 ): Promise<Array<Record<string, unknown> & { id: string; name: string }>> {
 	const response = await api.get(`${API_URL}/users/me/api-keys`);
 	expect(response.ok()).toBeTruthy();
-	return (await response.json()).data;
+	return (await response.json()).data.items;
 }
 
 async function openApiKeysPage(page: Page, username: string): Promise<void> {

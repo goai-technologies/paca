@@ -38,9 +38,6 @@ type Claims struct {
 	// password before accessing any other endpoint (e.g. after admin creation
 	// or admin password reset).
 	MustChangePassword bool `json:"mcp,omitempty"`
-	// AgentID is optionally set when authenticating via agent API key with
-	// X-Agent-ID header to identify which agent is performing the action.
-	AgentID *string `json:"agent_id,omitempty"`
 	// Scope narrows what an access/refresh token may be used for. Empty
 	// (the zero value) means full scope — every token Login/Refresh have
 	// ever issued, usable on any endpoint the subject's role/permissions

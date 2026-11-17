@@ -24,7 +24,6 @@
         "adminPassword": { "type": "string" },
         "encryptionKey": { "type": "string" },
         "internalApiKey": { "type": "string" },
-        "agentApiKey": { "type": "string" },
         "postgresPassword": { "type": "string" },
         "storageAccessKeyId": { "type": "string" },
         "storageSecretAccessKey": { "type": "string" }

@@ -25,8 +25,7 @@
 			"description": "您仍可以使用上方的按钮创建新用户。"
 		},
 		"table": {
-			"columnUsername": "用户名",
-			"columnFullName": "姓名",
+			"columnUser": "用户",
 			"columnRole": "角色",
 			"columnCreated": "创建时间",
 			"pwdResetBadge": "密码已重置",
@@ -35,7 +34,9 @@
 			"resetPasswordAction": "重置密码",
 			"editAction": "编辑用户",
 			"changeRoleAction": "更改角色",
-			"deleteAction": "删除用户"
+			"deleteAction": "删除用户",
+			"pwdResetHint": "该用户必须在下次登录时设置新密码",
+			"columnActions": "操作"
 		},
 		"formDialog": {
 			"createdTitle": "用户已创建",
@@ -127,6 +128,20 @@
 				"internalError": "出现错误，请重试。",
 				"generic": "出现错误。"
 			}
+		},
+		"filters": {
+			"searchPlaceholder": "按姓名、用户名或邮箱搜索…",
+			"searchLabel": "搜索用户",
+			"roleLabel": "按角色筛选",
+			"allRoles": "所有角色",
+			"clearSearch": "清除搜索",
+			"resultsCount": "结果：{{count}}",
+			"clearAll": "清除筛选"
+		},
+		"noMatch": {
+			"title": "没有匹配的用户",
+			"description": "请尝试其他搜索词或角色筛选。",
+			"clear": "清除筛选"
 		}
 	},
 	"globalRoles": {
@@ -156,14 +171,16 @@
 		},
 		"table": {
 			"columnName": "名称",
-			"columnPermissions": "权限",
+			"columnDescription": "描述",
 			"columnDefault": "默认",
 			"noPermissionsAssigned": "未分配权限",
 			"default": "默认",
 			"setDefaultAction": "设为默认角色",
 			"editAction": "编辑角色",
 			"deleteAction": "删除角色",
-			"deleteDefaultDisabled": "无法删除默认角色。请先将其他角色设为默认。"
+			"deleteDefaultDisabled": "无法删除默认角色。请先将其他角色设为默认。",
+			"builtIn": "内置角色",
+			"noDescription": "无描述"
 		},
 		"formDialog": {
 			"editTitle": "编辑角色",
@@ -178,16 +195,7 @@
 			"cancel": "取消",
 			"saving": "正在保存…",
 			"saveChanges": "保存更改",
-			"createRole": "创建角色",
-			"errors": {
-				"roleNameRequired": "角色名称不能为空。",
-				"nameTaken": "已存在同名角色。",
-				"nameInvalid": "角色名称只能包含大写字母、数字和下划线。",
-				"roleNotFound": "该角色已不存在，可能已被删除。",
-				"forbidden": "您没有权限执行此操作。",
-				"internalError": "服务器出现错误，请重试。",
-				"generic": "出现错误。"
-			}
+			"createRole": "创建角色"
 		},
 		"deleteDialog": {
 			"title": "删除角色",
@@ -199,7 +207,6 @@
 			"confirmButton": "删除角色",
 			"errors": {
 				"roleNotFound": "该角色已不存在。",
-				"hasUsersWarning": "该角色仍被分配给一个或多个用户，无法删除。",
 				"isDefault": "无法删除默认角色。请先将其他角色设为默认。",
 				"forbidden": "您没有权限删除该角色。",
 				"internalError": "出现错误，请重试。",
@@ -270,14 +277,40 @@
 			"settingsSsoWrite": {
 				"label": "管理 SSO 提供商",
 				"description": "配置用户登录所用的身份提供商。该权限可用于以其他用户身份登录，请视同完整管理员权限。"
+			},
+			"agentsRead": {
+				"label": "查看智能体",
+				"description": "查看工作区级别的 AI 智能体"
+			},
+			"agentsWrite": {
+				"label": "管理智能体",
+				"description": "创建、编辑和删除工作区级别的 AI 智能体"
+			},
+			"pluginsRead": {
+				"label": "查看插件",
+				"description": "查看已安装的插件"
+			},
+			"pluginsWrite": {
+				"label": "管理插件",
+				"description": "安装、更新、启用和移除插件"
+			},
+			"serviceAccountsRead": {
+				"label": "查看服务账号",
+				"description": "查看服务账号及其 API 密钥"
+			},
+			"serviceAccountsWrite": {
+				"label": "管理服务账号",
+				"description": "创建、编辑、删除服务账号，并签发或吊销其 API 密钥"
 			}
 		},
 		"permissionGroups": {
 			"globalRoles": "全局角色",
 			"users": "用户",
+			"agents": "AI 智能体",
 			"projects": "项目",
 			"plugins": "插件",
-			"settings": "设置"
+			"settings": "设置",
+			"serviceAccounts": "服务账号"
 		},
 		"defaultDialog": {
 			"title": "设置默认角色",
@@ -325,6 +358,7 @@
 		"empty": "暂无发布说明。"
 	},
 	"agents": {
+		"searchPlaceholder": "按名称或标识搜索智能体…",
 		"header": {
 			"title": "全局智能体",
 			"description": "管理可以在主页和管理页面聊天、并可被邀请加入任意项目的 AI 智能体。",
@@ -439,6 +473,159 @@
 				"saveFailed": "保存提供商失败，请重试。",
 				"loadFailed": "加载 SSO 提供商失败。",
 				"deleteFailed": "删除提供商失败，请重试。"
+			}
+		}
+	},
+	"serviceAccounts": {
+		"searchPlaceholder": "按名称或描述搜索…",
+		"header": {
+			"title": "服务账号",
+			"description": "拥有独立 API 密钥和角色的非人类账号，用于集成、CI 和自动化。",
+			"newAccount": "新建服务账号"
+		},
+		"empty": {
+			"title": "还没有服务账号",
+			"description": "创建一个，为集成提供独立的身份和 API 密钥。",
+			"create": "创建服务账号"
+		},
+		"errors": {
+			"loadFailed": "无法加载服务账号",
+			"tryAgain": "请刷新页面后重试。"
+		},
+		"noPermission": {
+			"title": "你没有查看服务账号的权限",
+			"description": "请向工作区管理员申请访问权限。"
+		},
+		"table": {
+			"columnAccount": "账号",
+			"columnActions": "操作",
+			"noDescription": "无描述",
+			"changeRoleAction": "更改角色",
+			"editAction": "编辑服务账号",
+			"deleteAction": "删除服务账号",
+			"columnRole": "角色"
+		},
+		"formDialog": {
+			"createTitle": "新建服务账号",
+			"editTitle": "编辑服务账号",
+			"createDescription": "新账号没有任何权限。请为其创建 API 密钥，然后授予角色。",
+			"editDescription": "修改名称、描述或头像。API 密钥和角色需单独管理。",
+			"nameLabel": "名称",
+			"namePlaceholder": "例如：CI 部署机器人",
+			"descriptionLabel": "描述",
+			"descriptionPlaceholder": "此账号用于什么？",
+			"cancel": "取消",
+			"create": "创建",
+			"creating": "正在创建…",
+			"save": "保存",
+			"saving": "正在保存…",
+			"avatar": {
+				"change": "更换头像",
+				"remove": "移除头像",
+				"uploading": "正在上传…",
+				"errors": {
+					"invalidType": "请使用 PNG、JPEG、WebP 或 GIF 图片。",
+					"tooLarge": "图片不得超过 5 MB。",
+					"uploadFailed": "无法上传头像，请重试。",
+					"removeFailed": "无法移除头像，请重试。"
+				}
+			},
+			"errors": {
+				"nameInvalid": "名称长度必须为 1–100 个字符。",
+				"descriptionTooLong": "描述过长（最多 1000 个字符）。",
+				"notFound": "此服务账号已不存在。",
+				"generic": "出错了，请重试。"
+			}
+		},
+		"deleteDialog": {
+			"title": "删除服务账号",
+			"description": "删除“{{name}}”？其 API 密钥将立即失效，角色和项目成员身份将被移除。此操作无法撤销。",
+			"cancel": "取消",
+			"confirm": "删除",
+			"deleting": "正在删除…",
+			"error": "无法删除服务账号，请重试。"
+		},
+		"keys": {
+			"nameLabel": "密钥名称",
+			"namePlaceholder": "例如：GitHub Actions",
+			"expiryLabel": "过期时间",
+			"expiryOptional": "（可选）",
+			"create": "创建密钥",
+			"creating": "正在创建…",
+			"empty": "还没有 API 密钥。",
+			"revokeAria": "吊销密钥 {{name}}",
+			"reveal": {
+				"title": "请复制新的 API 密钥",
+				"description": "这是唯一一次显示完整密钥。请妥善保存；若丢失，请创建新的密钥。",
+				"copyAria": "复制密钥",
+				"copied": "已复制到剪贴板",
+				"done": "完成"
+			},
+			"errors": {
+				"nameRequired": "请为密钥命名。",
+				"nameTooLong": "密钥名称过长（最多 100 个字符）。",
+				"createFailed": "无法创建密钥。请使用你的账号登录（而非 API 密钥）后重试。",
+				"revokeFailed": "无法吊销密钥，请重试。",
+				"copyFailed": "无法复制到剪贴板。请选中密钥并手动复制。"
+			},
+			"revoke": {
+				"title": "吊销 API 密钥",
+				"description": "吊销“{{name}}”？使用它的一切将立即失效。此操作无法撤销。",
+				"cancel": "取消",
+				"confirm": "吊销密钥",
+				"revoking": "正在吊销…"
+			},
+			"count": "API 密钥：{{count}}",
+			"newKey": "新建密钥",
+			"createFirst": "创建第一个密钥",
+			"createDialog": {
+				"title": "创建 API 密钥",
+				"description": "该密钥以此账号身份认证，仅在创建后显示一次。",
+				"cancel": "取消"
+			},
+			"row": {
+				"created": "创建于 {{date}}",
+				"expires": "{{date}} 过期",
+				"noExpiry": "永不过期",
+				"lastUsed": "最后使用于 {{date}}",
+				"neverUsed": "从未使用"
+			}
+		},
+		"roleDialog": {
+			"title": "更改角色",
+			"description": "选择 {{name}} 拥有的工作区角色。它只能执行这些角色允许的操作。",
+			"assign": "保存角色",
+			"assigning": "正在保存…",
+			"fullAccessWarning": "该角色授予所有权限。持有此账号 API 密钥的任何人都将拥有完全访问权限。"
+		},
+		"detail": {
+			"notFound": {
+				"title": "未找到服务账号",
+				"description": "它可能已被删除。"
+			},
+			"roles": {
+				"description": "此账号在工作区中可以执行的操作。新账号没有任何角色。",
+				"none": "无角色：此账号目前什么也做不了。",
+				"change": "更改角色",
+				"noneHint": "授予角色后才能执行操作。",
+				"readOnly": "你可以查看此账号的角色，但无法更改。"
+			},
+			"badge": "服务账号",
+			"tabs": {
+				"overview": "概览",
+				"apiKeys": "API 密钥",
+				"roles": "角色"
+			},
+			"overview": {
+				"descriptionHint": "显示在账号列表中以及邀请其加入项目时。",
+				"saveChanges": "保存更改",
+				"saved": "已保存",
+				"saveFailed": "无法保存更改，请重试。",
+				"idLabel": "ID",
+				"createdLabel": "创建时间",
+				"updatedLabel": "更新时间",
+				"deleteTitle": "删除此服务账号",
+				"deleteHint": "其 API 密钥将失效，角色和项目成员身份将被移除。"
 			}
 		}
 	}

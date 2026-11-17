@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/Paca-AI/api/internal/apierr"
 )
 
@@ -62,4 +64,32 @@ func splitCommaList(raw string) []string {
 		}
 	}
 	return out
+}
+
+// maxIDsParam bounds the ids batch-lookup filter shared by the list endpoints.
+const maxIDsParam = 100
+
+// parseCursorParam returns the optional cursor query param, or nil when absent.
+func parseCursorParam(r *http.Request) *string {
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		return &raw
+	}
+	return nil
+}
+
+// parseIDsParam reads the optional ids query param (comma-separated uuids, at
+// most maxIDsParam) used for batch lookups.
+func parseIDsParam(r *http.Request) ([]uuid.UUID, error) {
+	raw := r.URL.Query().Get("ids")
+	if raw == "" {
+		return nil, nil
+	}
+	ids, err := parseQueryUUIDs(raw)
+	if err != nil {
+		return nil, apierr.New(apierr.CodeBadRequest, "invalid ids")
+	}
+	if len(ids) > maxIDsParam {
+		return nil, apierr.New(apierr.CodeBadRequest, "ids must contain at most 100 entries")
+	}
+	return ids, nil
 }

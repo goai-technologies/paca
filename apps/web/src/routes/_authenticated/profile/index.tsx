@@ -26,6 +26,7 @@ import type { User as UserType } from "@/lib/auth-api";
 import { currentUserQueryOptions } from "@/lib/auth-api";
 import { formatDate } from "@/lib/format-date";
 import { ExtensionPoint } from "@/lib/plugins/extension-point";
+import { userAvatar } from "@/lib/provider-logos";
 
 export const Route = createFileRoute("/_authenticated/profile/")({
 	component: ProfilePage,
@@ -46,16 +47,6 @@ async function updateProfile(payload: {
  * this only catches obviously-malformed input before a round trip. */
 function isValidEmail(value: string): boolean {
 	return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function getInitials(name: string): string {
-	return name
-		.split(" ")
-		.filter(Boolean)
-		.map((n) => n[0])
-		.join("")
-		.toUpperCase()
-		.slice(0, 2);
 }
 
 function ProfilePage() {
@@ -158,7 +149,6 @@ function ProfilePage() {
 	}
 
 	const displayName = user.full_name || user.username;
-	const initials = getInitials(displayName);
 
 	const handleEdit = () => {
 		setFullName(user.full_name ?? "");
@@ -196,10 +186,12 @@ function ProfilePage() {
 					<div className="flex items-center gap-4">
 						<AvatarUpload
 							basePath="/users/me"
-							avatarUrl={user.avatar_url}
-							fallback={initials}
+							avatar={{
+								...userAvatar(user),
+								avatarUrl: user.avatar_url,
+								size: "xl",
+							}}
 							className="size-14 rounded-xl"
-							fallbackClassName="bg-primary text-primary-foreground text-lg font-bold"
 							labels={{
 								change: t("avatar.change"),
 								remove: t("avatar.remove"),
@@ -223,7 +215,7 @@ function ProfilePage() {
 							</CardDescription>
 							<div className="flex items-center gap-2 mt-2">
 								<Badge variant="secondary" className="text-xs">
-									{user.role}
+									{user.roles.map((r) => r.name).join(", ")}
 								</Badge>
 								<span className="flex items-center gap-1 text-xs text-muted-foreground">
 									<CalendarDays className="size-3" />

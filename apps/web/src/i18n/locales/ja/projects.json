@@ -12,7 +12,8 @@
 				"customFields": "カスタムフィールド",
 				"jev": "Jev AI",
 				"dangerZone": "危険な操作",
-				"plugins": "プラグイン"
+				"plugins": "プラグイン",
+				"export": "エクスポート"
 			},
 			"pluginTab": {
 				"noPermission": {
@@ -101,7 +102,6 @@
 			"configure": "設定",
 			"delete": "削除",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This agent is restricted — ask a project admin to grant you access before you can chat with it.",
 			"acpStatusConnected": "オンライン",
 			"acpStatusDisconnected": "オフライン",
 			"deleteDialog": {
@@ -114,6 +114,7 @@
 			}
 		},
 		"page": {
+			"searchPlaceholder": "名前またはハンドルでエージェントを検索…",
 			"title": "AIエージェント",
 			"subtitle": "タスクを処理し、チームとチャットする自律型エージェント",
 			"newAgent": "新規エージェント",
@@ -172,7 +173,6 @@
 				"skills": "スキル",
 				"envVars": "環境変数",
 				"globalRole": "グローバルロール",
-				"access": "Access",
 				"activity": "アクティビティ"
 			},
 			"globalRole": {
@@ -289,6 +289,11 @@
 					"urlLabel": "URL",
 					"cancel": "キャンセル",
 					"addServer": "サーバーを追加"
+				},
+				"system": {
+					"title": "システム MCP サーバー",
+					"description": "Paca がすべてのエージェントに提供します。編集はできません。",
+					"pacaDetail": "Paca 組み込みツール（プロジェクト、タスク、ドキュメント）"
 				}
 			},
 			"envVars": {
@@ -336,16 +341,11 @@
 					"nameReserved": "その名前はPaca自体の内部構造用に予約されています。別の名前を選択してください。",
 					"nameInvalid": "スキル名に「.」「..」を使用したり、スラッシュを含めたりすることはできません。",
 					"addFailed": "スキルの追加に失敗しました。もう一度お試しください。"
+				},
+				"system": {
+					"title": "システムスキル",
+					"description": "Paca に同梱され、すべてのエージェントで利用できます。編集はできません。"
 				}
-			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may chat with this agent. Everyone who can manage agents can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
 			},
 			"activity": {
 				"commented": "コメントしました",
@@ -370,6 +370,9 @@
 					"dateTo": "終了日",
 					"clearAll": "フィルターをクリア"
 				}
+			},
+			"system": {
+				"badge": "システム"
 			}
 		},
 		"conversationView": {
@@ -385,9 +388,8 @@
 			"connect": "接続",
 			"conversationEnded": "この会話は終了しました。",
 			"textOnlyMessage": "テキストメッセージのみサポートされています。",
-			"agentAccessRestricted": "このエージェントはアクセスが制限されています。チャットする前に、プロジェクト管理者にアクセス権を付与してもらってください。",
-			"environmentAccessRestricted": "この会話の環境はアクセスが制限されています。このエージェントとチャットする前に、プロジェクト管理者にアクセス権を付与してもらってください。",
 			"chatNoPermission": "この会話でメッセージを送信する権限がありません。",
+			"cliProviderNeedsEnvironment": "このエージェントは CLI プロバイダーを使用しており、既定の環境が必要ですが、利用可能なものがありません。プロジェクト管理者にエージェントの既定の環境を設定するよう依頼してください。",
 			"failed": "会話が失敗しました",
 			"noOutput": "エージェントは出力を生成しませんでした。",
 			"loadingOlder": "読み込み中…",
@@ -483,7 +485,6 @@
 			"subtitle": "エージェントが会話をまたいで接続できる、名前付きの長期稼働サンドボックス",
 			"newEnvironment": "新しい環境",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This environment is restricted — ask a project admin to grant you access before you can use it.",
 			"empty": {
 				"title": "まだ環境がありません",
 				"description": "毎回使い捨てのサンドボックスを作成する代わりに、静的環境を作成してファイルやバックグラウンドプロセスを会話をまたいで維持しましょう。",
@@ -526,8 +527,7 @@
 			"tabs": {
 				"overview": "概要",
 				"folders": "フォルダー",
-				"portForwards": "ポートフォワード",
-				"access": "Access"
+				"portForwards": "ポートフォワード"
 			},
 			"busy": "この環境はすでに起動、停止、または再起動中です。しばらくしてからもう一度お試しください。",
 			"actionFailed": "この操作に失敗しました。もう一度お試しください。",
@@ -643,15 +643,6 @@
 					"restartFailed": "環境の再起動に失敗しました。もう一度お試しください。"
 				}
 			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may browse, SSH into, forward ports on, or open a terminal in this environment. Everyone who can manage environments can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
-			},
 			"sshKeys": {
 				"connectHint": "<bastion-host> を、このデプロイで設定されたSSH踏み台のアドレスに置き換えてください。",
 				"connectUnavailable": "このデプロイではまだSSHアクセスが設定されていません。",
@@ -750,7 +741,6 @@
 			"deleteRole": "ロールを削除",
 			"errors": {
 				"notFound": "このロールは既に存在しません。",
-				"hasMembers": "このロールは1人以上のメンバーに割り当てられているため削除できません。",
 				"forbidden": "このロールを削除する権限がありません。",
 				"internalError": "問題が発生しました。もう一度お試しください。",
 				"generic": "問題が発生しました。"
@@ -764,23 +754,18 @@
 			"roleNameLabel": "ロール名",
 			"roleNamePlaceholder": "例: PROJECT_REVIEWER",
 			"permissionsLabel": "権限",
-			"fullAccessBadge": "フルアクセス",
 			"fullAccessDescription": "このロールには、将来追加される権限を含め、すべての権限が自動的に含まれます。以下のいずれかを切り替えると、現在の権限の固定セットに変換されます。",
 			"enabledCount_one": "{{count}}件有効",
 			"enabledCount_other": "{{count}}件有効",
 			"cancel": "キャンセル",
 			"saveChanges": "変更を保存",
-			"createRole": "ロールを作成",
-			"errors": {
-				"nameTaken": "この名前のロールは既に存在します。",
-				"nameInvalid": "ロール名は大文字、数字、アンダースコアのみ使用できます。",
-				"notFound": "このロールは既に存在しません。既に削除された可能性があります。",
-				"forbidden": "この操作を実行する権限がありません。",
-				"internalError": "サーバーで問題が発生しました。もう一度お試しください。",
-				"generic": "問題が発生しました。"
-			}
+			"createRole": "ロールを作成"
 		},
 		"permissions": {
+			"projectsRead": {
+				"label": "プロジェクトを表示",
+				"description": "プロジェクトを開き、基本情報を表示します"
+			},
 			"projectsWrite": {
 				"label": "プロジェクトの編集",
 				"description": "プロジェクト名、説明、設定を更新します"
@@ -795,7 +780,7 @@
 			},
 			"membersWrite": {
 				"label": "メンバーの管理",
-				"description": "プロジェクトメンバーの追加・削除・再割り当て"
+				"description": "プロジェクトメンバーの追加と削除（ロールの変更にはロールの割り当てが必要です）"
 			},
 			"rolesRead": {
 				"label": "ロールの閲覧",
@@ -804,6 +789,10 @@
 			"rolesWrite": {
 				"label": "ロールの管理",
 				"description": "プロジェクトロールの作成・編集・削除"
+			},
+			"rolesAssign": {
+				"label": "ロールを割り当て",
+				"description": "このプロジェクトのメンバーやエージェントに任意のロールを付与または解除します"
 			},
 			"settingsTaskTypesWrite": {
 				"label": "Manage Task Types",
@@ -900,6 +889,10 @@
 			"activitiesRead": {
 				"label": "アクティビティログの閲覧",
 				"description": "このプロジェクトで記録されたすべてのアクティビティを表示"
+			},
+			"projectExport": {
+				"label": "プロジェクトデータのエクスポート",
+				"description": "このプロジェクトのタスク（コメントとアクティビティを含む）とドキュメントをエクスポートします"
 			}
 		},
 		"permissionGroups": {
@@ -939,9 +932,6 @@
 			"taskIdPrefixPlaceholder": "PROJ",
 			"descriptionLabel": "説明",
 			"descriptionPlaceholder": "このプロジェクトについて説明してください…",
-			"publicProjectLabel": "公開プロジェクト",
-			"publicProjectHintPublic": "リンクを知っている人は誰でもこのプロジェクトを閲覧できます。匿名ユーザーは読み取り専用でアクセスできます。",
-			"publicProjectHintPrivate": "チームメンバーのみがこのプロジェクトにアクセスできます。",
 			"saveChanges": "変更を保存",
 			"saved": "保存しました ✓",
 			"noPermission": "このプロジェクトを編集する権限がありません。",
@@ -956,7 +946,6 @@
 			"title": "プロジェクトロール",
 			"description": "このプロジェクトのメンバーのロールと権限を管理します。",
 			"newRole": "新規ロール",
-			"noPermissionsAssigned": "権限が割り当てられていません",
 			"editRole": "ロールを編集",
 			"deleteRole": "ロールを削除",
 			"rolesDefined_one": "件のロールが定義済み",
@@ -969,14 +958,15 @@
 			},
 			"table": {
 				"name": "名前",
-				"permissions": "権限",
+				"description": "説明",
 				"created": "作成日"
 			},
-			"systemRolesNote": "システムロールは共有テンプレートであり、編集・削除はできません。",
+			"systemRolesNote": "ワークスペースから共有されているロールは、ワークスペースのロール設定でのみ変更できます。",
 			"noPermission": {
 				"title": "You don't have permission to view roles",
 				"description": "Ask a project admin to grant you the project.roles.read permission."
-			}
+			},
+			"noDescription": "説明なし"
 		},
 		"taskStatuses": {
 			"title": "タスクステータス",
@@ -1172,6 +1162,41 @@
 				"cancel": "キャンセル",
 				"deletePermanently": "完全に削除"
 			}
+		},
+		"export": {
+			"title": "エクスポート",
+			"description": "プロジェクトのデータをダウンロードします。エクスポートはバックグラウンドで生成され、7日間保存されます。",
+			"recent": {
+				"title": "最近のエクスポート",
+				"empty": "エクスポートはまだありません。"
+			},
+			"status": {
+				"pending": "待機中",
+				"processing": "生成中…",
+				"completed": "完了",
+				"failed": "失敗",
+				"expired": "期限切れ"
+			},
+			"rows": "タスク数: {{count}}",
+			"availableUntil": "{{date}}まで利用可能",
+			"download": "ダウンロード",
+			"failedMessage": "エクスポートを生成できませんでした。もう一度お試しください。",
+			"errors": {
+				"inProgress": "このプロジェクトではすでにエクスポートが進行中です。",
+				"requestFailed": "エクスポートを開始できませんでした。もう一度お試しください。",
+				"downloadFailed": "エクスポートをダウンロードできませんでした。もう一度お試しください。",
+				"expired": "このエクスポートは期限切れです。新しくリクエストしてください。"
+			},
+			"noPermission": {
+				"title": "このプロジェクトをエクスポートする権限がありません",
+				"description": "プロジェクトのオーナーまたは管理者にエクスポート権限の付与を依頼してください。"
+			},
+			"archive": {
+				"title": "プロジェクトデータ（ZIP）",
+				"description": "すべてのタスクをCSVで、コメントとアクティビティを別々のCSVファイルで、ドキュメントをMarkdownファイルで書き出します。",
+				"button": "プロジェクトをエクスポート",
+				"inProgress": "エクスポート中…"
+			}
 		}
 	},
 	"taskStatuses": {
@@ -1226,29 +1251,43 @@
 			"noUsersAvailable": "追加できるユーザーがいません。",
 			"loadingMore": "読み込み中…",
 			"roleLabel": "ロール",
-			"rolePlaceholder": "ロールを選択…",
 			"cancel": "キャンセル",
 			"addMember": "メンバーを追加",
 			"errors": {
 				"addFailed": "メンバーの追加に失敗しました。もう一度お試しください。",
 				"alreadyAdded": "このユーザーまたはエージェントはすでにプロジェクトのメンバーです。",
+				"roleForbidden": "これらのロールの一部を割り当てる権限がありません。",
 				"roleNotFound": "そのロールはもう存在しません。別のロールを選択してください。"
 			},
 			"modeUser": "ユーザー",
 			"modeAgent": "AIエージェント",
 			"agentLabel": "エージェント",
-			"noAgentsAvailable": "招待できるグローバルエージェントがありません。"
+			"noAgentsAvailable": "招待できるグローバルエージェントがありません。",
+			"modeServiceAccount": "サービスアカウント",
+			"serviceAccountLabel": "サービスアカウント",
+			"noServiceAccountsAvailable": "追加できるサービスアカウントがありません。",
+			"searchAgentsPlaceholder": "名前またはハンドルで検索…",
+			"noAgentsMatch": "検索に一致するエージェントはありません。",
+			"searchServiceAccountsPlaceholder": "名前または説明で検索…",
+			"noServiceAccountsMatch": "検索に一致するサービスアカウントはありません。"
 		},
 		"roleChip": {
 			"changeRole": "ロールを変更",
+			"dialogDescription": "{{name}} のロールを選択します。メンバーは少なくとも1つのロールを持ちます。",
+			"assign": "ロールを割り当てる",
+			"assigning": "割り当て中…",
 			"errors": {
 				"memberNotFound": "このメンバーはすでにプロジェクトのメンバーではありません。",
+				"roleForbidden": "これらのロールの一部を割り当てまたは解除する権限がありません。",
 				"roleNotFound": "そのロールはもう存在しません。",
 				"changeFailed": "ロールの変更に失敗しました。"
 			}
 		},
 		"memberRow": {
-			"removeMember": "メンバーを削除"
+			"removeMember": "メンバーを削除",
+			"agentBadge": "エージェント",
+			"actions": "メンバーの操作",
+			"serviceAccountBadge": "サービスアカウント"
 		},
 		"removeDialog": {
 			"title": "メンバーを削除",
@@ -1270,6 +1309,19 @@
 			"placeholder": "この人の担当業務は？",
 			"save": "保存",
 			"saveFailed": "説明の保存に失敗しました。"
+		},
+		"filters": {
+			"searchPlaceholder": "名前またはユーザー名で検索…",
+			"searchLabel": "メンバーを検索",
+			"roleLabel": "ロールで絞り込み",
+			"allRoles": "すべて",
+			"clearSearch": "検索をクリア",
+			"showingOf": "{{total}} 件中 {{shown}} 件を表示"
+		},
+		"noMatch": {
+			"title": "一致するメンバーがいません",
+			"description": "別の検索語やロールフィルターをお試しください。",
+			"clear": "フィルターをクリア"
 		}
 	},
 	"aiChat": {
@@ -1290,6 +1342,7 @@
 			"deleteFailed": "タスクタイプの削除に失敗しました。もう一度お試しください。",
 			"isDefault": "既定のタイプは削除できません。先に別のタイプを既定に設定してください。",
 			"isSystem": "システムタイプは削除できません。",
+			"commitmentsProjectOnly": "コミットメントタイプは削除できません。このプロジェクトにはコミットメントのみを置けます。",
 			"cancel": "キャンセル",
 			"deleteType": "タイプを削除"
 		},
@@ -1314,7 +1367,8 @@
 				"nameInvalid": "タイプ名が空か無効です。",
 				"nameReserved": "その名前は組み込みタイプ用に予約されています。",
 				"saveFailed": "タスクタイプの保存に失敗しました。もう一度お試しください。",
-				"isSystem": "システムタイプは編集できません。"
+				"isSystem": "システムタイプは編集できません。",
+				"commitmentsProjectOnly": "このプロジェクトにはコミットメントのみを置けます。他のタスクタイプの追加や、コミットメントタイプの名前変更はできません。"
 			}
 		}
 	},
@@ -1370,12 +1424,18 @@
 			"viewParent": "親タスクを表示",
 			"removeParent": "親タスクを削除",
 			"addFields": "フィールドを追加",
-			"autoAssign": "自動"
+			"autoAssign": "自動",
+			"sprintGroup": {
+				"active": "進行中",
+				"planned": "予定",
+				"completed": "完了"
+			}
 		},
 		"description": {
 			"title": "説明",
 			"writeWithAI": "AIで作成",
 			"writeWithAIDialog": {
+				"searchAgents": "エージェントを検索…",
 				"title": "AIで作成",
 				"description": "タスクの説明を作成するエージェントを選択してください。",
 				"noAgents": "このプロジェクトにはエージェントが設定されていません。",
@@ -1453,6 +1513,7 @@
 			"searchPlaceholder": "タイトルまたは番号でタスクを検索...",
 			"loadingTasks": "タスクを読み込み中…",
 			"noTasksFound": "タスクが見つかりません",
+			"loadError": "タスクを読み込めませんでした。もう一度お試しください。",
 			"linkTypes": {
 				"blocks": {
 					"label": "ブロックする",
@@ -1554,6 +1615,33 @@
 			"descriptionChangeDiff": "説明の変更差分",
 			"autoAssignSkippedLowConfidence": "担当者を確信を持って選べませんでした（信頼度{{confidence}}%）— タスクは未割り当てのままです",
 			"autoAssignSkipped": "自動割り当てをスキップしました — タスクは未割り当てのままです"
+		},
+		"searchableList": {
+			"searchPlaceholder": "検索…",
+			"noResults": "一致なし"
+		},
+		"commitment": {
+			"label": "コミットメント",
+			"inherited": "継承",
+			"inheritedHint": "最上位のチケットで設定されます。このチケットはそれを継承します。",
+			"searchPlaceholder": "コミットメントを検索…",
+			"open": "コミットメントを開く",
+			"remove": "コミットメントから外す",
+			"loading": "読み込み中…",
+			"empty": "オープンなコミットメントはありません",
+			"workTitle": "このコミットメントの作業",
+			"workEmpty": "このコミットメントにはまだチケットがありません。",
+			"workError": "関連する作業を読み込めませんでした。",
+			"hiddenProjects_one": "閲覧できない {{count}} 件のプロジェクトは表示されていません。",
+			"hiddenProjects_other": "閲覧できない {{count}} 件のプロジェクトは表示されていません。",
+			"groupThisProject": "このプロジェクト",
+			"groupOtherProjects": "その他のプロジェクト",
+			"projectLabel": "プロジェクト",
+			"projectHint": "このコミットメントの対象プロジェクト",
+			"projectSearchPlaceholder": "プロジェクトを検索…",
+			"projectClear": "プロジェクトをクリア",
+			"projectEmpty": "選択できるプロジェクトがありません",
+			"projectUnknown": "不明なプロジェクト"
 		}
 	},
 	"portForwardDetail": {
@@ -1755,6 +1843,7 @@
 			"error": "会話を削除できませんでした。もう一度お試しください。"
 		},
 		"filters": {
+			"searchAgents": "エージェントを検索…",
 			"title": "フィルター",
 			"agent": "エージェント",
 			"status": "ステータス",
@@ -2459,5 +2548,12 @@
 			"comment": "コメント:",
 			"fallback": "{{type}}:"
 		}
+	},
+	"workstream": {
+		"label": "ワークストリーム",
+		"hint": "このプロジェクトのコミットメントが既定で表示されるダッシュボード。コミットメント自身のワークストリーム欄が優先されます。",
+		"delivery": "デリバリー",
+		"platform": "PPE",
+		"internal": "内部"
 	}
 }

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	AlertTriangle,
+	Download,
 	LayoutList,
 	Plus,
 	Settings,
@@ -13,6 +14,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CustomFieldsSettings } from "@/components/projects/settings/CustomFieldsSettings";
 import { DangerZone } from "@/components/projects/settings/DangerZone";
+import { ExportSettings } from "@/components/projects/settings/ExportSettings";
 import { GeneralSettings } from "@/components/projects/settings/GeneralSettings";
 import { JevSettings } from "@/components/projects/settings/JevSettings";
 import { RolesSettings } from "@/components/projects/settings/RolesSettings";
@@ -77,6 +79,11 @@ const NAV_ITEMS = [
 		icon: Sparkles,
 	},
 	{
+		id: "export",
+		labelKey: "project.settingsPage.nav.export",
+		icon: Download,
+	},
+	{
 		id: "danger",
 		labelKey: "project.settingsPage.nav.dangerZone",
 		icon: AlertTriangle,
@@ -91,12 +98,11 @@ function SettingsPage() {
 	const { hasProjectPermission } = useProjectPermissions(projectId);
 
 	const canDelete =
-		hasPermission("projects.delete") || hasProjectPermission("projects.delete");
+		hasPermission("projects:delete") || hasProjectPermission("projects:delete");
 	const canEditProject =
-		hasPermission("projects.write") || hasProjectPermission("projects.write");
+		hasPermission("projects:write") || hasProjectPermission("projects:write");
 	const canManageRoles =
-		hasPermission("project.roles.write") ||
-		hasProjectPermission("project.roles.write");
+		hasPermission("roles:write") || hasProjectPermission("roles:write");
 	// Each schema area has its own write permission, independent of
 	// tasks.write (which only governs editing a task's own content) — see
 	// authz.PermissionProjectSettingsTaskTypesWrite's doc comment on the Go
@@ -105,27 +111,38 @@ function SettingsPage() {
 	// on all three even without the dedicated grant — the backend correctly
 	// rejected the request, but the button shouldn't have been shown at all.
 	const canManageTaskTypes =
-		hasPermission("project.settings.task_types.write") ||
-		hasProjectPermission("project.settings.task_types.write");
+		hasPermission("project.settings.task_types:write") ||
+		hasProjectPermission("project.settings.task_types:write");
 	const canManageTaskStatuses =
-		hasPermission("project.settings.task_statuses.write") ||
-		hasProjectPermission("project.settings.task_statuses.write");
+		hasPermission("project.settings.task_statuses:write") ||
+		hasProjectPermission("project.settings.task_statuses:write");
 	const canManageCustomFields =
-		hasPermission("project.settings.custom_fields.write") ||
-		hasProjectPermission("project.settings.custom_fields.write");
+		hasPermission("project.settings.custom_fields:write") ||
+		hasProjectPermission("project.settings.custom_fields:write");
+
+	// Exporting hands over the whole project in one file, so it has its own
+	// permission (project.export) rather than riding on tasks.read — see
+	// authz.PermissionProjectExport's doc comment on the Go side.
+	const canExport =
+		hasPermission("project:export") || hasProjectPermission("project:export");
+
+	const canReadRoles =
+		canManageRoles ||
+		hasPermission("roles:read") ||
+		hasProjectPermission("roles:read");
 
 	const { getRegistrations } = usePluginRegistry();
-	// A tab's own requiredPermission no longer hides it from this list —
-	// matching how the built-in tabs above (task-types, custom-fields, etc.)
-	// are always shown and instead render NoPermissionState internally when
-	// the viewer lacks the relevant permission. See the plugin-tab render
-	// branch below for the equivalent check.
+	// A plugin tab is only listed for members who hold its requiredPermission.
 	const pluginTabs = getRegistrations("project.settings.tab").filter(
-		(r) => !r.hidden,
+		(r) =>
+			!r.hidden &&
+			(!r.requiredPermission || hasProjectPermission(r.requiredPermission)),
 	);
 
 	const visibleNavItems = NAV_ITEMS.filter((i) => {
 		if (i.id === "danger") return canDelete;
+		if (i.id === "export") return canExport;
+		if (i.id === "roles") return canReadRoles;
 		return true;
 	});
 
@@ -136,6 +153,7 @@ function SettingsPage() {
 		| "task-types"
 		| "custom-fields"
 		| "jev"
+		| "export"
 		| "danger"
 		| string
 	>("general");
@@ -279,6 +297,9 @@ function SettingsPage() {
 						)}
 						{activeSection === "jev" && (
 							<JevSettings projectId={projectId} canEdit={canEditProject} />
+						)}
+						{activeSection === "export" && canExport && (
+							<ExportSettings projectId={projectId} canExport={canExport} />
 						)}
 						{activeSection === "danger" && canDelete && (
 							<DangerZone projectId={projectId} />

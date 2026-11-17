@@ -17,7 +17,7 @@ import {
 } from "@/lib/agent-api";
 import type { DocActivityContent, DocActivityType } from "@/lib/doc-api";
 import { sprintsQueryOptions } from "@/lib/interaction-api";
-import { projectMembersQueryOptions } from "@/lib/project-api";
+import { useMemberDirectory } from "@/lib/member-directory";
 import { timeAgo } from "@/lib/time-ago";
 import { describeDocActivity } from "../docs/doc-activity-pane";
 
@@ -118,19 +118,19 @@ export function AgentActivityTab({
 	const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
 		useInfiniteQuery(agentActivitiesQueryOptions(projectId, agentId, filters));
 
-	const { data: membersData } = useQuery(projectMembersQueryOptions(projectId));
+	const getMember = useMemberDirectory(projectId);
 	const { data: sprintsData } = useQuery(sprintsQueryOptions(projectId));
 	const names = useMemo<ActivityNameMaps>(() => {
-		const members: Record<string, string> = {};
-		for (const m of membersData ?? []) {
-			members[m.id] = m.full_name || m.username;
-		}
+		const members = (id: string) => {
+			const m = getMember(id);
+			return m ? m.full_name || m.username : undefined;
+		};
 		const sprints: Record<string, string> = {};
 		for (const s of sprintsData ?? []) {
 			sprints[s.id] = s.name;
 		}
 		return { members, sprints };
-	}, [membersData, sprintsData]);
+	}, [getMember, sprintsData]);
 
 	const items = data?.pages.flatMap((page) => page.items) ?? [];
 	const hasActiveFilters = Object.values(filters).some((v) =>

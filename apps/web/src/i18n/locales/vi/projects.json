@@ -12,7 +12,8 @@
 				"customFields": "Trường tùy chỉnh",
 				"jev": "Jev AI",
 				"dangerZone": "Khu vực nguy hiểm",
-				"plugins": "Plugin"
+				"plugins": "Plugin",
+				"export": "Xuất dữ liệu"
 			},
 			"pluginTab": {
 				"noPermission": {
@@ -101,7 +102,6 @@
 			"configure": "Cấu hình",
 			"delete": "Xóa",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This agent is restricted — ask a project admin to grant you access before you can chat with it.",
 			"acpStatusConnected": "Trực tuyến",
 			"acpStatusDisconnected": "Ngoại tuyến",
 			"deleteDialog": {
@@ -114,6 +114,7 @@
 			}
 		},
 		"page": {
+			"searchPlaceholder": "Tìm agent theo tên hoặc handle…",
 			"title": "AI Agent",
 			"subtitle": "Agent tự động xử lý nhiệm vụ và trò chuyện với đội nhóm của bạn",
 			"newAgent": "Agent mới",
@@ -172,7 +173,6 @@
 				"skills": "Skill",
 				"envVars": "Môi trường",
 				"globalRole": "Vai trò toàn cục",
-				"access": "Access",
 				"activity": "Hoạt động"
 			},
 			"globalRole": {
@@ -289,6 +289,11 @@
 					"urlLabel": "URL",
 					"cancel": "Hủy",
 					"addServer": "Thêm máy chủ"
+				},
+				"system": {
+					"title": "Máy chủ MCP hệ thống",
+					"description": "Do Paca cung cấp cho mọi agent. Không thể chỉnh sửa.",
+					"pacaDetail": "Công cụ tích hợp sẵn của Paca (dự án, tác vụ, tài liệu)"
 				}
 			},
 			"envVars": {
@@ -336,16 +341,11 @@
 					"nameReserved": "Tên đó được dành riêng cho scaffolding nội bộ của Paca. Hãy chọn một tên khác.",
 					"nameInvalid": "Tên skill không được là \".\", \"..\" hoặc chứa dấu gạch chéo.",
 					"addFailed": "Không thể thêm skill. Vui lòng thử lại."
+				},
+				"system": {
+					"title": "Kỹ năng hệ thống",
+					"description": "Được đóng gói cùng Paca và có sẵn cho mọi agent. Không thể chỉnh sửa."
 				}
-			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may chat with this agent. Everyone who can manage agents can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
 			},
 			"activity": {
 				"commented": "đã bình luận",
@@ -370,6 +370,9 @@
 					"dateTo": "Đến ngày",
 					"clearAll": "Xóa bộ lọc"
 				}
+			},
+			"system": {
+				"badge": "Hệ thống"
 			}
 		},
 		"conversationView": {
@@ -385,9 +388,8 @@
 			"connect": "Kết nối",
 			"conversationEnded": "Cuộc trò chuyện này đã kết thúc.",
 			"textOnlyMessage": "Chỉ hỗ trợ tin nhắn văn bản.",
-			"agentAccessRestricted": "Agent này bị giới hạn quyền truy cập. Hãy nhờ quản trị viên dự án cấp quyền truy cập trước khi bạn có thể trò chuyện với agent này.",
-			"environmentAccessRestricted": "Môi trường của cuộc trò chuyện này bị giới hạn quyền truy cập. Hãy nhờ quản trị viên dự án cấp quyền truy cập trước khi bạn có thể trò chuyện với agent này.",
 			"chatNoPermission": "Bạn không có quyền gửi tin nhắn trong cuộc trò chuyện này.",
+			"cliProviderNeedsEnvironment": "Tác tử này dùng nhà cung cấp CLI và cần một môi trường mặc định, nhưng hiện chưa có môi trường nào dùng được. Hãy nhờ quản trị viên dự án đặt môi trường mặc định cho tác tử.",
 			"failed": "Cuộc trò chuyện thất bại",
 			"noOutput": "Agent không tạo ra kết quả nào.",
 			"loadingOlder": "Đang tải…",
@@ -483,7 +485,6 @@
 			"subtitle": "Sandbox có tên, hoạt động lâu dài mà agent của bạn có thể gắn vào giữa các cuộc hội thoại",
 			"newEnvironment": "Môi trường mới",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This environment is restricted — ask a project admin to grant you access before you can use it.",
 			"empty": {
 				"title": "Chưa có môi trường nào",
 				"description": "Tạo một môi trường tĩnh để giữ tệp và tiến trình nền hoạt động xuyên suốt các cuộc hội thoại, thay vì tạo sandbox dùng một lần mỗi lần.",
@@ -526,8 +527,7 @@
 			"tabs": {
 				"overview": "Tổng quan",
 				"folders": "Thư mục",
-				"portForwards": "Chuyển tiếp cổng",
-				"access": "Access"
+				"portForwards": "Chuyển tiếp cổng"
 			},
 			"busy": "Environment này đang khởi động, dừng hoặc khởi động lại. Vui lòng thử lại sau giây lát.",
 			"actionFailed": "Thao tác không thành công. Vui lòng thử lại.",
@@ -643,15 +643,6 @@
 					"restartFailed": "Khởi động lại environment thất bại. Vui lòng thử lại."
 				}
 			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may browse, SSH into, forward ports on, or open a terminal in this environment. Everyone who can manage environments can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
-			},
 			"sshKeys": {
 				"connectHint": "Thay <bastion-host> bằng địa chỉ bastion SSH đã cấu hình trên triển khai này.",
 				"connectUnavailable": "Truy cập SSH chưa được cấu hình trên triển khai này.",
@@ -750,7 +741,6 @@
 			"deleteRole": "Xóa vai trò",
 			"errors": {
 				"notFound": "Vai trò này không còn tồn tại.",
-				"hasMembers": "Không thể xóa vai trò này vì vẫn còn được gán cho một hoặc nhiều thành viên.",
 				"forbidden": "Bạn không có quyền xóa vai trò này.",
 				"internalError": "Đã xảy ra lỗi. Vui lòng thử lại.",
 				"generic": "Đã xảy ra lỗi."
@@ -764,23 +754,18 @@
 			"roleNameLabel": "Tên vai trò",
 			"roleNamePlaceholder": "vd: PROJECT_REVIEWER",
 			"permissionsLabel": "Quyền hạn",
-			"fullAccessBadge": "Toàn quyền truy cập",
 			"fullAccessDescription": "Vai trò này tự động bao gồm mọi quyền, kể cả những quyền được thêm trong tương lai. Thay đổi bất kỳ công tắc nào bên dưới sẽ chuyển nó thành một tập quyền cố định theo hiện tại.",
 			"enabledCount_one": "{{count}} đã bật",
 			"enabledCount_other": "{{count}} đã bật",
 			"cancel": "Hủy",
 			"saveChanges": "Lưu thay đổi",
-			"createRole": "Tạo vai trò",
-			"errors": {
-				"nameTaken": "Đã tồn tại một vai trò với tên này.",
-				"nameInvalid": "Tên vai trò phải dùng chữ in hoa, số và dấu gạch dưới.",
-				"notFound": "Vai trò này không còn tồn tại. Có thể vai trò đã bị xóa.",
-				"forbidden": "Bạn không có quyền thực hiện thao tác này.",
-				"internalError": "Đã xảy ra lỗi trên máy chủ. Vui lòng thử lại.",
-				"generic": "Đã xảy ra lỗi."
-			}
+			"createRole": "Tạo vai trò"
 		},
 		"permissions": {
+			"projectsRead": {
+				"label": "Xem dự án",
+				"description": "Mở dự án và xem thông tin cơ bản"
+			},
 			"projectsWrite": {
 				"label": "Sửa dự án",
 				"description": "Cập nhật tên, mô tả và cài đặt dự án"
@@ -795,7 +780,7 @@
 			},
 			"membersWrite": {
 				"label": "Quản lý thành viên",
-				"description": "Thêm, xóa và gán lại thành viên dự án"
+				"description": "Thêm và xóa thành viên dự án (đổi vai trò của họ cần quyền Gán vai trò)"
 			},
 			"rolesRead": {
 				"label": "Xem vai trò",
@@ -804,6 +789,10 @@
 			"rolesWrite": {
 				"label": "Quản lý vai trò",
 				"description": "Tạo, sửa và xóa vai trò dự án"
+			},
+			"rolesAssign": {
+				"label": "Gán vai trò",
+				"description": "Gán cho thành viên và agent bất kỳ vai trò nào của dự án này, hoặc gỡ vai trò"
 			},
 			"settingsTaskTypesWrite": {
 				"label": "Manage Task Types",
@@ -900,6 +889,10 @@
 			"activitiesRead": {
 				"label": "Xem nhật ký hoạt động",
 				"description": "Xem mọi hoạt động được ghi lại trong dự án này"
+			},
+			"projectExport": {
+				"label": "Xuất dữ liệu dự án",
+				"description": "Xuất công việc (kèm bình luận và hoạt động) và tài liệu của dự án này"
 			}
 		},
 		"permissionGroups": {
@@ -939,9 +932,6 @@
 			"taskIdPrefixPlaceholder": "PROJ",
 			"descriptionLabel": "Mô tả",
 			"descriptionPlaceholder": "Mô tả dự án này nói về điều gì…",
-			"publicProjectLabel": "Dự án công khai",
-			"publicProjectHintPublic": "Bất kỳ ai có liên kết đều có thể xem dự án này. Người dùng ẩn danh chỉ có quyền xem.",
-			"publicProjectHintPrivate": "Chỉ thành viên đội nhóm mới có thể truy cập dự án này.",
 			"saveChanges": "Lưu thay đổi",
 			"saved": "Đã lưu ✓",
 			"noPermission": "Bạn không có quyền chỉnh sửa dự án này.",
@@ -956,7 +946,6 @@
 			"title": "Vai trò dự án",
 			"description": "Quản lý vai trò và quyền hạn cho thành viên của dự án này.",
 			"newRole": "Vai trò mới",
-			"noPermissionsAssigned": "Chưa gán quyền hạn nào",
 			"editRole": "Chỉnh sửa vai trò",
 			"deleteRole": "Xóa vai trò",
 			"rolesDefined_one": "vai trò đã định nghĩa",
@@ -969,14 +958,15 @@
 			},
 			"table": {
 				"name": "Tên",
-				"permissions": "Quyền hạn",
+				"description": "Mô tả",
 				"created": "Ngày tạo"
 			},
-			"systemRolesNote": "Vai trò hệ thống là mẫu dùng chung và không thể chỉnh sửa hoặc xóa.",
+			"systemRolesNote": "Vai trò dùng chung từ không gian làm việc chỉ có thể thay đổi trong cài đặt vai trò của không gian làm việc.",
 			"noPermission": {
 				"title": "You don't have permission to view roles",
 				"description": "Ask a project admin to grant you the project.roles.read permission."
-			}
+			},
+			"noDescription": "Không có mô tả"
 		},
 		"taskStatuses": {
 			"title": "Trạng thái nhiệm vụ",
@@ -1172,6 +1162,41 @@
 				"cancel": "Hủy",
 				"deletePermanently": "Xóa vĩnh viễn"
 			}
+		},
+		"export": {
+			"title": "Xuất dữ liệu",
+			"description": "Tải xuống dữ liệu dự án của bạn. Bản xuất được tạo ở chế độ nền và lưu giữ trong 7 ngày.",
+			"recent": {
+				"title": "Các bản xuất gần đây",
+				"empty": "Chưa có bản xuất nào."
+			},
+			"status": {
+				"pending": "Đang chờ",
+				"processing": "Đang tạo…",
+				"completed": "Sẵn sàng",
+				"failed": "Thất bại",
+				"expired": "Đã hết hạn"
+			},
+			"rows": "Công việc: {{count}}",
+			"availableUntil": "Có thể tải đến {{date}}",
+			"download": "Tải xuống",
+			"failedMessage": "Không thể tạo bản xuất. Vui lòng thử lại.",
+			"errors": {
+				"inProgress": "Dự án này đang có một bản xuất được xử lý.",
+				"requestFailed": "Không thể bắt đầu xuất dữ liệu. Vui lòng thử lại.",
+				"downloadFailed": "Không thể tải xuống bản xuất. Vui lòng thử lại.",
+				"expired": "Bản xuất này đã hết hạn. Hãy yêu cầu bản mới."
+			},
+			"noPermission": {
+				"title": "Bạn không có quyền xuất dữ liệu dự án này",
+				"description": "Hãy nhờ chủ sở hữu hoặc quản trị viên dự án cấp cho bạn quyền xuất dữ liệu."
+			},
+			"archive": {
+				"title": "Dữ liệu dự án (ZIP)",
+				"description": "Tất cả công việc dạng CSV, kèm bình luận và hoạt động trong các tệp CSV riêng, cùng tài liệu dưới dạng tệp Markdown.",
+				"button": "Xuất dự án",
+				"inProgress": "Đang xuất…"
+			}
 		}
 	},
 	"taskStatuses": {
@@ -1226,29 +1251,43 @@
 			"noUsersAvailable": "Không có người dùng nào để thêm.",
 			"loadingMore": "Đang tải…",
 			"roleLabel": "Vai trò",
-			"rolePlaceholder": "Chọn một vai trò…",
 			"cancel": "Hủy",
 			"addMember": "Thêm thành viên",
 			"errors": {
 				"addFailed": "Thêm thành viên thất bại. Vui lòng thử lại.",
 				"alreadyAdded": "Người dùng hoặc agent này đã là thành viên của dự án.",
+				"roleForbidden": "Bạn không có quyền gán một trong các vai trò này.",
 				"roleNotFound": "Vai trò đó không còn tồn tại. Vui lòng chọn vai trò khác."
 			},
 			"modeUser": "Người dùng",
 			"modeAgent": "Agent AI",
 			"agentLabel": "Agent",
-			"noAgentsAvailable": "Không có agent toàn cục nào để mời."
+			"noAgentsAvailable": "Không có agent toàn cục nào để mời.",
+			"modeServiceAccount": "Tài khoản dịch vụ",
+			"serviceAccountLabel": "Tài khoản dịch vụ",
+			"noServiceAccountsAvailable": "Không có tài khoản dịch vụ nào để thêm.",
+			"searchAgentsPlaceholder": "Tìm theo tên hoặc handle…",
+			"noAgentsMatch": "Không có agent nào khớp với tìm kiếm.",
+			"searchServiceAccountsPlaceholder": "Tìm theo tên hoặc mô tả…",
+			"noServiceAccountsMatch": "Không có tài khoản dịch vụ nào khớp với tìm kiếm."
 		},
 		"roleChip": {
 			"changeRole": "Đổi vai trò",
+			"dialogDescription": "Chọn vai trò cho {{name}}. Thành viên luôn giữ ít nhất một vai trò.",
+			"assign": "Gán vai trò",
+			"assigning": "Đang gán…",
 			"errors": {
 				"memberNotFound": "Thành viên này không còn thuộc dự án nữa.",
+				"roleForbidden": "Bạn không có quyền gán hoặc gỡ một trong các vai trò này.",
 				"roleNotFound": "Vai trò đó không còn tồn tại.",
 				"changeFailed": "Đổi vai trò thất bại."
 			}
 		},
 		"memberRow": {
-			"removeMember": "Xóa thành viên"
+			"removeMember": "Xóa thành viên",
+			"agentBadge": "Tác nhân",
+			"actions": "Thao tác với thành viên",
+			"serviceAccountBadge": "Tài khoản dịch vụ"
 		},
 		"removeDialog": {
 			"title": "Xóa thành viên",
@@ -1270,6 +1309,19 @@
 			"placeholder": "Người này làm công việc gì?",
 			"save": "Lưu",
 			"saveFailed": "Không thể lưu mô tả."
+		},
+		"filters": {
+			"searchPlaceholder": "Tìm theo tên hoặc tên người dùng…",
+			"searchLabel": "Tìm thành viên",
+			"roleLabel": "Lọc theo vai trò",
+			"allRoles": "Tất cả",
+			"clearSearch": "Xóa tìm kiếm",
+			"showingOf": "Hiển thị {{shown}} / {{total}}"
+		},
+		"noMatch": {
+			"title": "Không có thành viên phù hợp",
+			"description": "Hãy thử từ khóa hoặc bộ lọc vai trò khác.",
+			"clear": "Xóa bộ lọc"
 		}
 	},
 	"aiChat": {
@@ -1290,6 +1342,7 @@
 			"deleteFailed": "Xóa loại nhiệm vụ thất bại. Vui lòng thử lại.",
 			"isDefault": "Không thể xóa loại mặc định. Hãy đặt một loại khác làm mặc định trước.",
 			"isSystem": "Không thể xóa loại hệ thống.",
+			"commitmentsProjectOnly": "Không thể xóa loại cam kết: dự án này chỉ chứa cam kết.",
 			"cancel": "Hủy",
 			"deleteType": "Xóa loại"
 		},
@@ -1314,7 +1367,8 @@
 				"nameInvalid": "Tên loại trống hoặc không hợp lệ.",
 				"nameReserved": "Tên đó được dành riêng cho một loại tích hợp sẵn.",
 				"saveFailed": "Lưu loại nhiệm vụ thất bại. Vui lòng thử lại.",
-				"isSystem": "Không thể chỉnh sửa loại hệ thống."
+				"isSystem": "Không thể chỉnh sửa loại hệ thống.",
+				"commitmentsProjectOnly": "Dự án này chỉ chứa cam kết: không thể thêm loại nhiệm vụ khác hoặc đổi tên loại cam kết."
 			}
 		}
 	},
@@ -1370,12 +1424,18 @@
 			"viewParent": "Xem nhiệm vụ cha",
 			"removeParent": "Gỡ nhiệm vụ cha",
 			"addFields": "Thêm trường",
-			"autoAssign": "Tự động"
+			"autoAssign": "Tự động",
+			"sprintGroup": {
+				"active": "Đang hoạt động",
+				"planned": "Sắp tới",
+				"completed": "Đã hoàn thành"
+			}
 		},
 		"description": {
 			"title": "Mô tả",
 			"writeWithAI": "Viết bằng AI",
 			"writeWithAIDialog": {
+				"searchAgents": "Tìm agent…",
 				"title": "Viết bằng AI",
 				"description": "Chọn một agent để viết mô tả nhiệm vụ.",
 				"noAgents": "Chưa có agent nào được cấu hình cho dự án này.",
@@ -1453,6 +1513,7 @@
 			"searchPlaceholder": "Tìm nhiệm vụ theo tiêu đề hoặc số...",
 			"loadingTasks": "Đang tải nhiệm vụ…",
 			"noTasksFound": "Không tìm thấy nhiệm vụ nào",
+			"loadError": "Không thể tải công việc. Vui lòng thử lại.",
 			"linkTypes": {
 				"blocks": {
 					"label": "Chặn",
@@ -1554,6 +1615,32 @@
 			"descriptionChangeDiff": "Thay đổi mô tả",
 			"autoAssignSkippedLowConfidence": "không thể tự tin chọn người được giao ({{confidence}}% độ tin cậy) — nhiệm vụ vẫn chưa được giao",
 			"autoAssignSkipped": "đã bỏ qua tự động giao việc — nhiệm vụ vẫn chưa được giao"
+		},
+		"searchableList": {
+			"searchPlaceholder": "Tìm kiếm…",
+			"noResults": "Không có kết quả"
+		},
+		"commitment": {
+			"label": "Cam kết",
+			"inherited": "kế thừa",
+			"inheritedHint": "Được đặt ở ticket cấp cao nhất; ticket này kế thừa.",
+			"searchPlaceholder": "Tìm cam kết…",
+			"open": "Mở cam kết",
+			"remove": "Gỡ khỏi cam kết",
+			"loading": "Đang tải…",
+			"empty": "Không có cam kết đang mở",
+			"workTitle": "Công việc trong cam kết này",
+			"workEmpty": "Chưa có ticket nào thuộc cam kết này.",
+			"workError": "Không thể tải công việc liên quan.",
+			"hiddenProjects_other": "{{count}} dự án bạn không thể xem không được hiển thị.",
+			"groupThisProject": "Dự án này",
+			"groupOtherProjects": "Dự án khác",
+			"projectLabel": "Dự án",
+			"projectHint": "Cam kết này dành cho dự án nào",
+			"projectSearchPlaceholder": "Tìm dự án…",
+			"projectClear": "Bỏ chọn dự án",
+			"projectEmpty": "Không có dự án nào để chọn",
+			"projectUnknown": "Dự án không xác định"
 		}
 	},
 	"portForwardDetail": {
@@ -1755,6 +1842,7 @@
 			"error": "Không thể xóa cuộc trò chuyện. Vui lòng thử lại."
 		},
 		"filters": {
+			"searchAgents": "Tìm agent…",
 			"title": "Bộ lọc",
 			"agent": "Tác nhân",
 			"status": "Trạng thái",
@@ -2459,5 +2547,12 @@
 			"comment": "đã bình luận về",
 			"fallback": "đã thực hiện {{type}} trên"
 		}
+	},
+	"workstream": {
+		"label": "Mảng công việc",
+		"hint": "Bảng điều khiển mặc định cho các cam kết của dự án này. Trường Mảng công việc của chính cam kết sẽ được ưu tiên.",
+		"delivery": "Delivery",
+		"platform": "PPE",
+		"internal": "Internal"
 	}
 }

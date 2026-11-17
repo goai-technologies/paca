@@ -12,7 +12,8 @@
 				"customFields": "Champs personnalisés",
 				"jev": "Jev IA",
 				"dangerZone": "Zone de danger",
-				"plugins": "Plugins"
+				"plugins": "Plugins",
+				"export": "Exporter"
 			},
 			"pluginTab": {
 				"noPermission": {
@@ -101,7 +102,6 @@
 			"configure": "Configurer",
 			"delete": "Supprimer",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This agent is restricted — ask a project admin to grant you access before you can chat with it.",
 			"acpStatusConnected": "En ligne",
 			"acpStatusDisconnected": "Hors ligne",
 			"deleteDialog": {
@@ -114,6 +114,7 @@
 			}
 		},
 		"page": {
+			"searchPlaceholder": "Rechercher des agents par nom ou identifiant…",
 			"title": "Agents IA",
 			"subtitle": "Agents autonomes qui travaillent sur des tâches et discutent avec votre équipe",
 			"newAgent": "Nouvel agent",
@@ -172,7 +173,6 @@
 				"skills": "Compétences",
 				"envVars": "Environnement",
 				"globalRole": "Rôle global",
-				"access": "Access",
 				"activity": "Activité"
 			},
 			"globalRole": {
@@ -289,6 +289,11 @@
 					"urlLabel": "URL",
 					"cancel": "Annuler",
 					"addServer": "Ajouter le serveur"
+				},
+				"system": {
+					"title": "Serveurs MCP système",
+					"description": "Fournis par Paca à tous les agents. Ils ne peuvent pas être modifiés.",
+					"pacaDetail": "Outils Paca intégrés (projets, tâches, documents)"
 				}
 			},
 			"envVars": {
@@ -336,16 +341,11 @@
 					"nameReserved": "Ce nom est réservé à l'échafaudage interne de Paca. Choisissez-en un autre.",
 					"nameInvalid": "Le nom de la compétence ne peut pas être « . », « .. » ni contenir de barre oblique.",
 					"addFailed": "Échec de l'ajout de la compétence. Veuillez réessayer."
+				},
+				"system": {
+					"title": "Compétences système",
+					"description": "Fournies avec Paca et disponibles pour tous les agents. Elles ne peuvent pas être modifiées."
 				}
-			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may chat with this agent. Everyone who can manage agents can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
 			},
 			"activity": {
 				"commented": "a commenté",
@@ -370,6 +370,9 @@
 					"dateTo": "Au",
 					"clearAll": "Effacer les filtres"
 				}
+			},
+			"system": {
+				"badge": "Système"
 			}
 		},
 		"conversationView": {
@@ -385,9 +388,8 @@
 			"connect": "Se connecter",
 			"conversationEnded": "Cette conversation est terminée.",
 			"textOnlyMessage": "Seuls les messages texte sont pris en charge.",
-			"agentAccessRestricted": "Cet agent est à accès restreint. Demandez à un administrateur du projet de vous accorder l'accès avant de pouvoir discuter avec lui.",
-			"environmentAccessRestricted": "L'environnement de cette conversation est à accès restreint. Demandez à un administrateur du projet de vous accorder l'accès avant de pouvoir discuter avec cet agent.",
 			"chatNoPermission": "Vous n'avez pas la permission d'envoyer des messages dans cette conversation.",
+			"cliProviderNeedsEnvironment": "Cet agent utilise un fournisseur CLI et a besoin d'un environnement par défaut, mais il n'en a pas d'utilisable. Demandez à un administrateur du projet de définir un environnement par défaut pour l'agent.",
 			"failed": "La conversation a échoué",
 			"noOutput": "L'agent n'a produit aucun résultat.",
 			"loadingOlder": "Chargement…",
@@ -483,7 +485,6 @@
 			"subtitle": "Sandboxes nommés et persistants auxquels vos agents peuvent se rattacher d'une conversation à l'autre",
 			"newEnvironment": "Nouvel environnement",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This environment is restricted — ask a project admin to grant you access before you can use it.",
 			"empty": {
 				"title": "Aucun environnement pour le moment",
 				"description": "Créez un environnement statique pour conserver fichiers et processus en arrière-plan d'une conversation à l'autre, au lieu d'un sandbox jetable à chaque fois.",
@@ -526,8 +527,7 @@
 			"tabs": {
 				"overview": "Aperçu",
 				"folders": "Dossiers",
-				"portForwards": "Transferts de ports",
-				"access": "Access"
+				"portForwards": "Transferts de ports"
 			},
 			"busy": "Cet environnement est déjà en train de démarrer, de s'arrêter ou de redémarrer. Réessayez dans un instant.",
 			"actionFailed": "Cette action a échoué. Veuillez réessayer.",
@@ -643,15 +643,6 @@
 					"restartFailed": "Échec du redémarrage de l'environnement. Veuillez réessayer."
 				}
 			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may browse, SSH into, forward ports on, or open a terminal in this environment. Everyone who can manage environments can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
-			},
 			"sshKeys": {
 				"connectHint": "Remplacez <bastion-host> par l'adresse du bastion SSH configuré sur ce déploiement.",
 				"connectUnavailable": "L'accès SSH n'est pas encore configuré sur ce déploiement.",
@@ -750,7 +741,6 @@
 			"deleteRole": "Supprimer le rôle",
 			"errors": {
 				"notFound": "Ce rôle n'existe plus.",
-				"hasMembers": "Ce rôle ne peut pas être supprimé car il est encore attribué à un ou plusieurs membres.",
 				"forbidden": "Vous n'avez pas la permission de supprimer ce rôle.",
 				"internalError": "Une erreur s'est produite. Veuillez réessayer.",
 				"generic": "Une erreur s'est produite."
@@ -764,23 +754,18 @@
 			"roleNameLabel": "Nom du rôle",
 			"roleNamePlaceholder": "ex. PROJECT_REVIEWER",
 			"permissionsLabel": "Permissions",
-			"fullAccessBadge": "Accès complet",
 			"fullAccessDescription": "Ce rôle inclut automatiquement toutes les permissions, y compris celles ajoutées ultérieurement. Modifier un interrupteur ci-dessous le convertira en un ensemble fixe correspondant aux permissions actuelles.",
 			"enabledCount_one": "{{count}} activée",
 			"enabledCount_other": "{{count}} activées",
 			"cancel": "Annuler",
 			"saveChanges": "Enregistrer les modifications",
-			"createRole": "Créer le rôle",
-			"errors": {
-				"nameTaken": "Un rôle portant ce nom existe déjà.",
-				"nameInvalid": "Le nom du rôle doit utiliser des lettres majuscules, des chiffres et des underscores.",
-				"notFound": "Ce rôle n'existe plus. Il a peut-être déjà été supprimé.",
-				"forbidden": "Vous n'avez pas la permission d'effectuer cette action.",
-				"internalError": "Une erreur s'est produite sur le serveur. Veuillez réessayer.",
-				"generic": "Une erreur s'est produite."
-			}
+			"createRole": "Créer le rôle"
 		},
 		"permissions": {
+			"projectsRead": {
+				"label": "Voir le projet",
+				"description": "Ouvrir le projet et voir ses informations de base"
+			},
 			"projectsWrite": {
 				"label": "Modifier le projet",
 				"description": "Mettre à jour le nom, la description et les paramètres du projet"
@@ -795,7 +780,7 @@
 			},
 			"membersWrite": {
 				"label": "Gérer les membres",
-				"description": "Ajouter, supprimer et réattribuer les membres du projet"
+				"description": "Ajouter et retirer des membres du projet (modifier leurs rôles nécessite Attribuer des rôles)"
 			},
 			"rolesRead": {
 				"label": "Voir les rôles",
@@ -804,6 +789,10 @@
 			"rolesWrite": {
 				"label": "Gérer les rôles",
 				"description": "Créer, modifier et supprimer les rôles du projet"
+			},
+			"rolesAssign": {
+				"label": "Attribuer des rôles",
+				"description": "Donner aux membres et aux agents n'importe quel rôle de ce projet, ou le leur retirer"
 			},
 			"settingsTaskTypesWrite": {
 				"label": "Manage Task Types",
@@ -900,6 +889,10 @@
 			"activitiesRead": {
 				"label": "Voir le journal d'activité",
 				"description": "Voir toute l'activité enregistrée dans ce projet"
+			},
+			"projectExport": {
+				"label": "Exporter les données du projet",
+				"description": "Exporter les tâches (avec commentaires et activités) et la documentation de ce projet"
 			}
 		},
 		"permissionGroups": {
@@ -939,9 +932,6 @@
 			"taskIdPrefixPlaceholder": "PROJ",
 			"descriptionLabel": "Description",
 			"descriptionPlaceholder": "Décrivez de quoi parle ce projet…",
-			"publicProjectLabel": "Projet public",
-			"publicProjectHintPublic": "Toute personne disposant du lien peut consulter ce projet. Les utilisateurs anonymes ont un accès en lecture seule.",
-			"publicProjectHintPrivate": "Seuls les membres de l'équipe peuvent accéder à ce projet.",
 			"saveChanges": "Enregistrer les modifications",
 			"saved": "Enregistré ✓",
 			"noPermission": "Vous n'avez pas la permission de modifier ce projet.",
@@ -956,7 +946,6 @@
 			"title": "Rôles du projet",
 			"description": "Gérez les rôles et permissions des membres de ce projet.",
 			"newRole": "Nouveau rôle",
-			"noPermissionsAssigned": "Aucune permission attribuée",
 			"editRole": "Modifier le rôle",
 			"deleteRole": "Supprimer le rôle",
 			"rolesDefined_one": "rôle défini",
@@ -969,14 +958,15 @@
 			},
 			"table": {
 				"name": "Nom",
-				"permissions": "Permissions",
+				"description": "Description",
 				"created": "Créé"
 			},
-			"systemRolesNote": "Les rôles système sont des modèles partagés et ne peuvent pas être modifiés ou supprimés.",
+			"systemRolesNote": "Les rôles partagés de l'espace de travail ne peuvent être modifiés que dans les paramètres de rôles de l'espace de travail.",
 			"noPermission": {
 				"title": "You don't have permission to view roles",
 				"description": "Ask a project admin to grant you the project.roles.read permission."
-			}
+			},
+			"noDescription": "Aucune description"
 		},
 		"taskStatuses": {
 			"title": "Statuts de tâche",
@@ -1172,6 +1162,41 @@
 				"cancel": "Annuler",
 				"deletePermanently": "Supprimer définitivement"
 			}
+		},
+		"export": {
+			"title": "Exporter",
+			"description": "Téléchargez les données de votre projet. Les exports sont générés en arrière-plan et conservés 7 jours.",
+			"recent": {
+				"title": "Exports récents",
+				"empty": "Aucun export pour le moment."
+			},
+			"status": {
+				"pending": "En attente",
+				"processing": "Génération…",
+				"completed": "Prêt",
+				"failed": "Échec",
+				"expired": "Expiré"
+			},
+			"rows": "Tâches : {{count}}",
+			"availableUntil": "Disponible jusqu'au {{date}}",
+			"download": "Télécharger",
+			"failedMessage": "L'export n'a pas pu être généré. Veuillez réessayer.",
+			"errors": {
+				"inProgress": "Un export est déjà en cours pour ce projet.",
+				"requestFailed": "Impossible de lancer l'export. Veuillez réessayer.",
+				"downloadFailed": "Impossible de télécharger l'export. Veuillez réessayer.",
+				"expired": "Cet export a expiré. Demandez-en un nouveau."
+			},
+			"noPermission": {
+				"title": "Vous n'avez pas la permission d'exporter ce projet",
+				"description": "Demandez à un propriétaire ou administrateur du projet de vous accorder la permission d'export."
+			},
+			"archive": {
+				"title": "Données du projet (ZIP)",
+				"description": "Toutes les tâches en CSV, avec leurs commentaires et activités dans des fichiers CSV séparés, ainsi que la documentation en fichiers Markdown.",
+				"button": "Exporter le projet",
+				"inProgress": "Export en cours…"
+			}
 		}
 	},
 	"taskStatuses": {
@@ -1226,29 +1251,43 @@
 			"noUsersAvailable": "Aucun utilisateur disponible à ajouter.",
 			"loadingMore": "Chargement…",
 			"roleLabel": "Rôle",
-			"rolePlaceholder": "Sélectionner un rôle…",
 			"cancel": "Annuler",
 			"addMember": "Ajouter le membre",
 			"errors": {
 				"addFailed": "Échec de l'ajout du membre. Veuillez réessayer.",
 				"alreadyAdded": "Cet utilisateur ou agent est déjà membre du projet.",
+				"roleForbidden": "Vous n'avez pas l'autorisation d'attribuer l'un de ces rôles.",
 				"roleNotFound": "Ce rôle n'existe plus. Veuillez choisir un autre rôle."
 			},
 			"modeUser": "Utilisateur",
 			"modeAgent": "Agent IA",
 			"agentLabel": "Agent",
-			"noAgentsAvailable": "Aucun agent global disponible à inviter."
+			"noAgentsAvailable": "Aucun agent global disponible à inviter.",
+			"modeServiceAccount": "Compte de service",
+			"serviceAccountLabel": "Compte de service",
+			"noServiceAccountsAvailable": "Aucun compte de service à ajouter.",
+			"searchAgentsPlaceholder": "Rechercher par nom ou identifiant…",
+			"noAgentsMatch": "Aucun agent ne correspond à votre recherche.",
+			"searchServiceAccountsPlaceholder": "Rechercher par nom ou description…",
+			"noServiceAccountsMatch": "Aucun compte de service ne correspond à votre recherche."
 		},
 		"roleChip": {
 			"changeRole": "Changer de rôle",
+			"dialogDescription": "Choisissez les rôles de {{name}}. Un membre conserve au moins un rôle.",
+			"assign": "Attribuer le rôle",
+			"assigning": "Attribution…",
 			"errors": {
 				"memberNotFound": "Ce membre ne fait plus partie du projet.",
+				"roleForbidden": "Vous n'avez pas l'autorisation d'attribuer ou de retirer l'un de ces rôles.",
 				"roleNotFound": "Ce rôle n'existe plus.",
 				"changeFailed": "Échec du changement de rôle."
 			}
 		},
 		"memberRow": {
-			"removeMember": "Retirer le membre"
+			"removeMember": "Retirer le membre",
+			"agentBadge": "Agent",
+			"actions": "Actions du membre",
+			"serviceAccountBadge": "Compte de service"
 		},
 		"removeDialog": {
 			"title": "Retirer le membre",
@@ -1270,6 +1309,19 @@
 			"placeholder": "Sur quoi travaille cette personne ?",
 			"save": "Enregistrer",
 			"saveFailed": "Échec de l'enregistrement de la description."
+		},
+		"filters": {
+			"searchPlaceholder": "Rechercher par nom ou identifiant…",
+			"searchLabel": "Rechercher des membres",
+			"roleLabel": "Filtrer par rôle",
+			"allRoles": "Tous",
+			"clearSearch": "Effacer la recherche",
+			"showingOf": "{{shown}} sur {{total}} affichés"
+		},
+		"noMatch": {
+			"title": "Aucun membre ne correspond",
+			"description": "Essayez une autre recherche ou un autre filtre de rôle.",
+			"clear": "Effacer les filtres"
 		}
 	},
 	"aiChat": {
@@ -1290,6 +1342,7 @@
 			"deleteFailed": "Échec de la suppression du type de tâche. Veuillez réessayer.",
 			"isDefault": "Le type par défaut ne peut pas être supprimé. Définissez d'abord un autre type par défaut.",
 			"isSystem": "Les types système ne peuvent pas être supprimés.",
+			"commitmentsProjectOnly": "Le type d'engagement ne peut pas être supprimé : ce projet ne contient que des engagements.",
 			"cancel": "Annuler",
 			"deleteType": "Supprimer le type"
 		},
@@ -1314,7 +1367,8 @@
 				"nameInvalid": "Le nom du type est vide ou invalide.",
 				"nameReserved": "Ce nom est réservé à un type intégré.",
 				"saveFailed": "Échec de l'enregistrement du type de tâche. Veuillez réessayer.",
-				"isSystem": "Les types système ne peuvent pas être modifiés."
+				"isSystem": "Les types système ne peuvent pas être modifiés.",
+				"commitmentsProjectOnly": "Ce projet ne contient que des engagements : impossible d'y ajouter d'autres types de tâche ou de renommer le type d'engagement."
 			}
 		}
 	},
@@ -1370,12 +1424,18 @@
 			"viewParent": "Voir le parent",
 			"removeParent": "Retirer le parent",
 			"addFields": "Ajouter des champs",
-			"autoAssign": "Automatique"
+			"autoAssign": "Automatique",
+			"sprintGroup": {
+				"active": "Actifs",
+				"planned": "À venir",
+				"completed": "Terminés"
+			}
 		},
 		"description": {
 			"title": "Description",
 			"writeWithAI": "Rédiger avec l'IA",
 			"writeWithAIDialog": {
+				"searchAgents": "Rechercher des agents…",
 				"title": "Rédiger avec l'IA",
 				"description": "Sélectionnez un agent pour rédiger la description de la tâche.",
 				"noAgents": "Aucun agent configuré pour ce projet.",
@@ -1453,6 +1513,7 @@
 			"searchPlaceholder": "Rechercher des tâches par titre ou numéro...",
 			"loadingTasks": "Chargement des tâches…",
 			"noTasksFound": "Aucune tâche trouvée",
+			"loadError": "Impossible de charger les tâches. Veuillez réessayer.",
 			"linkTypes": {
 				"blocks": {
 					"label": "Bloque",
@@ -1554,6 +1615,33 @@
 			"descriptionChangeDiff": "Différences des modifications de la description",
 			"autoAssignSkippedLowConfidence": "n'a pas pu choisir un responsable avec certitude ({{confidence}} % de confiance) — la tâche reste non assignée",
 			"autoAssignSkipped": "a ignoré l'attribution automatique — la tâche reste non assignée"
+		},
+		"searchableList": {
+			"searchPlaceholder": "Rechercher…",
+			"noResults": "Aucun résultat"
+		},
+		"commitment": {
+			"label": "Engagement",
+			"inherited": "hérité",
+			"inheritedHint": "Défini sur le ticket de premier niveau ; ce ticket en hérite.",
+			"searchPlaceholder": "Rechercher des engagements…",
+			"open": "Ouvrir l'engagement",
+			"remove": "Retirer de l'engagement",
+			"loading": "Chargement…",
+			"empty": "Aucun engagement ouvert",
+			"workTitle": "Travail dans cet engagement",
+			"workEmpty": "Aucun ticket n'est encore rattaché à cet engagement.",
+			"workError": "Impossible de charger le travail rattaché.",
+			"hiddenProjects_one": "{{count}} projet que vous ne pouvez pas voir n'est pas affiché.",
+			"hiddenProjects_other": "{{count}} projets que vous ne pouvez pas voir ne sont pas affichés.",
+			"groupThisProject": "Ce projet",
+			"groupOtherProjects": "Autres projets",
+			"projectLabel": "Projet",
+			"projectHint": "Le projet auquel cet engagement est destiné",
+			"projectSearchPlaceholder": "Rechercher des projets…",
+			"projectClear": "Retirer le projet",
+			"projectEmpty": "Aucun projet à choisir",
+			"projectUnknown": "Projet inconnu"
 		}
 	},
 	"portForwardDetail": {
@@ -1755,6 +1843,7 @@
 			"error": "Impossible de supprimer la conversation. Veuillez réessayer."
 		},
 		"filters": {
+			"searchAgents": "Rechercher des agents…",
 			"title": "Filtres",
 			"agent": "Agent",
 			"status": "Statut",
@@ -2459,5 +2548,12 @@
 			"comment": "a commenté",
 			"fallback": "a effectué {{type}} sur"
 		}
+	},
+	"workstream": {
+		"label": "Filière",
+		"hint": "Le tableau de bord par défaut des engagements de ce projet. Le champ Filière de l'engagement lui-même a priorité.",
+		"delivery": "Livraison",
+		"platform": "PPE",
+		"internal": "Interne"
 	}
 }

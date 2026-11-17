@@ -1,4 +1,5 @@
 import {
+	keepPreviousData,
 	useInfiniteQuery,
 	useMutation,
 	useQuery,
@@ -8,21 +9,28 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
 	Bot,
 	Check,
-	ChevronDown,
+	KeyRound,
 	Loader2,
 	MoreHorizontal,
 	PenLine,
 	Plus,
 	Search,
-	Shield,
 	Trash2,
 	UserRound,
 	Users,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { RoleOptionList } from "@/components/admin/global-roles/role-option-list";
+import { projectPermissionBadgeClass } from "@/components/projects/roles/utils";
+import { MembersFilters } from "@/components/projects/team/MembersFilters";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
+import { HighlightMatch } from "@/components/shared/highlight-match";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { enrichRoles, RoleBadgeList } from "@/components/shared/role-badge";
+import { RoleChangeDialog } from "@/components/shared/role-change-dialog";
+import { RoleChangeTrigger } from "@/components/shared/role-change-trigger";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -44,39 +52,50 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { useCanAssignProjectRole } from "@/hooks/use-can-assign-project-role";
+import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
+import { useExistingMemberIds } from "@/hooks/use-existing-member-ids";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { type User, usersInfiniteQueryOptions } from "@/lib/admin-api";
-import { type Agent, chattableAgentsQueryOptions } from "@/lib/agent-api";
+import {
+	type Agent,
+	chattableAgentsInfiniteQueryOptions,
+} from "@/lib/agent-api";
 import {
 	ApiErrorCode,
 	getApiErrorCode,
 	isForbiddenError,
 } from "@/lib/api-error";
+import { invalidateMemberDirectory } from "@/lib/member-directory";
 import {
 	addProjectMember,
 	type ProjectMember,
-	type ProjectRole,
-	projectMembersQueryOptions,
+	projectMembersInfiniteQueryOptions,
+	projectMembersKey,
+	projectMemberTotalQueryOptions,
 	projectQueryOptions,
-	projectRolesQueryOptions,
 	removeProjectMember,
 	updateProjectMemberRole,
 } from "@/lib/project-api";
 import {
-	resolveAgentAvatarUrl,
-	resolveMemberAvatarUrl,
+	agentAvatar,
+	memberAvatar,
+	serviceAccountAvatar,
+	userAvatar,
 } from "@/lib/provider-logos";
+import {
+	projectRolesQueryOptions,
+	type Role,
+	replaceMemberRoles,
+} from "@/lib/role-api";
 import { createLoadMoreScrollHandler } from "@/lib/scroll-pagination";
+import {
+	type ServiceAccount,
+	serviceAccountsInfiniteQueryOptions,
+} from "@/lib/service-account-api";
 
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/team/",
@@ -95,15 +114,12 @@ export const Route = createFileRoute(
 	component: TeamPage,
 });
 
-function getInitials(name: string): string {
-	return name
-		.split(" ")
-		.filter(Boolean)
-		.map((n) => n[0])
-		.join("")
-		.toUpperCase()
-		.slice(0, 2);
+/** The roles a member holds, as one label. */
+function memberRoleNames(member: ProjectMember): string {
+	return member.roles.map((r) => r.name).join(", ");
 }
+
+const MIN_VISIBLE_USER_ROWS = 5;
 
 // ── Add Member Dialog ──────────────────────────────────────────────────────────
 
@@ -123,14 +139,7 @@ function UserPickerItem({
 			className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent ${selected ? "bg-accent" : ""}`}
 			onClick={() => onSelect(user)}
 		>
-			<Avatar className="size-7 shrink-0">
-				{user.avatar_thumb_url ? (
-					<AvatarImage src={user.avatar_thumb_url} />
-				) : null}
-				<AvatarFallback className="text-xs bg-primary/10 text-primary font-semibold">
-					{getInitials(display)}
-				</AvatarFallback>
-			</Avatar>
+			<EntityAvatar {...userAvatar(user)} size="md" />
 			<div className="min-w-0 flex-1">
 				<span className="font-medium truncate block">{display}</span>
 				{user.full_name && (
@@ -144,52 +153,145 @@ function UserPickerItem({
 	);
 }
 
+function PickerSearch({
+	value,
+	onChange,
+	placeholder,
+}: {
+	value: string;
+	onChange: (value: string) => void;
+	placeholder: string;
+}) {
+	const ref = useRef<HTMLInputElement>(null);
+	useEffect(() => ref.current?.focus(), []);
+	return (
+		<div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
+			<Search className="size-3.5 shrink-0 text-muted-foreground" />
+			<input
+				ref={ref}
+				className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+				placeholder={placeholder}
+				value={value}
+				onChange={(e) => onChange(e.target.value)}
+			/>
+		</div>
+	);
+}
+
 function AddMemberDialog({
 	open,
 	onOpenChange,
 	projectId,
 	roles,
-	existingMemberIds,
-	existingAgentIds,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	projectId: string;
-	roles: ProjectRole[];
-	existingMemberIds: Set<string>;
-	existingAgentIds: Set<string>;
+	roles: Role[];
 }) {
 	const { t } = useTranslation("projects");
 	const queryClient = useQueryClient();
 	const { hasPermission: can } = usePermissions();
-	const [mode, setMode] = useState<"user" | "agent">("user");
+	const [mode, setMode] = useState<"user" | "agent" | "service_account">(
+		"user",
+	);
+	const [selectedServiceAccount, setSelectedServiceAccount] =
+		useState<ServiceAccount | null>(null);
 	const [selectedUser, setSelectedUser] = useState<User | null>(null);
 	const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-	const [selectedRoleId, setSelectedRoleId] = useState<string>("");
+	const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
 	const [userSearch, setUserSearch] = useState("");
+	const [debouncedUserSearch, setDebouncedUserSearch] = useState("");
+	const applyUserSearch = useDebouncedCallback(setDebouncedUserSearch, 300);
+	// Agents and service accounts are searched and paged on the server.
+	const [agentSearch, setAgentSearch] = useState("");
+	const [debouncedAgentSearch, setDebouncedAgentSearch] = useState("");
+	const applyAgentSearch = useDebouncedCallback(setDebouncedAgentSearch, 300);
+	const [serviceAccountSearch, setServiceAccountSearch] = useState("");
+	const [debouncedServiceAccountSearch, setDebouncedServiceAccountSearch] =
+		useState("");
+	const applyServiceAccountSearch = useDebouncedCallback(
+		setDebouncedServiceAccountSearch,
+		300,
+	);
 	const [description, setDescription] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
-	const canReadUsers = can("users.read");
-	const selectedAgentAvatarUrl = selectedAgent
-		? resolveAgentAvatarUrl(selectedAgent)
-		: undefined;
+	const canReadUsers = can("users:read");
+	// Inviting a service account needs to list them (service_accounts:read).
+	const canInviteServiceAccounts = can("service_accounts:read");
 
-	const { data: allAgents = [], isLoading: isLoadingAgents } = useQuery({
-		...chattableAgentsQueryOptions,
+	const {
+		data: agentPages,
+		isLoading: isLoadingAgents,
+		fetchNextPage: fetchMoreAgents,
+		hasNextPage: hasMoreAgents,
+		isFetchingNextPage: isFetchingMoreAgents,
+		isFetchNextPageError: isMoreAgentsError,
+	} = useInfiniteQuery({
+		...chattableAgentsInfiniteQueryOptions(debouncedAgentSearch),
 		enabled: open && mode === "agent",
+		placeholderData: keepPreviousData,
 	});
-	const availableAgents = allAgents.filter((a) => !existingAgentIds.has(a.id));
+	const allAgents = useMemo(
+		() => agentPages?.pages.flatMap((p) => p.items) ?? [],
+		[agentPages],
+	);
+	// Which candidates are already members is asked of the server for just
+	// those ids, rather than loading the whole team to compare against.
+	const agentIds = useMemo(() => allAgents.map((a) => a.id), [allAgents]);
+	const { existingIds: existingAgentIds, resolvedIds: resolvedAgentIds } =
+		useExistingMemberIds(projectId, agentIds, open && mode === "agent");
+	const availableAgents = allAgents.filter(
+		(a) => resolvedAgentIds.has(a.id) && !existingAgentIds.has(a.id),
+	);
+
+	const {
+		data: serviceAccountPages,
+		isLoading: isLoadingServiceAccounts,
+		fetchNextPage: fetchMoreServiceAccounts,
+		hasNextPage: hasMoreServiceAccounts,
+		isFetchingNextPage: isFetchingMoreServiceAccounts,
+		isFetchNextPageError: isMoreServiceAccountsError,
+	} = useInfiniteQuery({
+		...serviceAccountsInfiniteQueryOptions(debouncedServiceAccountSearch),
+		enabled: open && mode === "service_account" && canInviteServiceAccounts,
+		placeholderData: keepPreviousData,
+	});
+	const allServiceAccounts = useMemo(
+		() => serviceAccountPages?.pages.flatMap((p) => p.items) ?? [],
+		[serviceAccountPages],
+	);
+	const serviceAccountIds = useMemo(
+		() => allServiceAccounts.map((a) => a.id),
+		[allServiceAccounts],
+	);
+	const {
+		existingIds: existingServiceAccountIds,
+		resolvedIds: resolvedServiceAccountIds,
+	} = useExistingMemberIds(
+		projectId,
+		serviceAccountIds,
+		open && mode === "service_account",
+	);
+	const availableServiceAccounts = allServiceAccounts.filter(
+		(a) =>
+			resolvedServiceAccountIds.has(a.id) &&
+			!existingServiceAccountIds.has(a.id),
+	);
 
 	const {
 		data: usersPages,
 		isLoading: isLoadingUsers,
+		isFetchNextPageError,
+		isPlaceholderData,
 		fetchNextPage,
 		hasNextPage,
 		isFetchingNextPage,
 	} = useInfiniteQuery({
-		...usersInfiniteQueryOptions(),
+		...usersInfiniteQueryOptions(debouncedUserSearch),
 		enabled: open && canReadUsers,
+		placeholderData: keepPreviousData,
 	});
 
 	const usersData = useMemo(
@@ -203,23 +305,56 @@ function AddMemberDialog({
 		onLoadMore: () => void fetchNextPage(),
 	});
 
-	const filteredUsers = useMemo<User[]>(() => {
-		const items: User[] = usersData;
-		const q = userSearch.toLowerCase();
-		return items
-			.filter((u) => !existingMemberIds.has(u.id))
-			.filter(
-				(u) =>
-					!q ||
-					u.username.toLowerCase().includes(q) ||
-					(u.full_name ?? "").toLowerCase().includes(q),
-			);
-	}, [usersData, existingMemberIds, userSearch]);
+	const userIds = useMemo(() => usersData.map((u) => u.id), [usersData]);
+	const { existingIds: existingMemberIds, resolvedIds: resolvedUserIds } =
+		useExistingMemberIds(projectId, userIds, open && mode === "user");
+
+	// Search is done server-side; existing members are only hidden here, and
+	// only once the server has said whether each candidate is a member.
+	const filteredUsers = useMemo<User[]>(
+		() =>
+			usersData.filter(
+				(u) => resolvedUserIds.has(u.id) && !existingMemberIds.has(u.id),
+			),
+		[usersData, existingMemberIds, resolvedUserIds],
+	);
+
+	// Hiding existing members can leave a page with few or no rows (and then
+	// nothing to scroll), so keep loading until a few rows are visible.
+	useEffect(() => {
+		if (
+			hasNextPage &&
+			!isFetchingNextPage &&
+			!isFetchNextPageError &&
+			!isPlaceholderData &&
+			!isLoadingUsers &&
+			filteredUsers.length < MIN_VISIBLE_USER_ROWS
+		) {
+			void fetchNextPage();
+		}
+	}, [
+		hasNextPage,
+		isFetchingNextPage,
+		isFetchNextPageError,
+		isPlaceholderData,
+		isLoadingUsers,
+		filteredUsers.length,
+		fetchNextPage,
+	]);
 
 	const addMutation = useMutation({
 		mutationFn: () => {
-			if (!selectedRoleId) {
+			if (selectedRoleIds.length === 0) {
 				return Promise.reject(new Error("Role is required"));
+			}
+			if (mode === "service_account") {
+				if (!selectedServiceAccount) {
+					return Promise.reject(new Error("Service account is required"));
+				}
+				return addProjectMember(projectId, {
+					service_account_id: selectedServiceAccount.id,
+					role_ids: selectedRoleIds,
+				});
 			}
 			if (mode === "agent") {
 				if (!selectedAgent) {
@@ -227,7 +362,7 @@ function AddMemberDialog({
 				}
 				return addProjectMember(projectId, {
 					agent_id: selectedAgent.id,
-					project_role_id: selectedRoleId,
+					role_ids: selectedRoleIds,
 				});
 			}
 			if (!selectedUser) {
@@ -235,14 +370,15 @@ function AddMemberDialog({
 			}
 			return addProjectMember(projectId, {
 				user_id: selectedUser.id,
-				project_role_id: selectedRoleId,
+				role_ids: selectedRoleIds,
 				description: description.trim(),
 			});
 		},
 		onSuccess: async () => {
 			await queryClient.invalidateQueries({
-				queryKey: projectMembersQueryOptions(projectId).queryKey,
+				queryKey: projectMembersKey(projectId),
 			});
+			invalidateMemberDirectory(projectId);
 			handleClose();
 		},
 		onError: (err: unknown) => {
@@ -250,9 +386,12 @@ function AddMemberDialog({
 			setError(
 				code === ApiErrorCode.ProjectMemberAlreadyAdded
 					? t("team.addMemberDialog.errors.alreadyAdded")
-					: code === ApiErrorCode.ProjectRoleNotFound
-						? t("team.addMemberDialog.errors.roleNotFound")
-						: t("team.addMemberDialog.errors.addFailed"),
+					: code === ApiErrorCode.Forbidden
+						? t("team.addMemberDialog.errors.roleForbidden")
+						: code === ApiErrorCode.RoleNotAttachable ||
+								code === ApiErrorCode.RoleNotFound
+							? t("team.addMemberDialog.errors.roleNotFound")
+							: t("team.addMemberDialog.errors.addFailed"),
 			);
 		},
 	});
@@ -261,17 +400,27 @@ function AddMemberDialog({
 		setMode("user");
 		setSelectedUser(null);
 		setSelectedAgent(null);
-		setSelectedRoleId("");
+		setSelectedServiceAccount(null);
+		setSelectedRoleIds([]);
 		setUserSearch("");
+		setAgentSearch("");
+		setServiceAccountSearch("");
+		setDebouncedUserSearch("");
+		// Supersede any pending debounce so it can't restore the old term.
+		applyUserSearch("");
 		setDescription("");
 		setError(null);
 		onOpenChange(false);
 	}
 
 	const canSubmit =
-		!!selectedRoleId &&
+		selectedRoleIds.length > 0 &&
 		!addMutation.isPending &&
-		(mode === "agent" ? !!selectedAgent : !!selectedUser);
+		(mode === "agent"
+			? !!selectedAgent
+			: mode === "service_account"
+				? !!selectedServiceAccount
+				: !!selectedUser);
 	const selectedUserId = selectedUser?.id ?? null;
 
 	return (
@@ -281,7 +430,7 @@ function AddMemberDialog({
 				if (!v) handleClose();
 			}}
 		>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-xl">
 				<DialogHeader>
 					<div className="flex size-10 items-center justify-center rounded-full bg-primary/10 mb-2">
 						<Users className="size-5 text-primary" />
@@ -293,9 +442,19 @@ function AddMemberDialog({
 				</DialogHeader>
 
 				<div className="space-y-4 py-1">
-					{/* Mode toggle: invite a human user, or invite a global agent */}
-					<div className="grid grid-cols-2 gap-2">
-						{(["user", "agent"] as const).map((m) => {
+					{/* Mode toggle: invite a human user, a global agent or a service account */}
+					<div
+						className={`grid gap-2 ${canInviteServiceAccounts ? "grid-cols-3" : "grid-cols-2"}`}
+					>
+						{(
+							[
+								"user",
+								"agent",
+								...(canInviteServiceAccounts
+									? (["service_account"] as const)
+									: []),
+							] as const
+						).map((m) => {
 							const isSelected = mode === m;
 							return (
 								<button
@@ -305,6 +464,7 @@ function AddMemberDialog({
 										setMode(m);
 										setSelectedUser(null);
 										setSelectedAgent(null);
+										setSelectedServiceAccount(null);
 										setError(null);
 									}}
 									className={`flex items-center justify-center gap-1.5 rounded-lg border p-2.5 text-xs font-medium transition-all ${
@@ -315,32 +475,114 @@ function AddMemberDialog({
 								>
 									{m === "user" ? (
 										<UserRound className="size-3.5" />
-									) : (
+									) : m === "agent" ? (
 										<Bot className="size-3.5" />
+									) : (
+										<KeyRound className="size-3.5" />
 									)}
 									{m === "user"
 										? t("team.addMemberDialog.modeUser")
-										: t("team.addMemberDialog.modeAgent")}
+										: m === "agent"
+											? t("team.addMemberDialog.modeAgent")
+											: t("team.addMemberDialog.modeServiceAccount")}
 								</button>
 							);
 						})}
 					</div>
 
-					{mode === "agent" ? (
+					{mode === "service_account" ? (
+						<div className="space-y-1.5">
+							<p className="text-sm font-medium">
+								{t("team.addMemberDialog.serviceAccountLabel")}
+							</p>
+							{selectedServiceAccount ? (
+								<div className="flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2">
+									<EntityAvatar
+										{...serviceAccountAvatar(selectedServiceAccount)}
+										size="md"
+									/>
+									<div className="min-w-0 flex-1">
+										<span className="text-sm font-medium">
+											{selectedServiceAccount.name}
+										</span>
+									</div>
+									<button
+										type="button"
+										className="text-xs text-muted-foreground hover:text-foreground"
+										onClick={() => setSelectedServiceAccount(null)}
+									>
+										{t("team.addMemberDialog.change")}
+									</button>
+								</div>
+							) : (
+								<div className="rounded-lg border border-border overflow-hidden">
+									<PickerSearch
+										value={serviceAccountSearch}
+										onChange={(value) => {
+											setServiceAccountSearch(value);
+											applyServiceAccountSearch(value);
+										}}
+										placeholder={t(
+											"team.addMemberDialog.searchServiceAccountsPlaceholder",
+										)}
+									/>
+									<div className="max-h-52 overflow-y-auto p-1">
+										{isLoadingServiceAccounts ? (
+											<div className="flex items-center justify-center py-4">
+												<Loader2 className="size-4 animate-spin text-muted-foreground" />
+											</div>
+										) : availableServiceAccounts.length === 0 ? (
+											<p className="py-4 text-center text-xs text-muted-foreground">
+												{serviceAccountSearch
+													? t("team.addMemberDialog.noServiceAccountsMatch")
+													: t(
+															"team.addMemberDialog.noServiceAccountsAvailable",
+														)}
+											</p>
+										) : (
+											availableServiceAccounts.map((account) => (
+												<button
+													key={account.id}
+													type="button"
+													className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+													onClick={() => setSelectedServiceAccount(account)}
+												>
+													<EntityAvatar
+														{...serviceAccountAvatar(account)}
+														size="md"
+													/>
+													<div className="min-w-0 flex-1">
+														<span className="font-medium truncate block">
+															{account.name}
+														</span>
+														{account.description ? (
+															<span className="text-xs text-muted-foreground truncate block">
+																{account.description}
+															</span>
+														) : null}
+													</div>
+												</button>
+											))
+										)}
+										<LoadMoreSentinel
+											compact
+											hasMore={!!hasMoreServiceAccounts}
+											isLoadingMore={isFetchingMoreServiceAccounts}
+											isError={isMoreServiceAccountsError}
+											onLoadMore={() => void fetchMoreServiceAccounts()}
+										/>
+									</div>
+								</div>
+							)}
+						</div>
+					) : mode === "agent" ? (
 						<div className="space-y-1.5">
 							<p className="text-sm font-medium">
 								{t("team.addMemberDialog.agentLabel")}
 							</p>
 							{selectedAgent ? (
 								<div className="flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2">
-									<Avatar className="size-7 shrink-0">
-										{selectedAgentAvatarUrl ? (
-											<AvatarImage src={selectedAgentAvatarUrl} />
-										) : null}
-										<AvatarFallback className="text-xs bg-primary/10 text-primary font-semibold">
-											<Bot className="size-3.5" />
-										</AvatarFallback>
-									</Avatar>
+									<EntityAvatar {...agentAvatar(selectedAgent)} size="md" />
 									<div className="min-w-0 flex-1">
 										<span className="text-sm font-medium">
 											{selectedAgent.name}
@@ -358,43 +600,58 @@ function AddMemberDialog({
 									</button>
 								</div>
 							) : (
-								<div className="rounded-lg border border-border overflow-hidden max-h-44 overflow-y-auto p-1">
-									{isLoadingAgents ? (
-										<div className="flex items-center justify-center py-4">
-											<Loader2 className="size-4 animate-spin text-muted-foreground" />
-										</div>
-									) : availableAgents.length === 0 ? (
-										<p className="py-4 text-center text-xs text-muted-foreground">
-											{t("team.addMemberDialog.noAgentsAvailable")}
-										</p>
-									) : (
-										availableAgents.map((agent) => {
-											const avatarUrl = resolveAgentAvatarUrl(agent);
-											return (
-												<button
-													key={agent.id}
-													type="button"
-													className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
-													onClick={() => setSelectedAgent(agent)}
-												>
-													<Avatar className="size-7 shrink-0">
-														{avatarUrl ? <AvatarImage src={avatarUrl} /> : null}
-														<AvatarFallback className="text-xs bg-primary/10 text-primary font-semibold">
-															<Bot className="size-3.5" />
-														</AvatarFallback>
-													</Avatar>
-													<div className="min-w-0 flex-1">
-														<span className="font-medium truncate block">
-															{agent.name}
-														</span>
-														<span className="text-xs text-muted-foreground truncate block">
-															@{agent.handle}
-														</span>
-													</div>
-												</button>
-											);
-										})
-									)}
+								<div className="rounded-lg border border-border overflow-hidden">
+									<PickerSearch
+										value={agentSearch}
+										onChange={(value) => {
+											setAgentSearch(value);
+											applyAgentSearch(value);
+										}}
+										placeholder={t(
+											"team.addMemberDialog.searchAgentsPlaceholder",
+										)}
+									/>
+									<div className="max-h-52 overflow-y-auto p-1">
+										{isLoadingAgents ? (
+											<div className="flex items-center justify-center py-4">
+												<Loader2 className="size-4 animate-spin text-muted-foreground" />
+											</div>
+										) : availableAgents.length === 0 ? (
+											<p className="py-4 text-center text-xs text-muted-foreground">
+												{agentSearch
+													? t("team.addMemberDialog.noAgentsMatch")
+													: t("team.addMemberDialog.noAgentsAvailable")}
+											</p>
+										) : (
+											availableAgents.map((agent) => {
+												return (
+													<button
+														key={agent.id}
+														type="button"
+														className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+														onClick={() => setSelectedAgent(agent)}
+													>
+														<EntityAvatar {...agentAvatar(agent)} size="md" />
+														<div className="min-w-0 flex-1">
+															<span className="font-medium truncate block">
+																{agent.name}
+															</span>
+															<span className="text-xs text-muted-foreground truncate block">
+																@{agent.handle}
+															</span>
+														</div>
+													</button>
+												);
+											})
+										)}
+										<LoadMoreSentinel
+											compact
+											hasMore={!!hasMoreAgents}
+											isLoadingMore={isFetchingMoreAgents}
+											isError={isMoreAgentsError}
+											onLoadMore={() => void fetchMoreAgents()}
+										/>
+									</div>
 								</div>
 							)}
 						</div>
@@ -405,16 +662,7 @@ function AddMemberDialog({
 							</p>
 							{selectedUser ? (
 								<div className="flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2">
-									<Avatar className="size-7 shrink-0">
-										{selectedUser.avatar_thumb_url ? (
-											<AvatarImage src={selectedUser.avatar_thumb_url} />
-										) : null}
-										<AvatarFallback className="text-xs bg-primary/10 text-primary font-semibold">
-											{getInitials(
-												selectedUser.full_name || selectedUser.username,
-											)}
-										</AvatarFallback>
-									</Avatar>
+									<EntityAvatar {...userAvatar(selectedUser)} size="md" />
 									<div className="min-w-0 flex-1">
 										<span className="text-sm font-medium">
 											{selectedUser.full_name || selectedUser.username}
@@ -445,7 +693,10 @@ function AddMemberDialog({
 											className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
 											placeholder={t("team.addMemberDialog.searchPlaceholder")}
 											value={userSearch}
-											onChange={(e) => setUserSearch(e.target.value)}
+											onChange={(e) => {
+												setUserSearch(e.target.value);
+												applyUserSearch(e.target.value.trim());
+											}}
 											autoFocus
 										/>
 									</div>
@@ -490,29 +741,13 @@ function AddMemberDialog({
 						<p className="text-sm font-medium">
 							{t("team.addMemberDialog.roleLabel")}
 						</p>
-						<Select
-							value={selectedRoleId}
-							onValueChange={(v) => {
-								if (v != null) setSelectedRoleId(v);
-							}}
-							items={roles.map((r) => ({
-								value: r.id,
-								label: r.role_name,
-							}))}
-						>
-							<SelectTrigger className="w-full">
-								<SelectValue
-									placeholder={t("team.addMemberDialog.rolePlaceholder")}
-								/>
-							</SelectTrigger>
-							<SelectContent>
-								{roles.map((role) => (
-									<SelectItem key={role.id} value={role.id}>
-										{role.role_name}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
+						<RoleOptionList
+							roles={roles}
+							values={selectedRoleIds}
+							onChange={(ids) => setSelectedRoleIds(ids)}
+							label={t("team.addMemberDialog.roleLabel")}
+							badgeClass={projectPermissionBadgeClass}
+						/>
 					</div>
 
 					{/* Only for humans — an invited agent's description lives on the
@@ -572,7 +807,10 @@ function AddMemberDialog({
 	);
 }
 
-// ── Role Chip (inline popover role picker) ────────────────────────────────────
+// ── Member role control (badges + a button that opens a dialog) ──────────────
+//
+// Same flow as the users page: the member's role badges, a "Change role"
+// button, and a dialog with the roles multi-select and an Assign button.
 
 function RoleChip({
 	member,
@@ -581,132 +819,106 @@ function RoleChip({
 }: {
 	member: ProjectMember;
 	projectId: string;
-	roles: ProjectRole[];
+	roles: Role[];
+}) {
+	const { t } = useTranslation("projects");
+	const [open, setOpen] = useState(false);
+
+	return (
+		<>
+			<RoleChangeTrigger
+				roles={enrichRoles(member.roles, roles)}
+				label={t("team.roleChip.changeRole")}
+				onClick={() => setOpen(true)}
+			/>
+			<MemberRoleDialog
+				member={member}
+				projectId={projectId}
+				roles={roles}
+				open={open}
+				onOpenChange={setOpen}
+			/>
+		</>
+	);
+}
+
+function MemberRoleDialog({
+	member,
+	projectId,
+	roles,
+	open,
+	onOpenChange,
+}: {
+	member: ProjectMember;
+	projectId: string;
+	roles: Role[];
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
 }) {
 	const { t } = useTranslation("projects");
 	const queryClient = useQueryClient();
-	const [open, setOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const currentIds = member.roles.map((r) => r.id);
+
+	const handleOpenChange = (next: boolean) => {
+		if (!next) setError(null);
+		onOpenChange(next);
+	};
 
 	const mutation = useMutation({
-		mutationFn: (roleId: string) =>
-			updateProjectMemberRole(projectId, member.id, {
-				project_role_id: roleId,
-			}),
-		onMutate: async (roleId) => {
-			await queryClient.cancelQueries({
-				queryKey: projectMembersQueryOptions(projectId).queryKey,
-			});
-			const previous = queryClient.getQueryData(
-				projectMembersQueryOptions(projectId).queryKey,
-			);
-			const newRole = roles.find((r) => r.id === roleId);
-			if (newRole) {
-				queryClient.setQueryData(
-					projectMembersQueryOptions(projectId).queryKey,
-					(old: ProjectMember[] | undefined) =>
-						old?.map((m) =>
-							m.user_id === member.user_id
-								? {
-										...m,
-										project_role_id: roleId,
-										role_name: newRole.role_name,
-									}
-								: m,
-						),
-				);
-			}
-			return { previous };
-		},
-		onError: (err: unknown, _roleId, context) => {
-			if (context?.previous) {
-				queryClient.setQueryData(
-					projectMembersQueryOptions(projectId).queryKey,
-					context.previous,
-				);
-			}
+		mutationFn: (roleIds: string[]) =>
+			replaceMemberRoles(projectId, member.id, roleIds),
+		onError: (err: unknown) => {
 			const code = getApiErrorCode(err);
+			void queryClient.invalidateQueries({
+				queryKey: projectMembersKey(projectId),
+			});
+			invalidateMemberDirectory(projectId);
 			setError(
 				code === ApiErrorCode.ProjectMemberNotFound
 					? t("team.roleChip.errors.memberNotFound")
-					: code === ApiErrorCode.ProjectRoleNotFound
-						? t("team.roleChip.errors.roleNotFound")
-						: t("team.roleChip.errors.changeFailed"),
+					: code === ApiErrorCode.Forbidden
+						? t("team.roleChip.errors.roleForbidden")
+						: code === ApiErrorCode.RoleNotAttachable ||
+								code === ApiErrorCode.RoleNotFound
+							? t("team.roleChip.errors.roleNotFound")
+							: t("team.roleChip.errors.changeFailed"),
 			);
 		},
-		onSuccess: () => {
-			setOpen(false);
-			setError(null);
-		},
-		onSettled: () => {
-			queryClient.invalidateQueries({
-				queryKey: projectMembersQueryOptions(projectId).queryKey,
+		// Close once the list has the new roles, so the badges never flash the
+		// old ones behind a closing dialog.
+		onSuccess: async () => {
+			await queryClient.invalidateQueries({
+				queryKey: projectMembersKey(projectId),
 			});
+			invalidateMemberDirectory(projectId);
+			handleOpenChange(false);
 		},
 	});
 
 	return (
-		<Popover
+		<RoleChangeDialog
 			open={open}
-			onOpenChange={(v) => {
-				setOpen(v);
-				if (!v) setError(null);
-			}}
-		>
-			<PopoverTrigger
-				type="button"
-				aria-label={t("team.roleChip.changeRole")}
-				disabled={mutation.isPending}
-				className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 bg-secondary/50 px-2.5 py-1 text-xs font-medium text-secondary-foreground transition-all hover:bg-accent hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-			>
-				{mutation.isPending ? (
-					<Loader2 className="size-3 animate-spin text-muted-foreground" />
-				) : (
-					<Shield className="size-3 text-muted-foreground" />
-				)}
-				<span>{member.role_name}</span>
-				{!mutation.isPending && (
-					<ChevronDown className="size-3 text-muted-foreground/70" />
-				)}
-			</PopoverTrigger>
-			<PopoverContent className="w-52 p-1.5" align="end">
-				<p className="px-2 py-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-					{t("team.roleChip.changeRole")}
-				</p>
-				<div className="mt-0.5 space-y-px">
-					{roles.map((role) => {
-						const isCurrent = role.id === member.project_role_id;
-						return (
-							<button
-								key={role.id}
-								type="button"
-								className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent ${
-									isCurrent
-										? "font-medium text-foreground"
-										: "text-muted-foreground hover:text-foreground"
-								}`}
-								onClick={() => {
-									if (!isCurrent) mutation.mutate(role.id);
-									else setOpen(false);
-								}}
-							>
-								<Check
-									className={`size-3.5 shrink-0 text-primary transition-opacity ${
-										isCurrent ? "opacity-100" : "opacity-0"
-									}`}
-								/>
-								{role.role_name}
-							</button>
-						);
-					})}
-				</div>
-				{error && (
-					<p className="mt-1.5 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-						{error}
-					</p>
-				)}
-			</PopoverContent>
-		</Popover>
+			onOpenChange={handleOpenChange}
+			title={t("team.roleChip.changeRole")}
+			description={t("team.roleChip.dialogDescription", {
+				name: member.full_name || member.username,
+			})}
+			person={{ avatar: memberAvatar(member), handle: member.username }}
+			roles={roles}
+			currentIds={currentIds}
+			// A member keeps at least one role: with none they could do nothing,
+			// and removing them is its own action.
+			minSelected={1}
+			badgeClass={projectPermissionBadgeClass}
+			saveLabel={t("team.roleChip.assign")}
+			savingLabel={t("team.roleChip.assigning")}
+			cancelLabel={t("team.addMemberDialog.cancel")}
+			isPending={mutation.isPending}
+			error={error}
+			onPick={() => setError(null)}
+			onSave={(ids) => mutation.mutate(ids)}
+		/>
 	);
 }
 
@@ -742,8 +954,9 @@ function DescriptionChip({
 		},
 		onSettled: () => {
 			queryClient.invalidateQueries({
-				queryKey: projectMembersQueryOptions(projectId).queryKey,
+				queryKey: projectMembersKey(projectId),
 			});
+			invalidateMemberDirectory(projectId);
 		},
 	});
 
@@ -809,12 +1022,18 @@ function MemberRow({
 	projectId,
 	roles,
 	canManage,
+	canAssignRoles,
+	highlight = "",
 	onRemove,
 }: {
 	member: ProjectMember;
 	projectId: string;
-	roles: ProjectRole[];
+	roles: Role[];
 	canManage: boolean;
+	/** Whether the viewer may change roles (roles:assign alone; not members:write). */
+	canAssignRoles: boolean;
+	/** Search text to highlight in the member's name and handle. */
+	highlight?: string;
 	onRemove: (member: ProjectMember) => void;
 }) {
 	const { t } = useTranslation("projects");
@@ -822,50 +1041,67 @@ function MemberRow({
 	const isBot =
 		member.member_type === "agent" ||
 		member.username.startsWith("bot-") ||
-		member.role_name.toLowerCase().includes("agent");
-	const memberAvatarUrl = resolveMemberAvatarUrl(member);
+		memberRoleNames(member).toLowerCase().includes("agent");
+	const isServiceAccount = member.member_type === "service_account";
+
+	const memberRoles = enrichRoles(member.roles, roles);
 
 	return (
-		<div className="flex items-center gap-3 rounded-xl border border-border/50 bg-card px-4 py-3 transition-colors hover:bg-muted/30">
-			<Avatar className="size-9 shrink-0">
-				{memberAvatarUrl ? <AvatarImage src={memberAvatarUrl} /> : null}
-				<AvatarFallback className="text-xs bg-primary/10 text-primary font-semibold">
-					{isBot ? <Bot className="size-4" /> : getInitials(display)}
-				</AvatarFallback>
-			</Avatar>
-			<div className="min-w-0 flex-1">
-				<p className="text-sm font-medium truncate">{display}</p>
-				<p className="text-xs text-muted-foreground truncate">
-					@{member.username}
+		<div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border/50 bg-card px-4 py-3 transition-colors hover:bg-muted/30">
+			<EntityAvatar {...memberAvatar(member)} size="lg" className="size-9" />
+			<div className="min-w-0 flex-1 basis-40">
+				<p className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+					<span className="truncate">
+						<HighlightMatch text={display} query={highlight} />
+					</span>
+					{isBot ? (
+						<span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium leading-none text-muted-foreground">
+							{t("team.memberRow.agentBadge")}
+						</span>
+					) : null}
+					{isServiceAccount ? (
+						<span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium leading-none text-muted-foreground">
+							{t("team.memberRow.serviceAccountBadge")}
+						</span>
+					) : null}
 				</p>
+				{isServiceAccount ? null : (
+					<p className="text-xs text-muted-foreground truncate">
+						@<HighlightMatch text={member.username} query={highlight} />
+					</p>
+				)}
 			</div>
-			{canManage && !isBot ? (
-				<DescriptionChip member={member} projectId={projectId} />
-			) : null}
-			{canManage ? (
-				<RoleChip member={member} projectId={projectId} roles={roles} />
-			) : (
-				<span className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 bg-secondary/50 px-2.5 py-1 text-xs font-medium text-secondary-foreground">
-					<Shield className="size-3 text-muted-foreground" />
-					{member.role_name}
-				</span>
-			)}
-			{canManage ? (
-				<DropdownMenu>
-					<DropdownMenuTrigger className="flex size-7 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-						<MoreHorizontal className="size-4" />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" className="w-44">
-						<DropdownMenuItem
-							className="text-destructive focus:text-destructive focus:bg-destructive/10"
-							onClick={() => onRemove(member)}
+			<div className="ml-auto flex min-w-0 max-w-full items-center gap-1.5 max-sm:order-last max-sm:w-full max-sm:pl-12">
+				{canManage && !isBot && !isServiceAccount ? (
+					<DescriptionChip member={member} projectId={projectId} />
+				) : null}
+				<div className="flex min-w-0 flex-1 justify-end max-sm:justify-start">
+					{canAssignRoles ? (
+						<RoleChip member={member} projectId={projectId} roles={roles} />
+					) : (
+						<RoleBadgeList roles={memberRoles} max={3} />
+					)}
+				</div>
+				{canManage ? (
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							aria-label={t("team.memberRow.actions")}
+							className="flex size-7 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						>
-							<Trash2 className="size-3.5 mr-2" />
-							{t("team.memberRow.removeMember")}
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
-			) : null}
+							<MoreHorizontal className="size-4" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-44">
+							<DropdownMenuItem
+								className="text-destructive focus:text-destructive focus:bg-destructive/10"
+								onClick={() => onRemove(member)}
+							>
+								<Trash2 className="size-3.5 mr-2" />
+								{t("team.memberRow.removeMember")}
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+				) : null}
+			</div>
 		</div>
 	);
 }
@@ -877,6 +1113,8 @@ function TeamPage() {
 	const { projectId } = Route.useParams();
 	const queryClient = useQueryClient();
 	const [addMemberOpen, setAddMemberOpen] = useState(false);
+	const [search, setSearch] = useState("");
+	const [roleFilter, setRoleFilter] = useState("");
 	const [removingMember, setRemovingMember] = useState<ProjectMember | null>(
 		null,
 	);
@@ -892,17 +1130,40 @@ function TeamPage() {
 		isGlobalPermissionsLoading || isProjectPermissionsLoading;
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const canReadMembers =
-		hasPermission("project.members.read") ||
-		hasProjectPermission("project.members.read");
+		hasPermission("project.members:read") ||
+		hasProjectPermission("project.members:read");
+	// Search is sent to the server (debounced) and the list pages in by
+	// cursor, so a large team is never loaded whole.
+	const [debouncedSearch, setDebouncedSearch] = useState("");
+	const applySearch = useDebouncedCallback(setDebouncedSearch, 300);
+	const { data: roles = [] } = useQuery(projectRolesQueryOptions(projectId));
+	const roleFilterId = roles.find((r) => r.name === roleFilter)?.id;
 	const {
-		data: members,
+		data: membersPages,
 		isLoading: isDataLoading,
 		isError,
 		error,
-	} = useQuery({
-		...projectMembersQueryOptions(projectId),
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+		isFetchNextPageError,
+	} = useInfiniteQuery({
+		...projectMembersInfiniteQueryOptions(projectId, {
+			search: debouncedSearch,
+			roleId: roleFilterId,
+		}),
+		enabled: canReadMembers,
+		placeholderData: keepPreviousData,
+	});
+	const { data: teamTotal } = useQuery({
+		...projectMemberTotalQueryOptions(projectId),
 		enabled: canReadMembers,
 	});
+	const members = useMemo(
+		() => membersPages?.pages.flatMap((p) => p.items),
+		[membersPages],
+	);
+	const matchingCount = membersPages?.pages[0]?.total_count ?? 0;
 	// While permissions are still loading, canReadMembers defaults to false
 	// same as a confirmed denial — guard on isPermissionsLoading (and fold
 	// it into isLoading) so the page shows the skeleton instead of flashing
@@ -911,25 +1172,29 @@ function TeamPage() {
 	const noPermission =
 		!isPermissionsLoading &&
 		(!canReadMembers || (isError && isForbiddenError(error)));
-	const { data: roles = [] } = useQuery(projectRolesQueryOptions(projectId));
 
 	const canManageMembers =
-		hasPermission("project.members.write") ||
-		hasProjectPermission("project.members.write");
+		hasPermission("project.members:write") ||
+		hasProjectPermission("project.members:write");
+	// Handing out roles is a privilege of its own (roles:assign). Editing an
+	// existing member's roles needs only that; project.members:write is not
+	// required. The API judges every role added or removed on its own resource,
+	// so the UI offers all roles and a refusal comes back as FORBIDDEN (shown by
+	// the role error mapping).
+	const { canAssignRoles } = useCanAssignProjectRole(projectId);
+	// Adding a member is member management (members:write) and, because a new
+	// member needs at least one role, also needs roles:assign.
+	const canAddMembers = canManageMembers && canAssignRoles;
 
-	const existingMemberIds = useMemo(
-		() => new Set((members ?? []).map((m) => m.user_id)),
-		[members],
+	const roleChips = useMemo(
+		() => roles.map((r) => ({ name: r.name })),
+		[roles],
 	);
-	const existingAgentIds = useMemo(
-		() =>
-			new Set(
-				(members ?? [])
-					.filter((m) => m.member_type === "agent" && m.agent_id)
-					.map((m) => m.agent_id as string),
-			),
-		[members],
-	);
+	const clearFilters = () => {
+		setSearch("");
+		setDebouncedSearch("");
+		setRoleFilter("");
+	};
 
 	const removeMutation = useMutation({
 		mutationFn: () => {
@@ -938,8 +1203,9 @@ function TeamPage() {
 		},
 		onSuccess: async () => {
 			await queryClient.invalidateQueries({
-				queryKey: projectMembersQueryOptions(projectId).queryKey,
+				queryKey: projectMembersKey(projectId),
 			});
+			invalidateMemberDirectory(projectId);
 			setRemovingMember(null);
 		},
 	});
@@ -967,7 +1233,7 @@ function TeamPage() {
 							{project?.name} · {t("team.subtitle")}
 						</p>
 					</div>
-					{canManageMembers ? (
+					{canAddMembers ? (
 						<Button
 							size="sm"
 							className="gap-1.5 shadow-sm shadow-primary/20"
@@ -1010,7 +1276,7 @@ function TeamPage() {
 							</div>
 						))}
 					</div>
-				) : !members?.length ? (
+				) : !members?.length && !debouncedSearch.trim() && !roleFilter ? (
 					<div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border/60 bg-muted/10 py-14">
 						<div className="flex size-12 items-center justify-center rounded-xl bg-primary/10">
 							<Users className="size-6 text-primary" />
@@ -1021,7 +1287,7 @@ function TeamPage() {
 								{t("team.empty.description")}
 							</p>
 						</div>
-						{canManageMembers ? (
+						{canAddMembers ? (
 							<Button
 								size="sm"
 								className="gap-1.5 mt-1"
@@ -1034,23 +1300,63 @@ function TeamPage() {
 					</div>
 				) : (
 					<div>
+						<MembersFilters
+							search={search}
+							roles={roleChips}
+							totalCount={teamTotal}
+							selectedRole={roleFilter}
+							shownCount={matchingCount}
+							onSearchChange={(value) => {
+								setSearch(value);
+								applySearch(value);
+							}}
+							onRoleChange={setRoleFilter}
+							onClear={clearFilters}
+						/>
 						<div className="mb-3 flex items-center justify-between">
 							<p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-								{t("team.memberCount", { count: members.length })}
+								{t("team.memberCount", { count: matchingCount })}
 							</p>
 						</div>
-						<div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-							{members.map((member) => (
-								<MemberRow
-									key={member.id}
-									member={member}
-									projectId={projectId}
-									roles={roles}
-									canManage={canManageMembers}
-									onRemove={setRemovingMember}
-								/>
-							))}
-						</div>
+						{(members ?? []).length === 0 ? (
+							<div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border/60 bg-muted/10 py-14">
+								<div className="flex size-12 items-center justify-center rounded-xl bg-muted">
+									<Search className="size-6 text-muted-foreground/60" />
+								</div>
+								<div className="text-center">
+									<p className="text-sm font-medium">
+										{t("team.noMatch.title")}
+									</p>
+									<p className="mt-0.5 text-xs text-muted-foreground">
+										{t("team.noMatch.description")}
+									</p>
+								</div>
+								<Button size="sm" variant="outline" onClick={clearFilters}>
+									{t("team.noMatch.clear")}
+								</Button>
+							</div>
+						) : (
+							<div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+								{(members ?? []).map((member) => (
+									<MemberRow
+										key={member.id}
+										member={member}
+										projectId={projectId}
+										roles={roles}
+										canManage={canManageMembers}
+										canAssignRoles={canAssignRoles}
+										highlight={search}
+										onRemove={setRemovingMember}
+									/>
+								))}
+							</div>
+						)}
+						<LoadMoreSentinel
+							hasMore={!!hasNextPage}
+							isLoadingMore={isFetchingNextPage}
+							isError={isFetchNextPageError}
+							onLoadMore={() => void fetchNextPage()}
+						/>
 					</div>
 				)}
 			</div>
@@ -1061,8 +1367,6 @@ function TeamPage() {
 				onOpenChange={setAddMemberOpen}
 				projectId={projectId}
 				roles={roles}
-				existingMemberIds={existingMemberIds}
-				existingAgentIds={existingAgentIds}
 			/>
 
 			{/* Remove confirmation dialog */}

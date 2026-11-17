@@ -46,7 +46,11 @@
 // internals.
 package providercli
 
-import "github.com/Paca-AI/agent-runner/internal/agent"
+import (
+	"sort"
+
+	"github.com/Paca-AI/agent-runner/internal/agent"
+)
 
 // sandboxHomeDir is $HOME inside the sandbox/environment container —
 // mirrored, not imported, from executor.sandboxWorkdir (this package is
@@ -55,6 +59,14 @@ import "github.com/Paca-AI/agent-runner/internal/agent"
 // right value here). Adapters use this to build absolute argv for
 // AuthStatusCommand.
 const sandboxHomeDir = "/home/goose"
+
+// HomeRoot is where every adapter's persisted CLI home lives
+// (HomeRoot/<Name()>) — a subtree of the environment's persistent
+// workspace volume, so login state survives container recreation. It must
+// match the symlink targets baked into services/agent-server/Dockerfile
+// (~/<HomeDirName()> -> HomeRoot/<Name()>); TestDockerfileCLIHomeSymlinks
+// keeps the two in step.
+const HomeRoot = "/home/paca/workspaces/.cli-home"
 
 // FileEntry is one file to write into a CLI's own config directory,
 // relative to $HOME — not to Adapter.HomeDirName(): the caller's bootstrap
@@ -137,4 +149,14 @@ func Register(a Adapter) { registry[a.Name()] = a }
 func Get(name string) (Adapter, bool) {
 	a, ok := registry[name]
 	return a, ok
+}
+
+// All returns every registered adapter, sorted by Name().
+func All() []Adapter {
+	out := make([]Adapter, 0, len(registry))
+	for _, a := range registry {
+		out = append(out, a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name() < out[j].Name() })
+	return out
 }

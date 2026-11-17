@@ -62,11 +62,6 @@ spec:
               value: "http://{{ include "paca.fullname" . }}-api.{{ .Release.Namespace }}.svc:8080"
             - name: PACA_GATEWAY_URL
               value: "http://{{ include "paca.fullname" . }}-gateway.{{ .Release.Namespace }}.svc:8080"
-            - name: PACA_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "paca.secretName" . }}
-                  key: AGENT_API_KEY
             - name: AGENT_SERVER_IMAGE
               value: "{{ .Values.agentRunner.sandbox.image.repository }}:{{ .Values.agentRunner.sandbox.image.tag }}"
             - name: SANDBOX_BACKEND

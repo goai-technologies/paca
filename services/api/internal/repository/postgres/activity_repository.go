@@ -58,10 +58,10 @@ const activityTitleSQL = `CASE a.entity_type
 	           WHEN 'view'        THEN sv.name
 	           WHEN 'automation'  THEN au.name
 	           WHEN 'environment' THEN e.name
-	           WHEN 'member'      THEN COALESCE(mu.full_name, mag.name)
+	           WHEN 'member'      THEN mac.name
 	           WHEN 'project'     THEN pr.name
-	           WHEN 'role'        THEN ro.role_name
-	           WHEN 'agent'       THEN eag.name
+	           WHEN 'role'        THEN ro.name
+	           WHEN 'agent'       THEN eac.name
 	       END`
 
 // activityDeletedSQL is true when the entity is gone — hard-deleted (no row)
@@ -76,7 +76,7 @@ const activityDeletedSQL = `CASE a.entity_type
 	           WHEN 'member'      THEN mpm.id IS NULL OR mpm.deleted_at IS NOT NULL
 	           WHEN 'project'     THEN pr.id IS NULL OR pr.deleted_at IS NOT NULL
 	           WHEN 'role'        THEN ro.id IS NULL
-	           WHEN 'agent'       THEN eag.id IS NULL OR eag.deleted_at IS NOT NULL
+	           WHEN 'agent'       THEN eac.id IS NULL OR eac.deleted_at IS NOT NULL
 	           ELSE FALSE
 	       END`
 
@@ -86,16 +86,17 @@ const activityDeletedSQL = `CASE a.entity_type
 var activitySelectSQL = fmt.Sprintf(`
 	SELECT a.id, a.project_id, a.entity_type, a.entity_id, a.actor_id,
 	       a.origin, a.activity_type, a.content, a.created_at, a.updated_at, a.deleted_at,
-	       COALESCE(u.full_name, ag.name)                    AS actor_full_name,
+	       aac.name                                          AS actor_full_name,
 	       COALESCE(u.username, ag.handle)                   AS actor_username,
-	       COALESCE(u.avatar_key, ag.avatar_key)             AS actor_avatar_key,
-	       COALESCE(u.avatar_thumb_key, ag.avatar_thumb_key) AS actor_avatar_thumb_key,
+	       aac.avatar_key                                    AS actor_avatar_key,
+	       aac.avatar_thumb_key                              AS actor_avatar_thumb_key,
 	       %s AS entity_title,
 	       COALESCE(%s, FALSE) AS entity_deleted
 	FROM activities a
 	LEFT JOIN project_members pm  ON pm.id = a.actor_id
-	LEFT JOIN users u             ON u.id = pm.user_id
-	LEFT JOIN agents ag           ON ag.id = pm.agent_id
+	LEFT JOIN accounts aac        ON aac.id = pm.account_id
+	LEFT JOIN users u             ON u.id = pm.account_id
+	LEFT JOIN agents ag           ON ag.id = pm.account_id
 	LEFT JOIN tasks t             ON a.entity_type = 'task'        AND t.id = a.entity_id
 	LEFT JOIN documents d         ON a.entity_type = 'doc'         AND d.id = a.entity_id
 	LEFT JOIN sprints s           ON a.entity_type = 'sprint'      AND s.id = a.entity_id
@@ -103,11 +104,12 @@ var activitySelectSQL = fmt.Sprintf(`
 	LEFT JOIN automations au      ON a.entity_type = 'automation'  AND au.id = a.entity_id
 	LEFT JOIN environments e      ON a.entity_type = 'environment' AND e.id = a.entity_id
 	LEFT JOIN project_members mpm ON a.entity_type = 'member'      AND mpm.id = a.entity_id
-	LEFT JOIN users mu            ON mu.id = mpm.user_id
-	LEFT JOIN agents mag          ON mag.id = mpm.agent_id
+	LEFT JOIN accounts mac        ON mac.id = mpm.account_id
+	LEFT JOIN users mu            ON mu.id = mpm.account_id
+	LEFT JOIN agents mag          ON mag.id = mpm.account_id
 	LEFT JOIN projects pr         ON a.entity_type = 'project'     AND pr.id = a.entity_id
-	LEFT JOIN project_roles ro    ON a.entity_type = 'role'        AND ro.id = a.entity_id
-	LEFT JOIN agents eag          ON a.entity_type = 'agent'       AND eag.id = a.entity_id`,
+	LEFT JOIN roles ro            ON a.entity_type = 'role'        AND ro.id = a.entity_id
+	LEFT JOIN accounts eac        ON a.entity_type = 'agent'       AND eac.id = a.entity_id`,
 	activityTitleSQL, activityDeletedSQL)
 
 // Create inserts one activity entry. ON CONFLICT DO NOTHING makes a
@@ -156,6 +158,14 @@ func (r *ActivityRepository) List(ctx context.Context, f activitydom.ListFilter,
 	addIn("a.entity_type", f.EntityTypes)
 	addIn("a.origin", f.Origins)
 	addIn("a.activity_type", f.ActivityTypes)
+	if len(f.ExcludeActivityTypes) > 0 {
+		ph := make([]string, len(f.ExcludeActivityTypes))
+		for i, v := range f.ExcludeActivityTypes {
+			args = append(args, v)
+			ph[i] = fmt.Sprintf("$%d", len(args))
+		}
+		where = append(where, "a.activity_type NOT IN ("+strings.Join(ph, ", ")+")")
+	}
 	if len(f.ActorMemberIDs) > 0 {
 		ids := make([]string, len(f.ActorMemberIDs))
 		for i, id := range f.ActorMemberIDs {
@@ -191,16 +201,26 @@ func (r *ActivityRepository) List(ctx context.Context, f activitydom.ListFilter,
 	return activitiesFromRecords(records), hasMore, nil
 }
 
-// ListForEntity returns one entity's non-deleted entries, oldest first.
-func (r *ActivityRepository) ListForEntity(ctx context.Context, entityType string, entityID uuid.UUID) ([]*activitydom.Activity, error) {
-	var records []activityRecord
-	err := r.db.SelectContext(ctx, &records, activitySelectSQL+`
-		WHERE a.entity_type = $1 AND a.entity_id = $2 AND a.deleted_at IS NULL
-		ORDER BY a.created_at ASC`, entityType, entityID.String())
-	if err != nil {
-		return nil, err
+// ListForEntity returns a page of one entity's non-deleted entries,
+// newest first, keyset-paginated on (created_at, id).
+func (r *ActivityRepository) ListForEntity(ctx context.Context, entityType string, entityID uuid.UUID, cursor *activitydom.Cursor, limit int) ([]*activitydom.Activity, bool, error) {
+	where := `a.entity_type = $1 AND a.entity_id = $2 AND a.deleted_at IS NULL`
+	args := []any{entityType, entityID.String()}
+	if cursor != nil {
+		args = append(args, cursor.CreatedAt, cursor.ID.String())
+		where += fmt.Sprintf(` AND (a.created_at, a.id) < ($%d, $%d)`, len(args)-1, len(args))
 	}
-	return activitiesFromRecords(records), nil
+	args = append(args, limit+1)
+	var records []activityRecord
+	if err := r.db.SelectContext(ctx, &records, activitySelectSQL+` WHERE `+where+
+		fmt.Sprintf(` ORDER BY a.created_at DESC, a.id DESC LIMIT $%d`, len(args)), args...); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(records) > limit
+	if hasMore {
+		records = records[:limit]
+	}
+	return activitiesFromRecords(records), hasMore, nil
 }
 
 // FindByID returns a single entry, including a soft-deleted one.

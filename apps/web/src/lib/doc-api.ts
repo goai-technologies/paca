@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
@@ -42,7 +42,8 @@ export interface DocSnapshot {
 	id: string;
 	document_id?: string | null;
 	title: string;
-	content: unknown[] | null;
+	/** Absent in snapshot lists; fetch one snapshot (getSnapshot) for its body. */
+	content?: unknown[] | null;
 	snapshot_number: number;
 	created_by?: string | null;
 	created_at: string;
@@ -50,6 +51,7 @@ export interface DocSnapshot {
 
 export interface DocSnapshotListResult {
 	items: DocSnapshot[];
+	next_cursor?: string | null;
 }
 
 export type DocActivityType =
@@ -132,6 +134,28 @@ export const docQueryKeys = {
 			: (["projects", projectId, "docs", "list"] as const),
 	detail: (projectId: string, docId: string) =>
 		["projects", projectId, "docs", docId] as const,
+	/** One page-set of a folder's child folders ("root" for the top level). */
+	folderChildren: (projectId: string, parentId: string | null) =>
+		[
+			"projects",
+			projectId,
+			"docs",
+			"folders",
+			"children",
+			parentId ?? "root",
+		] as const,
+	folderPath: (projectId: string, folderId: string) =>
+		["projects", projectId, "docs", "folders", "path", folderId] as const,
+	/** One page-set of a folder's documents ("root" for documents outside any folder). */
+	docChildren: (projectId: string, folderId: string | null) =>
+		[
+			"projects",
+			projectId,
+			"docs",
+			"list",
+			"children",
+			folderId ?? "root",
+		] as const,
 	snapshots: (projectId: string, docId: string) =>
 		["projects", projectId, "docs", docId, "snapshots"] as const,
 	snapshot: (projectId: string, docId: string, snapshotId: string) =>
@@ -142,16 +166,43 @@ export const docQueryKeys = {
 
 // ── Query options ─────────────────────────────────────────────────────────────
 
-export const docFoldersQueryOptions = (projectId: string) =>
-	queryOptions({
-		queryKey: docQueryKeys.folders(projectId),
-		queryFn: () => listFolders(projectId),
+export const DOC_TREE_PAGE_SIZE = 50;
+
+/** One level of the doc tree's folders, loaded a page at a time. */
+export const docFoldersInfiniteQueryOptions = (
+	projectId: string,
+	parentId: string | null,
+) =>
+	infiniteQueryOptions({
+		queryKey: docQueryKeys.folderChildren(projectId, parentId),
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listFolders(projectId, parentId, pageParam),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 	});
 
-export const docListQueryOptions = (projectId: string, folderId?: string) =>
+/** One level of the doc tree's documents, loaded a page at a time. */
+export const docsInfiniteQueryOptions = (
+	projectId: string,
+	folderId: string | null,
+) =>
+	infiniteQueryOptions({
+		queryKey: docQueryKeys.docChildren(projectId, folderId),
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listDocuments(projectId, { folderId, cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+	});
+
+/** The folders from the root down to this one, for breadcrumbs. */
+export const docFolderPathQueryOptions = (
+	projectId: string,
+	folderId: string | null | undefined,
+) =>
 	queryOptions({
-		queryKey: docQueryKeys.list(projectId, folderId),
-		queryFn: () => listDocuments(projectId, folderId),
+		queryKey: docQueryKeys.folderPath(projectId, folderId ?? ""),
+		queryFn: () => getFolderPath(projectId, folderId as string),
+		enabled: !!folderId,
 	});
 
 export const docQueryOptions = (projectId: string, docId: string) =>
@@ -161,10 +212,16 @@ export const docQueryOptions = (projectId: string, docId: string) =>
 		enabled: !!docId,
 	});
 
-export const docSnapshotsQueryOptions = (projectId: string, docId: string) =>
-	queryOptions({
+export const docSnapshotsInfiniteQueryOptions = (
+	projectId: string,
+	docId: string,
+) =>
+	infiniteQueryOptions({
 		queryKey: docQueryKeys.snapshots(projectId, docId),
-		queryFn: () => listSnapshots(projectId, docId),
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listSnapshots(projectId, docId, pageParam),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 		enabled: !!docId,
 	});
 
@@ -179,19 +236,40 @@ export const docSnapshotQueryOptions = (
 		enabled: !!snapshotId,
 	});
 
-export const docActivitiesQueryOptions = (projectId: string, docId: string) =>
-	queryOptions({
-		queryKey: docQueryKeys.activities(projectId, docId),
-		queryFn: () => listActivities(projectId, docId),
-		enabled: !!docId,
-	});
-
 // ── Folder API ────────────────────────────────────────────────────────────────
 
-export async function listFolders(projectId: string): Promise<DocFolder[]> {
+export interface DocFolderPage {
+	items: DocFolder[];
+	next_cursor?: string | null;
+}
+
+/** One page of a folder's direct child folders, in manual order
+ *  (parentId null = the top level). */
+export async function listFolders(
+	projectId: string,
+	parentId: string | null,
+	cursor?: string,
+): Promise<DocFolderPage> {
+	const { data } = await apiClient.instance.get<SuccessEnvelope<DocFolderPage>>(
+		`/projects/${projectId}/docs/folders`,
+		{
+			params: {
+				parent_id: parentId ?? "null",
+				page_size: DOC_TREE_PAGE_SIZE,
+				...(cursor ? { cursor } : {}),
+			},
+		},
+	);
+	return data.data;
+}
+
+export async function getFolderPath(
+	projectId: string,
+	folderId: string,
+): Promise<DocFolder[]> {
 	const { data } = await apiClient.instance.get<
 		SuccessEnvelope<DocFolderListResult>
-	>(`/projects/${projectId}/docs/folders`);
+	>(`/projects/${projectId}/docs/folders/${folderId}/path`);
 	return data.data.items;
 }
 
@@ -229,43 +307,29 @@ export async function deleteFolder(
 
 // ── Document API ──────────────────────────────────────────────────────────────
 
+/** One page of a project's documents in manual order, without their bodies.
+ *  `folderId` narrows to the documents directly inside that folder (null =
+ *  documents outside any folder; omit for documents anywhere); `search` is a
+ *  case-insensitive title match. Returns the page envelope so callers can
+ *  keep paging via next_cursor. */
 export async function listDocuments(
 	projectId: string,
-	folderId?: string,
-	/** Case-insensitive title match, server-side (mirrors task search) — used
-	 *  by hooks/use-context-item-search.ts's Doc tab. Omitted/blank means
-	 *  "don't filter", same as omitting folderId. */
-	search?: string,
-): Promise<Document[]> {
-	const params: Record<string, string> = {};
-	if (folderId) params.folder_id = folderId;
-	if (search?.trim()) params.search = search.trim();
-	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<DocumentListResult>
-	>(`/projects/${projectId}/docs`, {
-		params: Object.keys(params).length > 0 ? params : undefined,
-	});
-	return data.data.items;
-}
-
-/** Paginated sibling of listDocuments for the context-injection search
- *  picker (hooks/use-context-item-search.ts): same endpoint, but requests a
- *  bounded, cursor-paginated page instead of every matching document at
- *  once. Returns the page envelope (not just the array) so the caller can
- *  keep paging via next_cursor. */
-export async function listDocumentsPage(
-	projectId: string,
-	opts: { search?: string; cursor?: string; pageSize?: number } = {},
+	opts: {
+		folderId?: string | null;
+		search?: string;
+		cursor?: string;
+		pageSize?: number;
+	} = {},
 ): Promise<DocumentListResult> {
-	const params: Record<string, string | number> = {};
+	const params: Record<string, string | number> = {
+		page_size: opts.pageSize ?? DOC_TREE_PAGE_SIZE,
+	};
+	if (opts.folderId !== undefined) params.folder_id = opts.folderId ?? "null";
 	if (opts.search?.trim()) params.search = opts.search.trim();
 	if (opts.cursor) params.cursor = opts.cursor;
-	if (opts.pageSize) params.page_size = opts.pageSize;
 	const { data } = await apiClient.instance.get<
 		SuccessEnvelope<DocumentListResult>
-	>(`/projects/${projectId}/docs`, {
-		params: Object.keys(params).length > 0 ? params : undefined,
-	});
+	>(`/projects/${projectId}/docs`, { params });
 	return data.data;
 }
 
@@ -321,14 +385,24 @@ export async function deleteDocument(
 
 // ── Snapshot API ──────────────────────────────────────────────────────────────
 
+export const DOC_SNAPSHOT_PAGE_SIZE = 30;
+
+/** One page of a document's version history, newest first and without the
+ *  snapshot bodies; follow next_cursor for older versions. */
 export async function listSnapshots(
 	projectId: string,
 	docId: string,
-): Promise<DocSnapshot[]> {
+	cursor?: string,
+): Promise<DocSnapshotListResult> {
 	const { data } = await apiClient.instance.get<
 		SuccessEnvelope<DocSnapshotListResult>
-	>(`/projects/${projectId}/docs/${docId}/snapshots`);
-	return data.data.items;
+	>(`/projects/${projectId}/docs/${docId}/snapshots`, {
+		params: {
+			page_size: DOC_SNAPSHOT_PAGE_SIZE,
+			...(cursor ? { cursor } : {}),
+		},
+	});
+	return data.data;
 }
 
 export async function getSnapshot(
@@ -344,14 +418,24 @@ export async function getSnapshot(
 
 // ── Activity / Comment API ────────────────────────────────────────────────────
 
+export const DOC_ACTIVITY_PAGE_SIZE = 30;
+
+/** One page of a document's activity, newest first; pass the previous page's
+ *  next_cursor to get the next, older page. */
 export async function listActivities(
 	projectId: string,
 	docId: string,
-): Promise<DocActivity[]> {
+	cursor?: string,
+): Promise<{ items: DocActivity[]; next_cursor?: string | null }> {
 	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<DocActivityListResult>
-	>(`/projects/${projectId}/docs/${docId}/activities`);
-	return data.data.items;
+		SuccessEnvelope<{ items: DocActivity[]; next_cursor?: string | null }>
+	>(`/projects/${projectId}/docs/${docId}/activities`, {
+		params: {
+			page_size: DOC_ACTIVITY_PAGE_SIZE,
+			...(cursor ? { cursor } : {}),
+		},
+	});
+	return data.data;
 }
 
 export async function addDocComment(

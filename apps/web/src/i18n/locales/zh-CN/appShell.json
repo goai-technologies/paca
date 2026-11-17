@@ -30,7 +30,8 @@
 		"team": "团队",
 		"settings": "设置",
 		"changelog": "最新动态",
-		"activity": "动态"
+		"activity": "动态",
+		"serviceAccounts": "服务账号"
 	},
 	"projectSwitcher": {
 		"projects": "项目",

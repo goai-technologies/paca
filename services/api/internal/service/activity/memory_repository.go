@@ -86,19 +86,40 @@ func matches(a *activitydom.Activity, f activitydom.ListFilter) bool {
 	return true
 }
 
-// ListForEntity returns one entity's non-deleted entries oldest first.
-func (r *MemoryRepository) ListForEntity(_ context.Context, entityType string, entityID uuid.UUID) ([]*activitydom.Activity, error) {
+// ListForEntity returns a page of one entity's non-deleted entries,
+// newest first, after cursor.
+func (r *MemoryRepository) ListForEntity(_ context.Context, entityType string, entityID uuid.UUID, cursor *activitydom.Cursor, limit int) ([]*activitydom.Activity, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var out []*activitydom.Activity
+	var all []*activitydom.Activity
 	for _, a := range r.rows {
 		if a.EntityType == entityType && a.EntityIDOrNil() == entityID && a.DeletedAt == nil {
 			cp := *a
-			out = append(out, &cp)
+			all = append(all, &cp)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
-	return out, nil
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].CreatedAt.Equal(all[j].CreatedAt) {
+			return all[i].CreatedAt.After(all[j].CreatedAt)
+		}
+		return all[i].ID.String() > all[j].ID.String()
+	})
+	var out []*activitydom.Activity
+	for _, a := range all {
+		if cursor != nil {
+			older := a.CreatedAt.Before(cursor.CreatedAt) ||
+				(a.CreatedAt.Equal(cursor.CreatedAt) && a.ID.String() < cursor.ID.String())
+			if !older {
+				continue
+			}
+		}
+		out = append(out, a)
+	}
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	return out, hasMore, nil
 }
 
 // FindByID returns a copy of one entry or activitydom.ErrNotFound.

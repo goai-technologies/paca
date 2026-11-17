@@ -30,7 +30,8 @@
 		"team": "Team",
 		"settings": "Settings",
 		"changelog": "What's New",
-		"activity": "Activity"
+		"activity": "Activity",
+		"serviceAccounts": "Service Accounts"
 	},
 	"projectSwitcher": {
 		"projects": "Projects",

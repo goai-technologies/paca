@@ -56,7 +56,8 @@ func NewInstaller(backendDir, frontendDir, mcpDir, skillsDir string, httpClient 
 // It returns the parsed plugin manifest used for DB registration.
 //
 // checkManifest is called with the downloaded manifest immediately after it
-// is parsed and validated, before any of the plugin's live on-disk artifacts
+// is parsed and validated (PluginManifest.Validate runs first, then
+// checkManifest), before any of the plugin's live on-disk artifacts
 // are touched (the backend/frontend/migrations/mcp/skills copy steps below
 // overwrite or os.RemoveAll the existing installed directories in place, with
 // no staging — so a compatibility check run after those steps would be too
@@ -121,14 +122,30 @@ func (i *Installer) Install(ctx context.Context, item MarketplacePlugin, checkMa
 	if manifest.ID != item.Name {
 		return plugindom.PluginManifest{}, fmt.Errorf("manifest id %q does not match catalog name %q", manifest.ID, item.Name)
 	}
+	// Validate before checkManifest and before anything on disk is touched:
+	// a manifest the registry would reject (e.g. the retired
+	// requirePermissions middleware) must not overwrite a live plugin's
+	// artifacts or reach its migrations/runtime load.
+	if err := manifest.Validate(); err != nil {
+		return plugindom.PluginManifest{}, fmt.Errorf("invalid plugin manifest: %w", err)
+	}
 	if checkManifest != nil {
 		if err := checkManifest(manifest); err != nil {
 			return plugindom.PluginManifest{}, err
 		}
 	}
 
-	backendPluginDir := filepath.Join(i.backendDir, item.Name)
-	frontendPluginDir := filepath.Join(i.frontendDir, item.Name)
+	if err := plugindom.ValidatePluginName(item.Name); err != nil {
+		return plugindom.PluginManifest{}, err
+	}
+	backendPluginDir, err := safePluginDir(i.backendDir, item.Name)
+	if err != nil {
+		return plugindom.PluginManifest{}, err
+	}
+	frontendPluginDir, err := safePluginDir(i.frontendDir, item.Name)
+	if err != nil {
+		return plugindom.PluginManifest{}, err
+	}
 
 	// Backend WASM — optional.
 	if strings.TrimSpace(item.Artifacts.BackendTarGzURL) != "" {
@@ -249,10 +266,31 @@ func (i *Installer) Install(ctx context.Context, item MarketplacePlugin, checkMa
 // Uninstall removes all installed files for a plugin from the backend,
 // frontend, MCP, and skills stores. It does NOT touch the database.
 func (i *Installer) Uninstall(name string) error {
-	backendPluginDir := filepath.Join(i.backendDir, name)
-	frontendPluginDir := filepath.Join(i.frontendDir, name)
-	mcpPluginDir := filepath.Join(i.mcpDir, name)
-	skillsPluginDir := filepath.Join(i.skillsDir, name)
+	// Plugin names come from the database and may predate name validation;
+	// refuse anything that could resolve outside the plugin roots before any
+	// RemoveAll runs.
+	if err := plugindom.ValidatePluginName(name); err != nil {
+		return err
+	}
+	backendPluginDir, err := safePluginDir(i.backendDir, name)
+	if err != nil {
+		return err
+	}
+	frontendPluginDir, err := safePluginDir(i.frontendDir, name)
+	if err != nil {
+		return err
+	}
+	var mcpPluginDir, skillsPluginDir string
+	if strings.TrimSpace(i.mcpDir) != "" {
+		if mcpPluginDir, err = safePluginDir(i.mcpDir, name); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(i.skillsDir) != "" {
+		if skillsPluginDir, err = safePluginDir(i.skillsDir, name); err != nil {
+			return err
+		}
+	}
 
 	var errs []error
 	if err := os.RemoveAll(backendPluginDir); err != nil {
@@ -280,6 +318,18 @@ func (i *Installer) Uninstall(name string) error {
 		i.log.Info("plugin files removed", "name", name)
 	}
 	return nil
+}
+
+// safePluginDir joins name onto root and verifies the cleaned result is a
+// strict descendant of root, so a crafted name can never address root itself
+// or anything outside it.
+func safePluginDir(root, name string) (string, error) {
+	cleanRoot := filepath.Clean(root)
+	target := filepath.Join(cleanRoot, name)
+	if !strings.HasPrefix(target, cleanRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("plugin name %q resolves outside plugin directory", name)
+	}
+	return target, nil
 }
 
 func (i *Installer) downloadAndExtractTarGz(ctx context.Context, url, dest string) error {

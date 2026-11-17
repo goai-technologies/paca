@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { CustomFieldOption } from "@/lib/project-api";
+import type { AvatarIdentity } from "@/lib/provider-logos";
 
 export type PropertyFieldMode =
 	| "select"
@@ -24,13 +25,14 @@ export interface SelectOption {
 	/** Small muted hint shown after the label in the dropdown list only (not
 	 * in the compact trigger pill once a value is selected). */
 	hint?: string;
+	/** Group heading in the dropdown list (e.g. Active / Upcoming sprints). */
+	group?: string;
 }
 
 export interface UserOption {
 	value: string;
 	label: string;
-	initials: string;
-	avatarUrl?: string | null;
+	avatar: AvatarIdentity;
 }
 
 export interface PropertyFieldProps {

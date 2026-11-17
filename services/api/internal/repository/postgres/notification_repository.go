@@ -37,6 +37,7 @@ type notificationReadRow struct {
 	ActorAgentType        string  `db:"actor_agent_type"`
 	ActorAgentLLMProvider string  `db:"actor_agent_llm_provider"`
 	ActorAgentACPProvider *string `db:"actor_agent_acp_provider"`
+	ActorAgentCLIProvider *string `db:"actor_agent_cli_provider"`
 	TaskTitle             *string `db:"task_title"`
 	TaskNumber            *int    `db:"task_number"`
 	ProjectName           string  `db:"project_name"`
@@ -59,14 +60,15 @@ func NewNotificationRepository(db *sqlx.DB) *NotificationRepository {
 const notificationReadCols = `
 	n.id, n.recipient_user_id, n.actor_member_id, n.type,
 	n.task_id, n.project_id, n.read_at, n.created_at,
-	COALESCE(u.full_name, ag.name) AS actor_full_name,
+	aac.name AS actor_full_name,
 	COALESCE(u.username, ag.handle) AS actor_username,
-	COALESCE(u.avatar_key, ag.avatar_key) AS actor_avatar_key,
-	COALESCE(u.avatar_thumb_key, ag.avatar_thumb_key) AS actor_avatar_thumb_key,
-	COALESCE(pm.member_type, '') AS actor_member_type,
+	aac.avatar_key AS actor_avatar_key,
+	aac.avatar_thumb_key AS actor_avatar_thumb_key,
+	CASE aac.kind WHEN 'user' THEN 'human' ELSE COALESCE(aac.kind, '') END AS actor_member_type,
 	COALESCE(ag.agent_type, '') AS actor_agent_type,
 	COALESCE(ag.llm_provider, '') AS actor_agent_llm_provider,
 	ag.acp_provider AS actor_agent_acp_provider,
+	ag.cli_provider AS actor_agent_cli_provider,
 	t.title AS task_title, t.task_number,
 	p.name AS project_name`
 
@@ -96,6 +98,7 @@ func notificationFromRow(r notificationReadRow) *notificationdom.Notification {
 	n.ActorAgentType = r.ActorAgentType
 	n.ActorAgentLLMProvider = r.ActorAgentLLMProvider
 	n.ActorAgentACPProvider = r.ActorAgentACPProvider
+	n.ActorAgentCLIProvider = r.ActorAgentCLIProvider
 	if r.TaskID != nil {
 		id := uuid.MustParse(*r.TaskID)
 		n.TaskID = &id
@@ -165,8 +168,9 @@ func (r *NotificationRepository) ListForUser(ctx context.Context, userID uuid.UU
 		SELECT ` + notificationReadCols + `
 		FROM notifications n
 		LEFT JOIN project_members pm ON pm.id = n.actor_member_id
-		LEFT JOIN users u ON u.id = pm.user_id AND u.deleted_at IS NULL
-		LEFT JOIN agents ag ON ag.id = pm.agent_id
+		LEFT JOIN accounts aac ON aac.id = pm.account_id
+		LEFT JOIN users u ON u.id = pm.account_id
+		LEFT JOIN agents ag ON ag.id = pm.account_id
 		LEFT JOIN tasks t ON t.id = n.task_id AND t.deleted_at IS NULL
 		JOIN projects p ON p.id = n.project_id
 		WHERE n.recipient_user_id = $1` + whereCursor + `

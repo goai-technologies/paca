@@ -124,7 +124,7 @@ func (r *ConversationRepository) GetConversationRealtimeContext(ctx context.Cont
 		 FROM agent_conversations c
 		 LEFT JOIN agent_chat_sessions s ON s.id = c.chat_session_id
 		 LEFT JOIN project_members pm ON pm.id = s.member_id
-		 LEFT JOIN users u ON u.id = pm.user_id
+		 LEFT JOIN users u ON u.id = pm.account_id
 		 WHERE c.id = $1`, conversationID)
 	if err != nil {
 		return uuid.Nil, nil, fmt.Errorf("postgres: get realtime context for conversation %s: %w", conversationID, err)

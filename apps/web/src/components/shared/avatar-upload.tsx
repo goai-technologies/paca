@@ -1,6 +1,9 @@
 import { Camera, Loader2, X } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useRef, useState } from "react";
+import {
+	EntityAvatar,
+	type EntityAvatarProps,
+} from "@/components/shared/entity-avatar";
 import {
 	ACCEPTED_AVATAR_CONTENT_TYPES,
 	type AvatarResult,
@@ -23,31 +26,23 @@ export interface AvatarUploadLabels {
 interface AvatarUploadProps {
 	/** Owner path — "/users/me", "/projects/{id}/agents/{id}", or "/admin/agents/{id}". */
 	basePath: string;
-	avatarUrl?: string | null;
-	/** Shown when there's no avatar (initials or an icon). */
-	fallback: ReactNode;
+	/** What to render: the owner's identity plus its uploaded `avatarUrl`
+	 * (never a placeholder default — the remove button keys off it). */
+	avatar: EntityAvatarProps;
 	onChange: (result: AvatarResult) => void;
 	labels: AvatarUploadLabels;
 	/** Sizing/shape for the avatar itself, e.g. "size-14 rounded-xl". */
 	className?: string;
-	fallbackClassName?: string;
 	disabled?: boolean;
-	/** Whether the remove button can show at all — pass `false` when
-	 * `avatarUrl` is a placeholder (e.g. a provider-logo default) rather than
-	 * a real upload, since there's nothing to remove. Defaults to `true`. */
-	canRemove?: boolean;
 }
 
 export function AvatarUpload({
 	basePath,
-	avatarUrl,
-	fallback,
+	avatar,
 	onChange,
 	labels,
 	className,
-	fallbackClassName,
 	disabled,
-	canRemove = true,
 }: AvatarUploadProps) {
 	const inputRef = useRef<HTMLInputElement>(null);
 	const [uploading, setUploading] = useState(false);
@@ -103,23 +98,11 @@ export function AvatarUpload({
 					className,
 				)}
 			>
-				<Avatar className="size-full rounded-[inherit] after:rounded-[inherit]">
-					{/* Always mounted (never conditionally omitted): base-ui's Avatar
-					    tracks image-load status internally and only shows Fallback
-					    once it observes a missing/failed src — omitting this element
-					    from the tree instead leaves that internal state stuck at
-					    whatever it last was, so removing an avatar left the whole
-					    thing blank (no photo, no fallback) until a full reload. */}
-					<AvatarImage
-						src={avatarUrl ?? undefined}
-						className="rounded-[inherit]"
-					/>
-					<AvatarFallback
-						className={cn("rounded-[inherit]", fallbackClassName)}
-					>
-						{fallback}
-					</AvatarFallback>
-				</Avatar>
+				<EntityAvatar
+					{...avatar}
+					shape="inherit"
+					className={cn("size-full", avatar.className)}
+				/>
 
 				<button
 					type="button"
@@ -139,7 +122,7 @@ export function AvatarUpload({
 					)}
 				</button>
 
-				{avatarUrl && canRemove && !uploading ? (
+				{avatar.avatarUrl && !uploading ? (
 					<button
 						type="button"
 						aria-label={labels.remove}

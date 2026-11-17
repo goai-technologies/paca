@@ -15,20 +15,21 @@ import (
 
 // settingsColumns is shared between Get and WithLock's locked read so the
 // two queries can't drift apart.
-const settingsColumns = `logo_key, logo_thumb_key, favicon_key, favicon_thumb_key, primary_color_light, primary_color_dark, brand_name, updated_at, updated_by`
+const settingsColumns = `logo_key, logo_thumb_key, favicon_key, favicon_thumb_key, primary_color_light, primary_color_dark, brand_name, updated_at, updated_by, commitments_project_id`
 
 // workspaceSettingsRecord is the sqlx write model for the singleton
 // workspace_settings row.
 type workspaceSettingsRecord struct {
-	LogoKey           *string   `db:"logo_key"`
-	LogoThumbKey      *string   `db:"logo_thumb_key"`
-	FaviconKey        *string   `db:"favicon_key"`
-	FaviconThumbKey   *string   `db:"favicon_thumb_key"`
-	PrimaryColorLight *string   `db:"primary_color_light"`
-	PrimaryColorDark  *string   `db:"primary_color_dark"`
-	BrandName         *string   `db:"brand_name"`
-	UpdatedAt         time.Time `db:"updated_at"`
-	UpdatedBy         *string   `db:"updated_by"`
+	LogoKey              *string   `db:"logo_key"`
+	LogoThumbKey         *string   `db:"logo_thumb_key"`
+	FaviconKey           *string   `db:"favicon_key"`
+	FaviconThumbKey      *string   `db:"favicon_thumb_key"`
+	PrimaryColorLight    *string   `db:"primary_color_light"`
+	PrimaryColorDark     *string   `db:"primary_color_dark"`
+	BrandName            *string   `db:"brand_name"`
+	CommitmentsProjectID *string   `db:"commitments_project_id"`
+	UpdatedAt            time.Time `db:"updated_at"`
+	UpdatedBy            *string   `db:"updated_by"`
 }
 
 func workspaceSettingsToEntity(r *workspaceSettingsRecord) (*settingsdom.WorkspaceSettings, error) {
@@ -40,16 +41,25 @@ func workspaceSettingsToEntity(r *workspaceSettingsRecord) (*settingsdom.Workspa
 		}
 		updatedBy = &id
 	}
+	var commitmentsProject *uuid.UUID
+	if r.CommitmentsProjectID != nil {
+		id, err := uuid.Parse(*r.CommitmentsProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("settings repo: parse commitments_project_id %q: %w", *r.CommitmentsProjectID, err)
+		}
+		commitmentsProject = &id
+	}
 	return &settingsdom.WorkspaceSettings{
-		LogoKey:           r.LogoKey,
-		LogoThumbKey:      r.LogoThumbKey,
-		FaviconKey:        r.FaviconKey,
-		FaviconThumbKey:   r.FaviconThumbKey,
-		PrimaryColorLight: r.PrimaryColorLight,
-		PrimaryColorDark:  r.PrimaryColorDark,
-		BrandName:         r.BrandName,
-		UpdatedAt:         r.UpdatedAt,
-		UpdatedBy:         updatedBy,
+		CommitmentsProjectID: commitmentsProject,
+		LogoKey:              r.LogoKey,
+		LogoThumbKey:         r.LogoThumbKey,
+		FaviconKey:           r.FaviconKey,
+		FaviconThumbKey:      r.FaviconThumbKey,
+		PrimaryColorLight:    r.PrimaryColorLight,
+		PrimaryColorDark:     r.PrimaryColorDark,
+		BrandName:            r.BrandName,
+		UpdatedAt:            r.UpdatedAt,
+		UpdatedBy:            updatedBy,
 	}, nil
 }
 
@@ -131,8 +141,8 @@ func updateRow(ctx context.Context, tx *sqlx.Tx, s *settingsdom.WorkspaceSetting
 		id := s.UpdatedBy.String()
 		updatedBy = &id
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE workspace_settings SET logo_key = $1, logo_thumb_key = $2, favicon_key = $3, favicon_thumb_key = $4, primary_color_light = $5, primary_color_dark = $6, brand_name = $7, updated_at = $8, updated_by = $9 WHERE id = true`,
-		s.LogoKey, s.LogoThumbKey, s.FaviconKey, s.FaviconThumbKey, s.PrimaryColorLight, s.PrimaryColorDark, s.BrandName, s.UpdatedAt, updatedBy,
+	_, err := tx.ExecContext(ctx, `UPDATE workspace_settings SET logo_key = $1, logo_thumb_key = $2, favicon_key = $3, favicon_thumb_key = $4, primary_color_light = $5, primary_color_dark = $6, brand_name = $7, updated_at = $8, updated_by = $9, commitments_project_id = $10 WHERE id = true`,
+		s.LogoKey, s.LogoThumbKey, s.FaviconKey, s.FaviconThumbKey, s.PrimaryColorLight, s.PrimaryColorDark, s.BrandName, s.UpdatedAt, updatedBy, uuidPtrToStrPtr(s.CommitmentsProjectID),
 	)
 	if err != nil {
 		return fmt.Errorf("settings repo: update: %w", err)

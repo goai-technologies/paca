@@ -93,13 +93,16 @@ func NewAgentRepository(db *sqlx.DB) *AgentRepository {
 func (r *AgentRepository) FindByID(ctx context.Context, id uuid.UUID) (*agent.Config, error) {
 	var rec agentRecord
 	err := r.db.GetContext(ctx, &rec, `
-		SELECT id, name, handle, agent_scope, agent_type, llm_provider, llm_model,
-		       llm_api_key_secret, llm_base_url, system_prompt,
-		       max_iterations, timeout_minutes,
-		       git_committer_name, git_committer_email, docker_enabled,
-		       cli_provider, cli_model, cli_auth_mode, cli_api_key_secret
-		FROM agents
-		WHERE id = $1 AND deleted_at IS NULL
+		SELECT a.id, ac.name, a.handle,
+		       CASE WHEN a.project_id IS NULL THEN 'global' ELSE 'project' END AS agent_scope,
+		       a.agent_type, a.llm_provider, a.llm_model,
+		       a.llm_api_key_secret, a.llm_base_url, a.system_prompt,
+		       a.max_iterations, a.timeout_minutes,
+		       a.git_committer_name, a.git_committer_email, a.docker_enabled,
+		       a.cli_provider, a.cli_model, a.cli_auth_mode, a.cli_api_key_secret
+		FROM agents a
+		JOIN accounts ac ON ac.id = a.id
+		WHERE a.id = $1 AND ac.deleted_at IS NULL
 	`, id)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: find agent %s: %w", id, err)
@@ -242,9 +245,10 @@ type acpAgentRecord struct {
 func (r *AgentRepository) FindByBridgeTokenHash(ctx context.Context, tokenHash string) (*agent.ACPConfig, error) {
 	var rec acpAgentRecord
 	err := r.db.GetContext(ctx, &rec, `
-		SELECT id, project_id, acp_provider, acp_command, timeout_minutes
-		FROM agents
-		WHERE acp_bridge_token_hash = $1 AND agent_type = 'acp' AND deleted_at IS NULL
+		SELECT a.id, a.project_id, a.acp_provider, a.acp_command, a.timeout_minutes
+		FROM agents a
+		JOIN accounts ac ON ac.id = a.id AND ac.deleted_at IS NULL
+		WHERE a.acp_bridge_token_hash = $1 AND a.agent_type = 'acp'
 	`, tokenHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -265,9 +269,10 @@ func (r *AgentRepository) FindByBridgeTokenHash(ctx context.Context, tokenHash s
 func (r *AgentRepository) FindACPByID(ctx context.Context, id uuid.UUID) (*agent.ACPConfig, error) {
 	var rec acpAgentRecord
 	err := r.db.GetContext(ctx, &rec, `
-		SELECT id, project_id, acp_provider, acp_command, timeout_minutes
-		FROM agents
-		WHERE id = $1 AND agent_type = 'acp' AND deleted_at IS NULL
+		SELECT a.id, a.project_id, a.acp_provider, a.acp_command, a.timeout_minutes
+		FROM agents a
+		JOIN accounts ac ON ac.id = a.id AND ac.deleted_at IS NULL
+		WHERE a.id = $1 AND a.agent_type = 'acp'
 	`, id)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: find acp agent %s: %w", id, err)

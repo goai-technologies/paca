@@ -13,7 +13,6 @@ type Project struct {
 	Name         string
 	Description  string
 	TaskIDPrefix string
-	IsPublic     bool
 	Settings     map[string]any
 	// JevAPIKeySecret is this project's Jev (AI decision API) API key,
 	// encrypted at rest (see 000060_add_jev_integration.sql) — empty

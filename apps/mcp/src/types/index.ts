@@ -10,7 +10,11 @@ export interface PacaConfig {
 	 * URL (e.g. `http://gateway`).
 	 */
 	gatewayURL?: string;
-	/** Agent UUID forwarded as X-Agent-ID on every API request. */
+	/**
+	 * The agent this MCP server runs for (selects agent mode). It is not sent
+	 * to the API: the agent is identified by the API key (apiKey), which is
+	 * the agent's own.
+	 */
 	agentId?: string;
 	/**
 	 * Project UUID — required when agentId is provided AND the agent is
@@ -22,19 +26,10 @@ export interface PacaConfig {
 	 */
 	projectId?: string;
 	/**
-	 * Human user UUID this agent is acting on behalf of, forwarded as
-	 * X-Actor-User-ID on every API request. Only ever set for a global agent
-	 * dispatched from a trigger that names a human actor (e.g. a global-chat
-	 * message) — lets server-side attribution (e.g. who created a project)
-	 * point at that human instead of the shared agent-bot identity. Unset
-	 * for a personal API key or a project-scoped agent's automation runs.
-	 */
-	actorUserId?: string;
-	/**
 	 * UUID of the conversation this MCP server instance is running as part
 	 * of, forwarded as X-Conversation-ID on every API request — set
 	 * unconditionally by agent-runner's buildMCPServers (PACA_CONVERSATION_ID),
-	 * unlike projectId/actorUserId. Lets services/api's
+	 * unlike projectId. Lets services/api's
 	 * GetConversationForAgent (the read_conversation tool's backing
 	 * endpoint) authorize a cross-conversation read against *this*
 	 * conversation's own project/actor/owning member, instead of trusting
@@ -222,6 +217,16 @@ export interface Document {
 	updated_at: string;
 }
 
+export interface DocumentSearchHit {
+	id: string;
+	project_id?: string | null;
+	folder_id?: string | null;
+	title: string;
+	matched_in: "title" | "content";
+	snippet?: string;
+	updated_at: string;
+}
+
 export interface DocumentListResult {
 	items: Document[];
 }
@@ -335,49 +340,70 @@ export interface DocumentActivityListResult {
 
 // ==================== Project Members ====================
 
+export interface MemberRoleSummary {
+	id: string;
+	name: string;
+}
+
 export interface ProjectMember {
 	id: string;
 	project_id: string;
 	user_id: string;
-	project_role_id: string;
+	roles: MemberRoleSummary[];
 	username: string;
 	full_name: string;
-	role_name: string;
 	joined_at?: string;
 }
 
 export interface AddMemberInput {
 	user_id: string;
-	project_role_id: string;
+	role_ids: string[];
 }
 
-export interface UpdateMemberRoleInput {
-	project_role_id: string;
+export interface ReplaceMemberRolesInput {
+	role_ids: string[];
 }
 
 // ==================== Project Roles ====================
 
+/** One statement of an IAM policy document. */
+export interface PolicyStatement {
+	sid?: string;
+	effect: "Allow" | "Deny";
+	actions: string[];
+	resources: string[];
+	conditions?: Record<string, Record<string, unknown>>;
+}
+
+/** An IAM policy document: the only shape the roles API accepts. */
+export interface RolePolicy {
+	version?: string;
+	statements: PolicyStatement[];
+}
+
 export interface ProjectRole {
 	id: string;
-	project_id?: string;
-	role_name: string;
+	project_id?: string | null;
+	name: string;
 	description?: string | null;
-	permissions: Record<string, unknown>;
+	policy: RolePolicy;
 	is_system?: boolean;
+	is_default?: boolean;
+	attachment_count?: number;
 	created_at: string;
 	updated_at: string;
 }
 
 export interface CreateRoleInput {
-	role_name: string;
+	name: string;
 	description?: string;
-	permissions: Record<string, unknown>;
+	policy: RolePolicy;
 }
 
 export interface UpdateRoleInput {
-	role_name?: string;
-	description?: string;
-	permissions?: Record<string, unknown>;
+	name: string;
+	description: string;
+	policy: RolePolicy;
 }
 
 // ==================== Task Types ====================

@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	agentdom "github.com/Paca-AI/api/internal/domain/agent"
+	accountdom "github.com/Paca-AI/api/internal/domain/account"
 	apikeydom "github.com/Paca-AI/api/internal/domain/apikey"
 	apikeysvc "github.com/Paca-AI/api/internal/service/apikey"
 )
@@ -19,12 +19,12 @@ import (
 // ---------------------------------------------------------------------------
 
 type stubRepo struct {
-	findByID       func(ctx context.Context, id uuid.UUID) (*apikeydom.APIKey, error)
-	findByHash     func(ctx context.Context, hash string) (*apikeydom.APIKey, error)
-	listByUserID   func(ctx context.Context, userID uuid.UUID) ([]*apikeydom.APIKey, error)
-	create         func(ctx context.Context, key *apikeydom.APIKey, keyHash string) error
-	revoke         func(ctx context.Context, id uuid.UUID) error
-	updateLastUsed func(ctx context.Context, id uuid.UUID, at time.Time) error
+	findByID        func(ctx context.Context, id uuid.UUID) (*apikeydom.APIKey, error)
+	findByHash      func(ctx context.Context, hash string) (*apikeydom.APIKey, error)
+	listByAccountID func(ctx context.Context, userID uuid.UUID, cursor *string, limit int) ([]*apikeydom.APIKey, bool, int, error)
+	create          func(ctx context.Context, key *apikeydom.APIKey, keyHash string) error
+	revoke          func(ctx context.Context, id uuid.UUID) error
+	updateLastUsed  func(ctx context.Context, id uuid.UUID, at time.Time) error
 }
 
 func (r *stubRepo) FindByID(ctx context.Context, id uuid.UUID) (*apikeydom.APIKey, error) {
@@ -39,11 +39,11 @@ func (r *stubRepo) FindByHash(ctx context.Context, hash string) (*apikeydom.APIK
 	}
 	return nil, apikeydom.ErrNotFound
 }
-func (r *stubRepo) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*apikeydom.APIKey, error) {
-	if r.listByUserID != nil {
-		return r.listByUserID(ctx, userID)
+func (r *stubRepo) ListByAccountID(ctx context.Context, userID uuid.UUID, cursor *string, limit int) ([]*apikeydom.APIKey, bool, int, error) {
+	if r.listByAccountID != nil {
+		return r.listByAccountID(ctx, userID, cursor, limit)
 	}
-	return nil, nil
+	return nil, false, 0, nil
 }
 func (r *stubRepo) Create(ctx context.Context, key *apikeydom.APIKey, keyHash string) error {
 	if r.create != nil {
@@ -75,8 +75,8 @@ func TestCreate_GeneratesKey(t *testing.T) {
 	svc := apikeysvc.New(&stubRepo{})
 
 	key, rawKey, err := svc.Create(context.Background(), apikeydom.CreateInput{
-		UserID: uuid.New(),
-		Name:   "CI token",
+		AccountID: uuid.New(),
+		Name:      "CI token",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -99,8 +99,8 @@ func TestCreate_EmptyNameReturnsError(t *testing.T) {
 	svc := apikeysvc.New(&stubRepo{})
 
 	_, _, err := svc.Create(context.Background(), apikeydom.CreateInput{
-		UserID: uuid.New(),
-		Name:   "   ",
+		AccountID: uuid.New(),
+		Name:      "   ",
 	})
 	if !errors.Is(err, apikeydom.ErrNameInvalid) {
 		t.Errorf("expected ErrNameInvalid, got %v", err)
@@ -111,8 +111,8 @@ func TestCreate_NameTooLongReturnsError(t *testing.T) {
 	svc := apikeysvc.New(&stubRepo{})
 
 	_, _, err := svc.Create(context.Background(), apikeydom.CreateInput{
-		UserID: uuid.New(),
-		Name:   strings.Repeat("a", 101),
+		AccountID: uuid.New(),
+		Name:      strings.Repeat("a", 101),
 	})
 	if !errors.Is(err, apikeydom.ErrNameTooLong) {
 		t.Errorf("expected ErrNameTooLong, got %v", err)
@@ -128,8 +128,8 @@ func TestCreate_PropagatesRepoError(t *testing.T) {
 	})
 
 	_, _, err := svc.Create(context.Background(), apikeydom.CreateInput{
-		UserID: uuid.New(),
-		Name:   "token",
+		AccountID: uuid.New(),
+		Name:      "token",
 	})
 	if !errors.Is(err, repoErr) {
 		t.Errorf("expected repo error, got %v", err)
@@ -147,7 +147,7 @@ func TestRevoke_OwnerCanRevoke(t *testing.T) {
 	var revokedID uuid.UUID
 	svc := apikeysvc.New(&stubRepo{
 		findByID: func(_ context.Context, id uuid.UUID) (*apikeydom.APIKey, error) {
-			return &apikeydom.APIKey{ID: id, UserID: userID}, nil
+			return &apikeydom.APIKey{ID: id, AccountID: userID}, nil
 		},
 		revoke: func(_ context.Context, id uuid.UUID) error {
 			revokedID = id
@@ -170,7 +170,7 @@ func TestRevoke_NonOwnerForbidden(t *testing.T) {
 
 	svc := apikeysvc.New(&stubRepo{
 		findByID: func(_ context.Context, id uuid.UUID) (*apikeydom.APIKey, error) {
-			return &apikeydom.APIKey{ID: id, UserID: ownerID}, nil
+			return &apikeydom.APIKey{ID: id, AccountID: ownerID}, nil
 		},
 	})
 
@@ -195,7 +195,7 @@ func TestRevoke_NotFound(t *testing.T) {
 func TestAuthenticate_ValidKey(t *testing.T) {
 	// Create a key so we know the hash.
 	var capturedHash string
-	storedKey := &apikeydom.APIKey{ID: uuid.New(), UserID: uuid.New(), Name: "test"}
+	storedKey := &apikeydom.APIKey{ID: uuid.New(), AccountID: uuid.New(), Name: "test"}
 
 	svc := apikeysvc.New(&stubRepo{
 		create: func(_ context.Context, key *apikeydom.APIKey, keyHash string) error {
@@ -212,8 +212,8 @@ func TestAuthenticate_ValidKey(t *testing.T) {
 	})
 
 	_, rawKey, err := svc.Create(context.Background(), apikeydom.CreateInput{
-		UserID: storedKey.UserID,
-		Name:   "test",
+		AccountID: storedKey.AccountID,
+		Name:      "test",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -262,94 +262,14 @@ func TestAuthenticate_UnknownKey(t *testing.T) {
 	}
 }
 
-// stubAgentIdentityStore satisfies apikeysvc.AgentIdentityStore for the
-// per-agent MCP key fallback tests below.
-type stubAgentIdentityStore struct {
-	findAgentByMCPAPIKeyHash func(ctx context.Context, hash string) (*agentdom.Agent, error)
-}
-
-func (s *stubAgentIdentityStore) FindAgentByID(_ context.Context, agentID uuid.UUID) (*agentdom.Agent, error) {
-	return &agentdom.Agent{ID: agentID}, nil
-}
-
-func (s *stubAgentIdentityStore) HasActiveGlobalChatSession(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
-	return true, nil
-}
-
-func (s *stubAgentIdentityStore) FindAgentByMCPAPIKeyHash(ctx context.Context, hash string) (*agentdom.Agent, error) {
-	if s.findAgentByMCPAPIKeyHash != nil {
-		return s.findAgentByMCPAPIKeyHash(ctx, hash)
-	}
-	return nil, agentdom.ErrAgentNotFound
-}
-
-func TestAuthenticate_AgentMCPKey_ResolvesAgentID(t *testing.T) {
-	agentID := uuid.New()
-	svc := apikeysvc.New(&stubRepo{}).
-		WithAgentIdentityStore(&stubAgentIdentityStore{
-			findAgentByMCPAPIKeyHash: func(context.Context, string) (*agentdom.Agent, error) {
-				return &agentdom.Agent{ID: agentID}, nil
-			},
-		})
-
-	result, err := svc.Authenticate(context.Background(), "some-agent-mcp-key")
-	if err != nil {
-		t.Fatalf("authenticate: %v", err)
-	}
-	if result.AgentID == nil || *result.AgentID != agentID {
-		t.Fatalf("expected AgentID %v, got %v", agentID, result.AgentID)
-	}
-}
-
-func TestAuthenticate_PersonalKeyTakesPrecedenceOverAgentStore(t *testing.T) {
-	// A hash that matches a personal key must never fall through to the
-	// agent-identity store — the two lookups only differ in what an
-	// attacker-unknown raw key happens to hash to.
-	personalKey := &apikeydom.APIKey{ID: uuid.New(), UserID: uuid.New()}
-	agentStoreCalled := false
-	svc := apikeysvc.New(&stubRepo{
-		findByHash: func(context.Context, string) (*apikeydom.APIKey, error) {
-			return personalKey, nil
-		},
-	}).WithAgentIdentityStore(&stubAgentIdentityStore{
-		findAgentByMCPAPIKeyHash: func(context.Context, string) (*agentdom.Agent, error) {
-			agentStoreCalled = true
-			return &agentdom.Agent{ID: uuid.New()}, nil
-		},
-	})
-
-	result, err := svc.Authenticate(context.Background(), "paca_"+"a"+strings.Repeat("b", 63))
-	if err != nil {
-		t.Fatalf("authenticate: %v", err)
-	}
-	if result.AgentID != nil {
-		t.Errorf("expected no AgentID for a personal key match, got %v", result.AgentID)
-	}
-	if agentStoreCalled {
-		t.Error("agent identity store should not be consulted once a personal key matches")
-	}
-}
-
-func TestAuthenticate_UnknownKey_AgentStoreConfigured(t *testing.T) {
-	// A key that matches neither a personal key nor any agent's MCP key
-	// must still fail closed with ErrNotFound.
-	svc := apikeysvc.New(&stubRepo{}).WithAgentIdentityStore(&stubAgentIdentityStore{})
-	_, err := svc.Authenticate(context.Background(), "paca_"+"a"+strings.Repeat("b", 63))
-	if !errors.Is(err, apikeydom.ErrNotFound) {
-		t.Errorf("expected ErrNotFound, got %v", err)
-	}
-}
-
-// TestAuthenticate_AgentStoreDBError_Propagates covers a transient failure
-// in the MCP-key fallback lookup (e.g. the database is unreachable): it must
-// surface as-is, not be masked as an ordinary "invalid API key" ErrNotFound —
-// otherwise an infrastructure outage looks identical to a bad credential.
-func TestAuthenticate_AgentStoreDBError_Propagates(t *testing.T) {
+// TestAuthenticate_LookupError_Propagates covers a transient failure in the
+// key lookup (e.g. the database is unreachable): it must surface as-is, not be
+// masked as an ordinary "invalid API key" ErrNotFound — otherwise an
+// infrastructure outage looks identical to a bad credential.
+func TestAuthenticate_LookupError_Propagates(t *testing.T) {
 	dbErr := errors.New("connection refused")
-	svc := apikeysvc.New(&stubRepo{}).WithAgentIdentityStore(&stubAgentIdentityStore{
-		findAgentByMCPAPIKeyHash: func(context.Context, string) (*agentdom.Agent, error) {
-			return nil, dbErr
-		},
+	svc := apikeysvc.New(&stubRepo{
+		findByHash: func(context.Context, string) (*apikeydom.APIKey, error) { return nil, dbErr },
 	})
 
 	_, err := svc.Authenticate(context.Background(), "paca_"+"a"+strings.Repeat("b", 63))
@@ -358,5 +278,23 @@ func TestAuthenticate_AgentStoreDBError_Propagates(t *testing.T) {
 	}
 	if errors.Is(err, apikeydom.ErrNotFound) {
 		t.Error("a transient lookup failure must not be reported as ErrNotFound")
+	}
+}
+
+// An agent's key resolves like any other: the record carries the owning
+// account's id and kind, from which the middleware builds the principal.
+func TestAuthenticate_AgentKey_CarriesAccountKind(t *testing.T) {
+	agentID := uuid.New()
+	svc := apikeysvc.New(&stubRepo{
+		findByHash: func(context.Context, string) (*apikeydom.APIKey, error) {
+			return &apikeydom.APIKey{ID: uuid.New(), AccountID: agentID, AccountKind: accountdom.KindAgent}, nil
+		},
+	})
+	got, err := svc.Authenticate(context.Background(), "paca_"+"a"+strings.Repeat("b", 63))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AccountID != agentID || got.AccountKind != accountdom.KindAgent {
+		t.Fatalf("got %+v", got)
 	}
 }

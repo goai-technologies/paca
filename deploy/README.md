@@ -98,7 +98,6 @@ prefixed `PACA_` are installer-only choices with no direct `.env` equivalent.
 | `PUBLIC_URL` | Full public URL, no trailing slash | derived from the above |
 | `PACA_WEB` | `bundled`/`external` | `bundled` |
 | `PACA_AGENT_RUNNER` | Include the Agent Runner service (`yes`/`no`) | `yes` |
-| `AGENT_API_KEY` | Agent Runner → API pre-shared key | auto-generated |
 | `INTERNAL_API_KEY` | API → Agent Runner pre-shared key | auto-generated |
 | `JWT_SECRET` | | auto-generated |
 
@@ -152,10 +151,6 @@ POSTGRES_PASSWORD=<strong-random-password>
 # used to authenticate the api → agent-runner internal status/control calls.
 # Generate with: openssl rand -hex 32
 INTERNAL_API_KEY=<strong-random-secret>
-# Optional — only used by Agent Runner to call back into the api service as
-# its own bot user. Leave unset if you're skipping Agent Runner.
-# Generate with: openssl rand -hex 32
-AGENT_API_KEY=<strong-random-secret>
 # Required to encrypt LLM-type agents' API keys and plugin secrets at rest.
 # Not enforced at startup, but leaving it empty stores those values in
 # plaintext instead of failing — set it unless you're certain you don't need
@@ -282,8 +277,7 @@ docker compose --env-file .env up -d --scale agent-runner=0
 
 `INTERNAL_API_KEY` must still be set in `.env` even with Agent Runner scaled
 to 0 — the api service requires it unconditionally at startup regardless of
-whether agent-runner is actually running (see above). `AGENT_API_KEY` can be
-left unset in this case.
+whether agent-runner is actually running (see above).
 
 Flags can be combined:
 

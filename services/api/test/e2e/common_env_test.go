@@ -30,7 +30,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/Paca-AI/api/internal/platform/authz"
+	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	"github.com/Paca-AI/api/internal/platform/cache"
 	"github.com/Paca-AI/api/internal/platform/database"
 	"github.com/Paca-AI/api/internal/platform/messaging"
@@ -44,13 +44,15 @@ import (
 	attachmentsvc "github.com/Paca-AI/api/internal/service/attachment"
 	authsvc "github.com/Paca-AI/api/internal/service/auth"
 	automationsvc "github.com/Paca-AI/api/internal/service/automation"
-	globalrolesvc "github.com/Paca-AI/api/internal/service/globalrole"
+	docsvc "github.com/Paca-AI/api/internal/service/doc"
 	projectsvc "github.com/Paca-AI/api/internal/service/project"
+	rolesvc "github.com/Paca-AI/api/internal/service/role"
 	sprintsvc "github.com/Paca-AI/api/internal/service/sprint"
 	ssosvc "github.com/Paca-AI/api/internal/service/sso"
 	tasksvc "github.com/Paca-AI/api/internal/service/task"
 	usersvc "github.com/Paca-AI/api/internal/service/user"
 	"github.com/Paca-AI/api/internal/transport/http/handler"
+	httpmw "github.com/Paca-AI/api/internal/transport/http/middleware"
 	"github.com/Paca-AI/api/internal/transport/http/router"
 )
 
@@ -58,9 +60,7 @@ import (
 // dependency without wiring a real members cache into the e2e harness — the
 // e2e suite doesn't exercise cache invalidation, only the agent CRUD /
 // ACP-bridge HTTP surface. It embeds the real *projectsvc.Service (not the
-// caching decorator) so FindRoleByID — CreateAgent's project_role_id
-// ownership check, see GHSA-xxc8-ggm7-vmxp — still validates against real
-// project_roles rows; only InvalidateMembersCache, which the base Service
+// caching decorator); only InvalidateMembersCache, which the base Service
 // doesn't implement, is stubbed out.
 type noopMemberCacheInvalidator struct {
 	*projectsvc.Service
@@ -96,7 +96,9 @@ type e2eEnv struct {
 	client         *http.Client
 	userService    *usersvc.Service
 	userRepo       *pgRepo.UserRepository
-	roleRepo       *pgRepo.GlobalRoleRepository
+	roleRepo       *pgRepo.RoleRepository
+	roleSvc        *rolesvc.Service
+	authz          *iam.Authorizer
 	projectRepo    *pgRepo.ProjectRepository
 	projectSvc     *projectsvc.Service
 	taskRepo       *pgRepo.TaskRepository
@@ -204,17 +206,17 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 
 	tm := jwttoken.New(e2eJWTSecret, e2eAccessTTL, e2eRefreshTTL)
 	userRepo := pgRepo.NewUserRepository(db)
-	roleRepo := pgRepo.NewGlobalRoleRepository(db)
-	syncBuiltinGlobalRoles(t, roleRepo)
-	authzStore := pgRepo.NewAuthzPermissionStore(db)
+	roleRepo := pgRepo.NewRoleRepository(db)
+	seedShippedRoles(t, db)
+	authorizer := pgRepo.NewIAMAuthorizer(db)
+	roleService := rolesvc.New(roleRepo, authorizer, authorizer, authorizer.Registry(), authorizer.Schema())
 	refreshStore := redisRepo.NewRefreshTokenStore(redisClient)
 	authService := authsvc.New(userRepo, tm, refreshStore, e2eRefreshTTL, e2eRefreshSessionTTL)
-	userService := usersvc.New(userRepo, authzStore, roleRepo)
+	userService := usersvc.New(userRepo, e2eActionsReader{authorizer})
 	agentRepo := pgRepo.NewAgentRepository(db)
-	globalRoleService := globalrolesvc.New(roleRepo, agentRepo)
 	projectRepo := pgRepo.NewProjectRepository(db)
 	taskRepo := pgRepo.NewTaskRepository(db)
-	projectService := projectsvc.New(projectRepo, taskRepo, agentRepo)
+	projectService := projectsvc.New(projectRepo, taskRepo, agentRepo).WithRoleInvalidator(authorizer)
 	taskService := tasksvc.New(taskRepo)
 	// A real (non-nil) publisher is required so that task.updated activity
 	// events actually reach StreamActivities — otherwise a per-test
@@ -236,11 +238,13 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 	apiKeyService := apikeysvc.New(apiKeyRepo)
 	activityLog := activitysvc.New(pgRepo.NewActivityRepository(db), projectRepo, activitysvc.NewRecorder(publisher))
 	activityService := tasksvc.NewActivityService(activityLog, taskRepo, projectRepo)
+	docRepo := pgRepo.NewDocumentRepository(db)
+	docService := docsvc.New(docRepo, projectRepo)
+	docActivityService := docsvc.NewActivityService(activityLog, docRepo)
 	automationRepo := pgRepo.NewAutomationRepository(db)
 	automationService := automationsvc.New(automationRepo, taskRepo, projectRepo, publisher)
 	pluginRepoForAgent := pgRepo.NewPluginRepository(db)
-	agentService := agentsvc.New(agentRepo, noopMemberCacheInvalidator{Service: projectService}, publisher, pluginRepoForAgent).
-		WithGlobalRoleService(globalRoleService)
+	agentService := agentsvc.New(agentRepo, noopMemberCacheInvalidator{Service: projectService}, publisher, pluginRepoForAgent)
 	var attachmentService *attachmentsvc.Service
 	if sharedStorageEndpoint != "" {
 		storageEndpoint := sharedStorageEndpoint
@@ -258,8 +262,7 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 		if err := storageClient.EnsureBucket(ctx, attachBucket); err != nil {
 			t.Fatalf("ensure bucket: %v", err)
 		}
-		docRepoForAttachments := pgRepo.NewDocumentRepository(db)
-		attachmentService = attachmentsvc.New(attachmentRepo, attachmentsvc.NewTaskOwnerChecker(taskRepo), attachmentsvc.NewDocOwnerChecker(docRepoForAttachments), storageClient, attachBucket)
+		attachmentService = attachmentsvc.New(attachmentRepo, attachmentsvc.NewTaskOwnerChecker(taskRepo), attachmentsvc.NewDocOwnerChecker(docRepo), storageClient, attachBucket)
 	}
 
 	cookieCfg := handler.CookieConfig{
@@ -276,16 +279,20 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 			userRepo, userService, authService, log),
 		authHandler, "")
 	engine := router.New(router.Deps{
-		TokenManager:         tm,
-		APIKeyAuth:           apiKeyService,
-		Authorizer:           authz.NewAuthorizer(authzStore),
-		ProjectVisibilitySvc: projectService,
-		Health:               handler.NewHealthHandler(),
-		Auth:                 authHandler,
-		SSO:                  ssoHandler,
-		User:                 handler.NewUserHandler(userService),
-		GlobalRole:           handler.NewGlobalRoleHandler(globalRoleService),
-		Project: handler.NewProjectHandler(projectService, authz.NewAuthorizer(authzStore),
+		TokenManager:        tm,
+		APIKeyAuth:          apiKeyService,
+		IAM:                 authorizer,
+		AgentEnvironments:   httpmw.AgentRepoLookups{Repo: agentRepo},
+		MemberPrincipals:    httpmw.MemberRepoLookup{Repo: projectRepo},
+		TaskNumbers:         taskRepo,
+		SessionEnvironments: httpmw.AgentRepoLookups{Repo: agentRepo},
+		Health:              handler.NewHealthHandler(),
+		Auth:                authHandler,
+		SSO:                 ssoHandler,
+		User:                handler.NewUserHandler(userService),
+		Role:                handler.NewRoleHandler(roleService),
+		RoleAttachments:     httpmw.NewRoleServiceAttachments(roleService),
+		Project: handler.NewProjectHandler(projectService, authorizer,
 			// Same Jev wiring as bootstrap/app.go (nil encryptor: keys are
 			// stored as plaintext, as on an instance without ENCRYPTION_KEY),
 			// plus a plain transport so jev-config/test can reach a test's
@@ -298,6 +305,7 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 			// autofill consumer never overwrites them — as in bootstrap/app.go.
 			handler.WithTaskAutofillRepository(taskRepo)),
 		Sprint:       handler.NewSprintHandler(sprintService, viewService),
+		Document:     handler.NewDocumentHandler(docService, docActivityService),
 		View:         handler.NewViewHandler(viewService),
 		Attachment:   handler.NewAttachmentHandler(attachmentService),
 		APIKey:       handler.NewAPIKeyHandler(apiKeyService),
@@ -325,6 +333,8 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 		userService:    userService,
 		userRepo:       userRepo,
 		roleRepo:       roleRepo,
+		roleSvc:        roleService,
+		authz:          authorizer,
 		projectRepo:    projectRepo,
 		projectSvc:     projectService,
 		taskRepo:       taskRepo,

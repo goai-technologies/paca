@@ -137,7 +137,7 @@ type DocSnapshotResponse struct {
 	ID             uuid.UUID       `json:"id"`
 	DocumentID     uuid.UUID       `json:"document_id"`
 	Title          string          `json:"title"`
-	Content        json.RawMessage `json:"content"`
+	Content        json.RawMessage `json:"content,omitempty"`
 	SnapshotNumber int64           `json:"snapshot_number"`
 	CreatedBy      *uuid.UUID      `json:"created_by,omitempty"`
 	CreatedByName  string          `json:"created_by_name,omitempty"`
@@ -204,5 +204,31 @@ func DocActivityFromEntity(a *docdom.Activity) DocActivityResponse {
 		CreatedAt:     a.CreatedAt,
 		UpdatedAt:     a.UpdatedAt,
 		DeletedAt:     a.DeletedAt,
+	}
+}
+
+// DocumentSearchHitResponse is one result of a title/content document search:
+// list-item metadata plus where the query matched and an excerpt (empty for
+// title matches). Content is never included.
+type DocumentSearchHitResponse struct {
+	ID        uuid.UUID  `json:"id"`
+	ProjectID uuid.UUID  `json:"project_id"`
+	FolderID  *uuid.UUID `json:"folder_id,omitempty"`
+	Title     string     `json:"title"`
+	MatchedIn string     `json:"matched_in"`
+	Snippet   string     `json:"snippet,omitempty"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// DocumentSearchHitFromEntity maps a domain SearchHit to its DTO.
+func DocumentSearchHitFromEntity(h docdom.SearchHit) DocumentSearchHitResponse {
+	return DocumentSearchHitResponse{
+		ID:        h.Document.ID,
+		ProjectID: h.Document.ProjectID,
+		FolderID:  h.Document.FolderID,
+		Title:     h.Document.Title,
+		MatchedIn: h.MatchedIn,
+		Snippet:   h.Snippet,
+		UpdatedAt: h.Document.UpdatedAt,
 	}
 }

@@ -12,17 +12,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	accountdom "github.com/Paca-AI/api/internal/domain/account"
 	activitydom "github.com/Paca-AI/api/internal/domain/activity"
-	agentdom "github.com/Paca-AI/api/internal/domain/agent"
 	apikeydom "github.com/Paca-AI/api/internal/domain/apikey"
 	taskdom "github.com/Paca-AI/api/internal/domain/task"
 	userdom "github.com/Paca-AI/api/internal/domain/user"
-	"github.com/Paca-AI/api/internal/platform/authz"
+	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	jwttoken "github.com/Paca-AI/api/internal/platform/token"
 	activitysvc "github.com/Paca-AI/api/internal/service/activity"
 	apikeysvc "github.com/Paca-AI/api/internal/service/apikey"
@@ -39,8 +40,6 @@ import (
 // Agent API Key Integration Tests
 // ---------------------------------------------------------------------------
 
-// testAgentAPIKey is the static agent API key used in tests
-const testAgentAPIKey = "paca_test_agent_key_1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 const testAgentBotUserID = "00000000-0000-0000-0000-000000000001"
 
 // buildAgentKeyRouter creates a test router with agent API key authentication configured
@@ -74,60 +73,64 @@ func buildAgentKeyRouterWithBotID(taskRepo *fakeTaskRepo, apiKeyRepo *fakeAPIKey
 	}
 	activityService := tasksvc.NewActivityService(activitysvc.New(activityRepo, &fakeActivityMemberRepo{}, nil), taskRepo, &fakeActivityMemberRepo{})
 
-	apiKeyService := apikeysvc.New(apiKeyRepo).WithAgentKey(testAgentAPIKey, botUserID)
-	// None of these task/comment-focused tests exercise the X-Actor-User-ID
-	// verification path (they never set that header, only X-Agent-ID) — see
-	// authn_test.go's TestAuthn_APIKey_* for that. This fake exists purely
-	// so a well-formed X-Agent-ID isn't rejected outright by
-	// verifyAgentIdentity's DB lookup, which every one of these tests would
-	// otherwise fail closed against.
-	apiKeyService.WithAgentIdentityStore(passthroughAgentIdentityStore{})
+	apiKeyService := &testAgentKeyAuth{inner: apikeysvc.New(apiKeyRepo)}
 
 	if store == nil {
 		store = &projectPermStore{}
 	}
-	authorizer := authz.NewAuthorizer(store)
+	authorizer := newIAM(store)
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	return router.New(router.Deps{
-		TokenManager:         tm,
-		APIKeyAuth:           apiKeyService,
-		Authorizer:           authorizer,
-		ProjectVisibilitySvc: projectService,
-		Health:               handler.NewHealthHandler(),
-		Auth:                 handler.NewAuthHandler(authService, testCookieCfg),
-		User:                 handler.NewUserHandler(userService),
-		GlobalRole:           handler.NewGlobalRoleHandler(&fakeGlobalRoleService{}),
-		Project:              handler.NewProjectHandler(projectService, authorizer),
-		Task:                 handler.NewTaskHandler(taskService, viewService, activityService),
-		Sprint:               handler.NewSprintHandler(sprintService, viewService),
-		View:                 handler.NewViewHandler(viewService),
-		Log:                  log,
+		TokenManager: tm,
+		APIKeyAuth:   apiKeyService,
+		IAM:          authorizer,
+		Health:       handler.NewHealthHandler(),
+		Auth:         handler.NewAuthHandler(authService, testCookieCfg),
+		User:         handler.NewUserHandler(userService),
+		Project:      handler.NewProjectHandler(projectService, authorizer),
+		Task:         handler.NewTaskHandler(taskService, viewService, activityService),
+		Sprint:       handler.NewSprintHandler(sprintService, viewService),
+		View:         handler.NewViewHandler(viewService),
+		Log:          log,
 	})
 }
 
-// passthroughAgentIdentityStore satisfies apikeysvc.AgentIdentityStore by
-// treating every X-Agent-ID as a real, existing agent — these integration
-// tests are about task/comment behavior under agent-key auth, not about the
-// X-Agent-ID verification boundary itself (see authn_test.go for that), so
-// they don't need a real agents-table fake.
-type passthroughAgentIdentityStore struct{}
+// testAgentKeyAuth authenticates the synthetic "paca_agent_<uuid>" keys
+// agentKeyAuthReq presents as that agent, and delegates every other key to the
+// real API key service (which looks keys up by hash).
+type testAgentKeyAuth struct{ inner *apikeysvc.Service }
 
-func (passthroughAgentIdentityStore) FindAgentByID(_ context.Context, agentID uuid.UUID) (*agentdom.Agent, error) {
-	return &agentdom.Agent{ID: agentID, AgentScope: agentdom.AgentScopeProject}, nil
+func (a *testAgentKeyAuth) Authenticate(ctx context.Context, raw string) (*apikeydom.APIKey, error) {
+	if id, ok := strings.CutPrefix(raw, "paca_agent_"); ok {
+		if agentID, err := uuid.Parse(id); err == nil {
+			return &apikeydom.APIKey{ID: uuid.New(), AccountID: agentID, AccountKind: accountdom.KindAgent}, nil
+		}
+	}
+	return a.inner.Authenticate(ctx, raw)
 }
 
-func (passthroughAgentIdentityStore) HasActiveGlobalChatSession(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
-	return true, nil
-}
-
-func (passthroughAgentIdentityStore) FindAgentByMCPAPIKeyHash(context.Context, string) (*agentdom.Agent, error) {
-	return nil, agentdom.ErrAgentNotFound
-}
-
-// agentKeyAuthReq creates a request authenticated with agent API key
+// agentKeyAuthReq creates a request authenticated as the agent agentID: it
+// presents the agent's own API key. With agentID == uuid.Nil it authenticates as
+// the bot user testAgentBotUserID instead (a plain user, no agent identity).
 func agentKeyAuthReq(ctx context.Context, method, url string, agentID uuid.UUID, body any) *http.Request {
+	if agentID == uuid.Nil {
+		return botUserAuthReq(ctx, method, url, uuid.MustParse(testAgentBotUserID), body)
+	}
+	return newJSONReq(ctx, method, url, body, func(r *http.Request) { r.Header.Set("X-API-Key", "paca_agent_"+agentID.String()) })
+}
+
+// botUserAuthReq creates a request authenticated as the plain user botUserID.
+func botUserAuthReq(ctx context.Context, method, url string, botUserID uuid.UUID, body any) *http.Request {
+	tok, err := jwttoken.New(testSecret, 15*time.Minute, 168*time.Hour).IssueAccess(botUserID.String(), "bot", "USER", "fam", false)
+	if err != nil {
+		panic(err)
+	}
+	return newJSONReq(ctx, method, url, body, func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+tok) })
+}
+
+func newJSONReq(ctx context.Context, method, url string, body any, auth func(*http.Request)) *http.Request {
 	var reader *bytes.Reader
 	if body == nil {
 		reader = bytes.NewReader(nil)
@@ -136,10 +139,7 @@ func agentKeyAuthReq(ctx context.Context, method, url string, agentID uuid.UUID,
 		reader = bytes.NewReader(b)
 	}
 	req := httptest.NewRequestWithContext(ctx, method, url, reader)
-	req.Header.Set("X-API-Key", testAgentAPIKey)
-	if agentID != uuid.Nil {
-		req.Header.Set("X-Agent-ID", agentID.String())
-	}
+	auth(req)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -157,14 +157,14 @@ func TestAgentAPIKey_CreateTask_Success(t *testing.T) {
 	agentID := uuid.New()
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			uuid.MustParse(testAgentBotUserID): {
-				projectID: {authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksWrite},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksWrite},
+				agentID: {iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -208,9 +208,9 @@ func TestAgentAPIKey_CreateTask_MissingAgentID_Returns401(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -235,8 +235,8 @@ func TestAgentAPIKey_CreateTask_InvalidAPIKey_Returns401(t *testing.T) {
 	agentID := uuid.New()
 
 	store := &projectPermStore{
-		projectPerms: map[uuid.UUID][]authz.Permission{
-			projectID: {authz.PermissionTasksWrite},
+		projectPerms: map[uuid.UUID][]iam.Action{
+			projectID: {iam.ActionTasksWrite},
 		},
 	}
 
@@ -263,14 +263,14 @@ func TestAgentAPIKey_CreateTask_NoPermission_Returns403(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksRead},
+				projectID: {iam.ActionTasksRead},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksRead},
+				agentID: {iam.ActionTasksRead},
 			},
 		},
 	}
@@ -301,14 +301,14 @@ func TestAgentAPIKey_AddComment_Success(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksWrite},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksWrite},
+				agentID: {iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -368,9 +368,9 @@ func TestAgentAPIKey_AddComment_MissingAgentID_ReturnsClearError(t *testing.T) {
 	botUserID := userdom.SystemActorUserID
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -386,8 +386,8 @@ func TestAgentAPIKey_AddComment_MissingAgentID_ReturnsClearError(t *testing.T) {
 	r := buildAgentKeyRouterWithBotID(taskRepo, apiKeyRepo, store, botUserID, activityRepo)
 	commentURL := fmt.Sprintf("/api/v1/projects/%s/tasks/%s/activities/comments", projectID, taskID)
 
-	// No agentID (uuid.Nil) means agentKeyAuthReq omits the X-Agent-ID header.
-	w := serve(r, agentKeyAuthReq(t.Context(), http.MethodPost, commentURL, uuid.Nil, map[string]any{
+	// Authenticated as the plain bot user: there is no agent identity.
+	w := serve(r, botUserAuthReq(t.Context(), http.MethodPost, commentURL, botUserID, map[string]any{
 		"content": []map[string]any{
 			{
 				"type":    "paragraph",
@@ -422,14 +422,14 @@ func TestAgentAPIKey_UpdateComment_Success(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksWrite},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksWrite},
+				agentID: {iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -488,14 +488,14 @@ func TestAgentAPIKey_UpdateTask_Success(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksWrite},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksWrite},
+				agentID: {iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -547,14 +547,14 @@ func TestAgentAPIKey_ListTasks_Success(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksRead},
+				projectID: {iam.ActionTasksRead},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksRead},
+				agentID: {iam.ActionTasksRead},
 			},
 		},
 	}
@@ -607,14 +607,14 @@ func TestAgentAPIKey_GetTask_Success(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksRead},
+				projectID: {iam.ActionTasksRead},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksRead},
+				agentID: {iam.ActionTasksRead},
 			},
 		},
 	}
@@ -665,14 +665,14 @@ func TestAgentAPIKey_GetTask_NotFound(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksRead},
+				projectID: {iam.ActionTasksRead},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksRead},
+				agentID: {iam.ActionTasksRead},
 			},
 		},
 	}
@@ -704,14 +704,14 @@ func TestAgentAPIKey_DeleteTask_Success(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksWrite},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksWrite},
+				agentID: {iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -753,14 +753,14 @@ func TestAgentAPIKey_CommentWorkflow(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksRead, authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksRead, iam.ActionTasksWrite},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksRead, authz.PermissionTasksWrite},
+				agentID: {iam.ActionTasksRead, iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -860,16 +860,18 @@ func TestAgentAPIKey_CommentWorkflow(t *testing.T) {
 // Agent ID Header Validation Tests
 // ---------------------------------------------------------------------------
 
-func TestAgentAPIKey_InvalidAgentIDHeaderIgnored(t *testing.T) {
+// The agent is whoever the credential proves: an X-Agent-ID header, malformed
+// or not, changes nothing about the caller.
+func TestAgentAPIKey_AgentIDHeaderIgnored(t *testing.T) {
 	taskRepo := newFakeTaskRepoIT()
 	apiKeyRepo := newFakeAPIKeyRepo()
 	projectID := uuid.New()
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -877,17 +879,12 @@ func TestAgentAPIKey_InvalidAgentIDHeaderIgnored(t *testing.T) {
 	r := buildAgentKeyRouter(taskRepo, apiKeyRepo, store)
 	base := fmt.Sprintf("/api/v1/projects/%s/tasks", projectID)
 
-	// Invalid agent ID (malformed)
-	body, _ := json.Marshal(map[string]any{"title": "Test"})
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, base, bytes.NewReader(body))
-	req.Header.Set("X-API-Key", testAgentAPIKey)
+	req := botUserAuthReq(t.Context(), http.MethodPost, base, botUserID, map[string]any{"title": "Test"})
 	req.Header.Set("X-Agent-ID", "not-a-valid-uuid")
-	req.Header.Set("Content-Type", "application/json")
 
 	w := serve(r, req)
-	// Should succeed but agent ID should be ignored (set to uuid.Nil)
 	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201 with invalid agent ID (header ignored), got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("expected 201 (header ignored, caller is the bot user), got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -903,18 +900,19 @@ func TestAgentAPIKey_UserAPIKeyCannotUseAgentID(t *testing.T) {
 	userID := uuid.New()
 
 	store := &projectPermStore{
-		projectPerms: map[uuid.UUID][]authz.Permission{
-			projectID: {authz.PermissionTasksWrite},
+		projectPerms: map[uuid.UUID][]iam.Action{
+			projectID: {iam.ActionTasksWrite},
 		},
 	}
 
 	// Create a regular user API key
 	userAPIKey := &apikeydom.APIKey{
-		ID:        uuid.New(),
-		UserID:    userID,
-		Name:      "User Key",
-		KeyPrefix: "abc12345",
-		CreatedAt: time.Now(),
+		ID:          uuid.New(),
+		AccountID:   userID,
+		AccountKind: accountdom.KindUser,
+		Name:        "User Key",
+		KeyPrefix:   "abc12345",
+		CreatedAt:   time.Now(),
 	}
 	keyHash := "user_key_hash_12345"
 	if err := apiKeyRepo.Create(context.Background(), userAPIKey, keyHash); err != nil {
@@ -951,14 +949,14 @@ func TestAgentAPIKey_BulkTaskOperations(t *testing.T) {
 	botUserID := uuid.MustParse(testAgentBotUserID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			botUserID: {
-				projectID: {authz.PermissionTasksRead, authz.PermissionTasksWrite},
+				projectID: {iam.ActionTasksRead, iam.ActionTasksWrite},
 			},
 		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 			projectID: {
-				agentID: {authz.PermissionTasksRead, authz.PermissionTasksWrite},
+				agentID: {iam.ActionTasksRead, iam.ActionTasksWrite},
 			},
 		},
 	}
@@ -1065,14 +1063,14 @@ func TestAgentAPIKey_PermissionScenarios(t *testing.T) {
 
 	t.Run("read_permission_allows_get", func(t *testing.T) {
 		store := &projectPermStore{
-			userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+			userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 				botUserID: {
-					projectID: {authz.PermissionTasksRead},
+					projectID: {iam.ActionTasksRead},
 				},
 			},
-			agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+			agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 				projectID: {
-					agentID: {authz.PermissionTasksRead},
+					agentID: {iam.ActionTasksRead},
 				},
 			},
 		}
@@ -1086,14 +1084,14 @@ func TestAgentAPIKey_PermissionScenarios(t *testing.T) {
 
 	t.Run("write_permission_allows_update", func(t *testing.T) {
 		store := &projectPermStore{
-			userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+			userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 				botUserID: {
-					projectID: {authz.PermissionTasksWrite},
+					projectID: {iam.ActionTasksWrite},
 				},
 			},
-			agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+			agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 				projectID: {
-					agentID: {authz.PermissionTasksWrite},
+					agentID: {iam.ActionTasksWrite},
 				},
 			},
 		}
@@ -1109,12 +1107,12 @@ func TestAgentAPIKey_PermissionScenarios(t *testing.T) {
 
 	t.Run("no_permission_denies_all", func(t *testing.T) {
 		store := &projectPermStore{
-			userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+			userPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 				botUserID: {
 					projectID: {},
 				},
 			},
-			agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
+			agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
 				projectID: {
 					agentID: {},
 				},
@@ -1138,115 +1136,29 @@ func TestAgentAPIKey_PermissionScenarios(t *testing.T) {
 // authn.go's agentClaimsForKey): a key that, by itself, already proves which
 // single agent it belongs to, with no X-Agent-ID header needed or trusted.
 // ---------------------------------------------------------------------------
+// An agent's own API key (the MCP key) — an ordinary api_keys row whose
+// account is the agent.
+// ---------------------------------------------------------------------------
 
-// mcpKeyAgentIdentityStore fakes apikeysvc.AgentIdentityStore with a real,
-// stateful hash->agent mapping (unlike passthroughAgentIdentityStore above,
-// which always fails FindAgentByMCPAPIKeyHash) so a test can mint a key for
-// an agent and then present it over HTTP exactly like a real generated key.
-type mcpKeyAgentIdentityStore struct {
-	agents map[uuid.UUID]*agentdom.Agent
-	byHash map[string]uuid.UUID // sha256 hex hash -> agentID
-}
-
-func newMCPKeyAgentIdentityStore() *mcpKeyAgentIdentityStore {
-	return &mcpKeyAgentIdentityStore{
-		agents: map[uuid.UUID]*agentdom.Agent{},
-		byHash: map[string]uuid.UUID{},
-	}
-}
-
-// registerKey mints a plaintext MCP key for agentID and records its hash,
-// mirroring agentsvc.Service.GenerateAgentMCPKey (random bytes -> hex ->
-// SHA-256 hash). Calling it again for the same agent drops the previous
-// hash first, mirroring SetMCPAPIKeyHash overwriting the column — only one
-// key is ever live per agent.
-func (s *mcpKeyAgentIdentityStore) registerKey(agentID uuid.UUID) string {
+// registerAgentKey stores a key for agentID, as the agent repository's
+// ReplaceAPIKeyHash does, and returns the plaintext to present.
+func registerAgentKey(repo *fakeAPIKeyRepo, agentID uuid.UUID) string {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		panic(err)
 	}
-	plaintext := hex.EncodeToString(raw)
+	plaintext := "paca_" + hex.EncodeToString(raw)
 	sum := sha256.Sum256([]byte(plaintext))
-	hash := hex.EncodeToString(sum[:])
-
-	for h, id := range s.byHash {
-		if id == agentID {
-			delete(s.byHash, h)
+	// Only one live key per agent: revoke the previous ones.
+	for _, k := range repo.byID {
+		if k.AccountID == agentID && k.RevokedAt == nil {
+			_ = repo.Revoke(context.Background(), k.ID)
 		}
 	}
-	s.byHash[hash] = agentID
-	if _, ok := s.agents[agentID]; !ok {
-		s.agents[agentID] = &agentdom.Agent{ID: agentID, AgentScope: agentdom.AgentScopeProject}
-	}
+	_ = repo.Create(context.Background(), &apikeydom.APIKey{
+		ID: uuid.New(), AccountID: agentID, AccountKind: accountdom.KindAgent, Name: "MCP key", CreatedAt: time.Now(),
+	}, hex.EncodeToString(sum[:]))
 	return plaintext
-}
-
-func (s *mcpKeyAgentIdentityStore) FindAgentByID(_ context.Context, agentID uuid.UUID) (*agentdom.Agent, error) {
-	if a, ok := s.agents[agentID]; ok {
-		return a, nil
-	}
-	return nil, agentdom.ErrAgentNotFound
-}
-
-func (s *mcpKeyAgentIdentityStore) HasActiveGlobalChatSession(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
-	return true, nil
-}
-
-func (s *mcpKeyAgentIdentityStore) FindAgentByMCPAPIKeyHash(_ context.Context, hash string) (*agentdom.Agent, error) {
-	agentID, ok := s.byHash[hash]
-	if !ok {
-		return nil, agentdom.ErrAgentNotFound
-	}
-	return s.agents[agentID], nil
-}
-
-// buildAgentMCPKeyRouter is like buildAgentKeyRouterWithBotID but wires a
-// stateful mcpKeyAgentIdentityStore instead of the always-fail
-// passthroughAgentIdentityStore, so tests can register a real per-agent MCP
-// key and then present it over HTTP to exercise the full Authenticate ->
-// FindAgentByMCPAPIKeyHash -> agentClaimsForKey path production traffic
-// uses. The static agent key is still wired (as it always is in production,
-// see bootstrap/app.go) so agentBotUserID is set correctly.
-func buildAgentMCPKeyRouter(taskRepo *fakeTaskRepo, apiKeyRepo *fakeAPIKeyRepo, store *projectPermStore, identityStore *mcpKeyAgentIdentityStore) http.Handler {
-	tm := jwttoken.New(testSecret, 15*time.Minute, 168*time.Hour)
-	refreshStore := &fakeRefreshStore{}
-	userRepo := newFakeUserRepo()
-	authService := authsvc.New(userRepo, tm, refreshStore, 168*time.Hour, 24*time.Hour)
-	userService := usersvc.New(userRepo, userRepo)
-	projectRepo := newFakeProjectRepo()
-	projectService := projectsvc.New(projectRepo, taskRepo, nil)
-	taskService := tasksvc.New(taskRepo)
-	sprintService := sprintsvc.New(newFakeSprintRepoIT(), taskRepo, nil)
-	viewService := sprintsvc.NewViewService(newFakeViewRepoIT(), newFakeSprintRepoIT(), taskRepo, nil)
-	activityRepo := newFakeTaskActivityRepo()
-	activityService := tasksvc.NewActivityService(activitysvc.New(activityRepo, &fakeActivityMemberRepo{}, nil), taskRepo, &fakeActivityMemberRepo{})
-
-	apiKeyService := apikeysvc.New(apiKeyRepo).
-		WithAgentKey(testAgentAPIKey, uuid.MustParse(testAgentBotUserID)).
-		WithAgentIdentityStore(identityStore)
-
-	if store == nil {
-		store = &projectPermStore{}
-	}
-	authorizer := authz.NewAuthorizer(store)
-
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-
-	return router.New(router.Deps{
-		TokenManager:         tm,
-		APIKeyAuth:           apiKeyService,
-		Authorizer:           authorizer,
-		ProjectVisibilitySvc: projectService,
-		Health:               handler.NewHealthHandler(),
-		Auth:                 handler.NewAuthHandler(authService, testCookieCfg),
-		User:                 handler.NewUserHandler(userService),
-		GlobalRole:           handler.NewGlobalRoleHandler(&fakeGlobalRoleService{}),
-		Project:              handler.NewProjectHandler(projectService, authorizer),
-		Task:                 handler.NewTaskHandler(taskService, viewService, activityService),
-		Sprint:               handler.NewSprintHandler(sprintService, viewService),
-		View:                 handler.NewViewHandler(viewService),
-		Log:                  log,
-	})
 }
 
 func TestAgentMCPKey_CreateTask_Success(t *testing.T) {
@@ -1254,93 +1166,57 @@ func TestAgentMCPKey_CreateTask_Success(t *testing.T) {
 	apiKeyRepo := newFakeAPIKeyRepo()
 	projectID := uuid.New()
 	agentID := uuid.New()
-	botUserID := uuid.MustParse(testAgentBotUserID)
-
-	identityStore := newMCPKeyAgentIdentityStore()
-	mcpKey := identityStore.registerKey(agentID)
+	mcpKey := registerAgentKey(apiKeyRepo, agentID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
-			botUserID: {
-				projectID: {authz.PermissionTasksWrite},
-			},
-		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
-			projectID: {
-				agentID: {authz.PermissionTasksWrite},
-			},
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
+			projectID: {agentID: {iam.ActionTasksWrite}},
 		},
 	}
 
-	r := buildAgentMCPKeyRouter(taskRepo, apiKeyRepo, store, identityStore)
+	r := buildAgentKeyRouter(taskRepo, apiKeyRepo, store)
 	base := fmt.Sprintf("/api/v1/projects/%s/tasks", projectID)
 
 	body, _ := json.Marshal(map[string]any{"title": "Created via MCP key"})
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, base, bytes.NewReader(body))
 	req.Header.Set("X-API-Key", mcpKey)
 	req.Header.Set("Content-Type", "application/json")
-	// Deliberately no X-Agent-ID header — identity must come entirely from
-	// the key itself.
 
 	w := serve(r, req)
-
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-
 	var env struct {
 		Data map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	title, _ := env.Data["title"].(string)
-	if title != "Created via MCP key" {
+	if title, _ := env.Data["title"].(string); title != "Created via MCP key" {
 		t.Errorf("expected title %q, got %q", "Created via MCP key", title)
 	}
 }
 
 func TestAgentMCPKey_UnknownKey_Returns401(t *testing.T) {
-	taskRepo := newFakeTaskRepoIT()
-	apiKeyRepo := newFakeAPIKeyRepo()
-	projectID := uuid.New()
-
-	identityStore := newMCPKeyAgentIdentityStore()
-	r := buildAgentMCPKeyRouter(taskRepo, apiKeyRepo, &projectPermStore{}, identityStore)
-	base := fmt.Sprintf("/api/v1/projects/%s/tasks", projectID)
-
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, base, nil)
+	r := buildAgentKeyRouter(newFakeTaskRepoIT(), newFakeAPIKeyRepo(), &projectPermStore{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/tasks", uuid.New()), nil)
 	req.Header.Set("X-API-Key", "paca_some_key_that_was_never_registered")
-
-	w := serve(r, req)
-	if w.Code != http.StatusUnauthorized {
+	if w := serve(r, req); w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for an unregistered key, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-// TestAgentMCPKey_RegeneratedKey_InvalidatesOldKey covers the "only one live
-// key per agent" guarantee described on GenerateAgentMCPKey: regenerating a
-// key must make the previous plaintext stop authenticating immediately.
+// Regenerating an agent's key makes the previous plaintext stop authenticating.
 func TestAgentMCPKey_RegeneratedKey_InvalidatesOldKey(t *testing.T) {
-	taskRepo := newFakeTaskRepoIT()
 	apiKeyRepo := newFakeAPIKeyRepo()
 	projectID := uuid.New()
 	agentID := uuid.New()
-	botUserID := uuid.MustParse(testAgentBotUserID)
-
-	identityStore := newMCPKeyAgentIdentityStore()
-	oldKey := identityStore.registerKey(agentID)
+	oldKey := registerAgentKey(apiKeyRepo, agentID)
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
-			botUserID: {projectID: {authz.PermissionTasksRead}},
-		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
-			projectID: {agentID: {authz.PermissionTasksRead}},
-		},
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{projectID: {agentID: {iam.ActionTasksRead}}},
 	}
-
-	r := buildAgentMCPKeyRouter(taskRepo, apiKeyRepo, store, identityStore)
+	r := buildAgentKeyRouter(newFakeTaskRepoIT(), apiKeyRepo, store)
 	base := fmt.Sprintf("/api/v1/projects/%s/tasks", projectID)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, base, nil)
@@ -1349,69 +1225,39 @@ func TestAgentMCPKey_RegeneratedKey_InvalidatesOldKey(t *testing.T) {
 		t.Fatalf("expected 200 with the live key, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Regenerate — overwrites the stored hash, same as SetMCPAPIKeyHash.
-	identityStore.registerKey(agentID)
+	registerAgentKey(apiKeyRepo, agentID) // regenerate
 
 	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, base, nil)
 	req.Header.Set("X-API-Key", oldKey)
-	w := serve(r, req)
-	if w.Code != http.StatusUnauthorized {
+	if w := serve(r, req); w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for the replaced key, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-// TestAgentMCPKey_XAgentIDHeaderIgnored is the regression test for the
-// impersonation gap this PR closes: presenting one agent's own MCP key
-// alongside an X-Agent-ID header claiming a *different* agent must still
-// attribute the request to the key's own agent, never the header's. Before
-// this PR's per-agent key, a leaked shared AGENT_API_KEY plus an arbitrary
-// X-Agent-ID header could authenticate as any agent; agentClaimsForKey now
-// trusts the key-resolved identity unconditionally once key.AgentID is set.
+// Presenting one agent's key with an X-Agent-ID naming another agent still
+// attributes the request to the key's own agent.
 func TestAgentMCPKey_XAgentIDHeaderIgnored(t *testing.T) {
 	taskRepo := newFakeTaskRepoIT()
 	apiKeyRepo := newFakeAPIKeyRepo()
 	projectID := uuid.New()
-	ownAgentID := uuid.New()
-	otherAgentID := uuid.New() // caller never holds this agent's key
-	botUserID := uuid.MustParse(testAgentBotUserID)
-
-	identityStore := newMCPKeyAgentIdentityStore()
-	ownKey := identityStore.registerKey(ownAgentID)
-	identityStore.registerKey(otherAgentID)
+	ownAgentID, otherAgentID := uuid.New(), uuid.New()
+	ownKey := registerAgentKey(apiKeyRepo, ownAgentID)
+	registerAgentKey(apiKeyRepo, otherAgentID)
 
 	taskID := uuid.New()
-	taskRepo.tasks[taskID] = &taskdom.Task{
-		ID:        taskID,
-		ProjectID: projectID,
-		Title:     "Task",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
+	taskRepo.tasks[taskID] = &taskdom.Task{ID: taskID, ProjectID: projectID, Title: "Task", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 
 	store := &projectPermStore{
-		userPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
-			botUserID: {projectID: {authz.PermissionTasksRead}},
-		},
-		agentPerms: map[uuid.UUID]map[uuid.UUID][]authz.Permission{
-			projectID: {
-				ownAgentID:   {authz.PermissionTasksRead},
-				otherAgentID: {}, // explicitly no permissions
-			},
+		agentPerms: map[uuid.UUID]map[uuid.UUID][]iam.Action{
+			projectID: {ownAgentID: {iam.ActionTasksRead}, otherAgentID: {}},
 		},
 	}
+	r := buildAgentKeyRouter(taskRepo, apiKeyRepo, store)
 
-	r := buildAgentMCPKeyRouter(taskRepo, apiKeyRepo, store, identityStore)
-	taskURL := fmt.Sprintf("/api/v1/projects/%s/tasks/%s", projectID, taskID)
-
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, taskURL, nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/tasks/%s", projectID, taskID), nil)
 	req.Header.Set("X-API-Key", ownKey)
-	// Spoofing attempt: claim to be an agent with no permissions. If this
-	// were honored, the request would 403; the fix means it's ignored and
-	// the request is attributed to ownAgentID instead.
 	req.Header.Set("X-Agent-ID", otherAgentID.String())
-
-	w := serve(r, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 (request attributed to the key's own agent, X-Agent-ID ignored), got %d: %s", w.Code, w.Body.String())
+	if w := serve(r, req); w.Code != http.StatusOK {
+		t.Fatalf("expected 200 (attributed to the key's own agent), got %d: %s", w.Code, w.Body.String())
 	}
 }

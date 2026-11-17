@@ -8,13 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Paca-AI/api/internal/apierr"
 	environmentdom "github.com/Paca-AI/api/internal/domain/environment"
-	projectdom "github.com/Paca-AI/api/internal/domain/project"
+	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	"github.com/Paca-AI/api/internal/transport/http/dto"
 	"github.com/Paca-AI/api/internal/transport/http/middleware"
 	"github.com/Paca-AI/api/internal/transport/http/presenter"
@@ -43,6 +44,8 @@ const (
 // docs/ai-agent/environment-management.md).
 type EnvironmentHandler struct {
 	svc environmentdom.Service
+	// listScoper limits listings to the environments the caller may read.
+	listScoper ListScoper
 	// aiAgentInternalKey signs terminal tickets — the same shared
 	// AI_AGENT_INTERNAL_KEY agent-runner verifies internal-only calls with
 	// (see agent_handler.go's aiAgentInternalKey), reused here as an HMAC
@@ -54,12 +57,6 @@ type EnvironmentHandler struct {
 	// safe and just means GetConfig reports the feature(s) as unconfigured.
 	sshBastionHost  string
 	portForwardHost string
-	// memberRepo resolves the caller (human or agent) to their
-	// project_members.id for AccessGranted response decoration — see
-	// resolveActorMemberIDForDecoration. Optional: nil just means every
-	// response's AccessGranted falls back to dto.EnvironmentFromEntity's
-	// own caller-agnostic approximation.
-	memberRepo projectdom.MemberRepository
 }
 
 // NewEnvironmentHandler returns an EnvironmentHandler wired to the
@@ -69,11 +66,10 @@ func NewEnvironmentHandler(svc environmentdom.Service, aiAgentInternalKey string
 	return &EnvironmentHandler{svc: svc, aiAgentInternalKey: aiAgentInternalKey}
 }
 
-// WithMemberRepo attaches the project member repository used to resolve the
-// authenticated caller's project_members.id — mirrors AgentHandler's own
-// WithMemberRepo.
-func (h *EnvironmentHandler) WithMemberRepo(repo projectdom.MemberRepository) *EnvironmentHandler {
-	h.memberRepo = repo
+// WithListScoper limits environment listings to the environments the caller
+// may read, inside the query (see scopedContext).
+func (h *EnvironmentHandler) WithListScoper(s ListScoper) *EnvironmentHandler {
+	h.listScoper = s
 	return h
 }
 
@@ -108,95 +104,72 @@ func (h *EnvironmentHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// parseEnvListParams reads the paging params every environment list takes:
+// page_size (1-100, default 30) and cursor.
+func parseEnvListParams(r *http.Request) (cursor *string, pageSize int, err error) {
+	cursor = parseCursorParam(r)
+	pageSize, err = parsePageSize(r, 30, 100)
+	return cursor, pageSize, err
+}
+
+// pageBody builds a cursor page response. total_count is a first-page field
+// (the lists skip the COUNT on later pages), so it is included only then.
+func pageBody(items any, pageSize int, nextCursor *string, firstPage bool, total any) map[string]any {
+	body := map[string]any{"items": items, "page_size": pageSize, "next_cursor": nextCursor}
+	if firstPage {
+		body["total_count"] = total
+	}
+	return body
+}
+
 // --- Environments -------------------------------------------------------
 
-// ListEnvironments handles GET /projects/:projectId/environments.
+// ListEnvironments handles GET /projects/:projectId/environments — one
+// cursor-paginated page of the project's environments, newest first:
+//   - page_size=<1-100>  (default 30)
+//   - cursor=<opaque>    from the previous page's next_cursor
+//   - search=<text>      every word must appear in the name or slug
+//   - ids=<uuid,...>     only these environments (batch lookup, at most 100)
+//
+// Responds with {"items": [...], "page_size": n, "next_cursor": ...}.
 func (h *EnvironmentHandler) ListEnvironments(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	envs, err := h.svc.ListEnvironments(r.Context(), projectID)
+	ctx, err := scopedContext(r, h.listScoper, iam.ActionEnvironmentsRead, projectID, "environment")
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	grantedIDs := h.callerGrantedEnvironmentIDs(r, projectID)
+	cursor, pageSize, err := parseEnvListParams(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	ids, err := parseIDsParam(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	filter := environmentdom.EnvironmentFilter{Search: strings.TrimSpace(r.URL.Query().Get("search")), IDs: ids}
+	envs, hasMore, err := h.svc.ListEnvironments(ctx, projectID, filter, cursor, pageSize)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
 	resp := make([]dto.EnvironmentResponse, 0, len(envs))
 	for _, e := range envs {
-		resp = append(resp, h.toEnvironmentResponseForCaller(e, grantedIDs))
+		resp = append(resp, dto.EnvironmentFromEntity(e))
 	}
-	presenter.OK(w, r, map[string]any{"environments": resp})
-}
-
-// toEnvironmentResponseForCaller is dto.EnvironmentFromEntity plus an
-// accurate AccessGranted for one specific caller — see
-// AgentHandler.toAgentResponseForCaller's identical reasoning.
-func (h *EnvironmentHandler) toEnvironmentResponseForCaller(env *environmentdom.Environment, grantedIDs map[uuid.UUID]bool) dto.EnvironmentResponse {
-	resp := dto.EnvironmentFromEntity(env)
-	if resp.AccessMode == environmentdom.AccessModeRestricted {
-		resp.AccessGranted = grantedIDs[env.ID]
-		if !resp.AccessGranted {
-			// SSHPort is per-instance connection metadata — combined with the
-			// deployment-wide (non-secret) bastion host GetConfig reports,
-			// it's enough to know where to attempt an SSH connection into
-			// this specific container. A member the admin explicitly locked
-			// out of a restricted environment shouldn't learn this just from
-			// the environment still being visible in list/detail views —
-			// same "alternate access path" rubric that already gates SSH
-			// keys/terminal/port-forwards behind RequireEnvironmentAccess
-			// rather than leaving them on environments.read alone.
-			resp.SSHPort = nil
-		}
+	var nextCursor *string
+	if hasMore && len(envs) > 0 {
+		last := envs[len(envs)-1]
+		c := environmentdom.EncodeCursor(last.CreatedAt, last.ID)
+		nextCursor = &c
 	}
-	return resp
-}
-
-// callerGrantedEnvironmentIDs mirrors AgentHandler.callerGrantedAgentIDs.
-func (h *EnvironmentHandler) callerGrantedEnvironmentIDs(r *http.Request, projectID uuid.UUID) map[uuid.UUID]bool {
-	memberID := h.resolveActorMemberIDForDecoration(r, projectID)
-	if memberID == uuid.Nil {
-		return map[uuid.UUID]bool{}
-	}
-	ids, err := h.svc.ListGrantedEnvironmentIDsForMember(r.Context(), memberID)
-	if err != nil {
-		return map[uuid.UUID]bool{}
-	}
-	set := make(map[uuid.UUID]bool, len(ids))
-	for _, id := range ids {
-		set[id] = true
-	}
-	return set
-}
-
-// resolveActorMemberIDForDecoration mirrors
-// AgentHandler.resolveActorMemberIDForDecoration exactly — see its doc
-// comment.
-func (h *EnvironmentHandler) resolveActorMemberIDForDecoration(r *http.Request, projectID uuid.UUID) uuid.UUID {
-	if h.memberRepo == nil {
-		return uuid.Nil
-	}
-	if agentID, ok := middleware.AgentIDFromRequest(r); ok {
-		m, err := h.memberRepo.FindMemberByActor(r.Context(), projectID, uuid.Nil, &agentID)
-		if err != nil {
-			return uuid.Nil
-		}
-		return m.ID
-	}
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		return uuid.Nil
-	}
-	userID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		return uuid.Nil
-	}
-	m, err := h.memberRepo.FindMemberByActor(r.Context(), projectID, userID, nil)
-	if err != nil {
-		return uuid.Nil
-	}
-	return m.ID
+	presenter.OK(w, r, map[string]any{"items": resp, "page_size": pageSize, "next_cursor": nextCursor})
 }
 
 // CreateEnvironment handles POST /projects/:projectId/environments.
@@ -246,7 +219,7 @@ func (h *EnvironmentHandler) GetEnvironment(w http.ResponseWriter, r *http.Reque
 		presenter.Error(w, r, err)
 		return
 	}
-	presenter.OK(w, r, h.toEnvironmentResponseForCaller(env, h.callerGrantedEnvironmentIDs(r, projectID)))
+	presenter.OK(w, r, dto.EnvironmentFromEntity(env))
 }
 
 // UpdateEnvironment handles PATCH /projects/:projectId/environments/:environmentId.
@@ -264,7 +237,6 @@ func (h *EnvironmentHandler) UpdateEnvironment(w http.ResponseWriter, r *http.Re
 	env, err := h.svc.UpdateEnvironment(r.Context(), projectID, environmentID, environmentdom.UpdateEnvironmentInput{
 		Name:               req.Name,
 		IdleTimeoutMinutes: req.IdleTimeoutMinutes,
-		AccessMode:         req.AccessMode,
 	})
 	if err != nil {
 		presenter.Error(w, r, err)
@@ -381,14 +353,27 @@ func (h *EnvironmentHandler) VerifyCLILogin(w http.ResponseWriter, r *http.Reque
 
 // --- Folders --------------------------------------------------------------
 
-// ListFolders handles GET /projects/:projectId/environments/:environmentId/folders.
+// ListFolders handles GET /projects/:projectId/environments/:environmentId/folders —
+// one cursor-paginated page of the environment's folders, oldest first
+// (page_size, cursor, search over the path, ids), with total_count.
 func (h *EnvironmentHandler) ListFolders(w http.ResponseWriter, r *http.Request) {
 	projectID, environmentID, err := h.parseEnvironment(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	folders, err := h.svc.ListFolders(r.Context(), projectID, environmentID)
+	cursor, pageSize, err := parseEnvListParams(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	ids, err := parseIDsParam(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	filter := environmentdom.FolderFilter{Search: strings.TrimSpace(r.URL.Query().Get("search")), IDs: ids}
+	folders, hasMore, total, err := h.svc.ListFolders(r.Context(), projectID, environmentID, filter, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -397,7 +382,13 @@ func (h *EnvironmentHandler) ListFolders(w http.ResponseWriter, r *http.Request)
 	for _, f := range folders {
 		resp = append(resp, dto.EnvironmentFolderFromEntity(f))
 	}
-	presenter.OK(w, r, map[string]any{"folders": resp})
+	var nextCursor *string
+	if hasMore && len(folders) > 0 {
+		last := folders[len(folders)-1]
+		c := environmentdom.EncodeCursor(last.CreatedAt, last.ID)
+		nextCursor = &c
+	}
+	presenter.OK(w, r, pageBody(resp, pageSize, nextCursor, cursor == nil, total))
 }
 
 // AddFolder handles POST /projects/:projectId/environments/:environmentId/folders.
@@ -478,89 +469,23 @@ func (h *EnvironmentHandler) BrowseFolder(w http.ResponseWriter, r *http.Request
 	presenter.OK(w, r, resp)
 }
 
-// --- Access grants ------------------------------------------------------
-
-// ListEnvironmentAccessGrants handles GET
-// /projects/:projectId/environments/:environmentId/access-grants.
-func (h *EnvironmentHandler) ListEnvironmentAccessGrants(w http.ResponseWriter, r *http.Request) {
-	projectID, environmentID, err := h.parseEnvironment(r)
-	if err != nil {
-		presenter.Error(w, r, err)
-		return
-	}
-	grants, err := h.svc.ListEnvironmentAccessGrants(r.Context(), projectID, environmentID)
-	if err != nil {
-		presenter.Error(w, r, err)
-		return
-	}
-	resp := make([]dto.EnvironmentAccessGrantResponse, 0, len(grants))
-	for _, g := range grants {
-		resp = append(resp, dto.EnvironmentAccessGrantFromEntity(g))
-	}
-	presenter.OK(w, r, map[string]any{"items": resp})
-}
-
-// AddEnvironmentAccessGrant handles POST
-// /projects/:projectId/environments/:environmentId/access-grants.
-func (h *EnvironmentHandler) AddEnvironmentAccessGrant(w http.ResponseWriter, r *http.Request) {
-	projectID, environmentID, err := h.parseEnvironment(r)
-	if err != nil {
-		presenter.Error(w, r, err)
-		return
-	}
-	var req dto.AddEnvironmentAccessGrantRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		presenter.Error(w, r, err)
-		return
-	}
-	if req.MemberID == uuid.Nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "member_id is required"))
-		return
-	}
-	var grantedBy *uuid.UUID
-	if claims := middleware.ClaimsFrom(r); claims != nil {
-		if id, err := uuid.Parse(claims.Subject); err == nil {
-			grantedBy = &id
-		}
-	}
-	g, err := h.svc.AddEnvironmentAccessGrant(r.Context(), projectID, environmentID, req.MemberID, grantedBy)
-	if err != nil {
-		presenter.Error(w, r, err)
-		return
-	}
-	presenter.Created(w, r, dto.EnvironmentAccessGrantFromEntity(g))
-}
-
-// RemoveEnvironmentAccessGrant handles DELETE
-// /projects/:projectId/environments/:environmentId/access-grants/:memberId.
-func (h *EnvironmentHandler) RemoveEnvironmentAccessGrant(w http.ResponseWriter, r *http.Request) {
-	projectID, environmentID, err := h.parseEnvironment(r)
-	if err != nil {
-		presenter.Error(w, r, err)
-		return
-	}
-	memberID, err := parseParamUUID(r, "memberId")
-	if err != nil {
-		presenter.Error(w, r, err)
-		return
-	}
-	if err := h.svc.RemoveEnvironmentAccessGrant(r.Context(), projectID, environmentID, memberID); err != nil {
-		presenter.Error(w, r, err)
-		return
-	}
-	presenter.OK(w, r, map[string]any{"message": "access grant removed"})
-}
-
 // --- SSH keys ---------------------------------------------------------------
 
-// ListSSHKeys handles GET /projects/:projectId/environments/:environmentId/ssh-keys.
+// ListSSHKeys handles GET /projects/:projectId/environments/:environmentId/ssh-keys —
+// one cursor-paginated page of the environment's SSH keys, oldest first
+// (page_size, cursor), with total_count.
 func (h *EnvironmentHandler) ListSSHKeys(w http.ResponseWriter, r *http.Request) {
 	projectID, environmentID, err := h.parseEnvironment(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	keys, err := h.svc.ListSSHKeys(r.Context(), projectID, environmentID)
+	cursor, pageSize, err := parseEnvListParams(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	keys, hasMore, total, err := h.svc.ListSSHKeys(r.Context(), projectID, environmentID, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -569,7 +494,13 @@ func (h *EnvironmentHandler) ListSSHKeys(w http.ResponseWriter, r *http.Request)
 	for _, k := range keys {
 		resp = append(resp, dto.EnvironmentSSHKeyFromEntity(k))
 	}
-	presenter.OK(w, r, map[string]any{"ssh_keys": resp})
+	var nextCursor *string
+	if hasMore && len(keys) > 0 {
+		last := keys[len(keys)-1]
+		c := environmentdom.EncodeCursor(last.CreatedAt, last.ID)
+		nextCursor = &c
+	}
+	presenter.OK(w, r, pageBody(resp, pageSize, nextCursor, cursor == nil, total))
 }
 
 // AddSSHKey handles POST /projects/:projectId/environments/:environmentId/ssh-keys.
@@ -630,14 +561,21 @@ func (h *EnvironmentHandler) DeleteSSHKey(w http.ResponseWriter, r *http.Request
 // --- Port forwards -----------------------------------------------------------
 
 // ListPortForwards handles GET
-// /projects/:projectId/environments/:environmentId/port-forwards.
+// /projects/:projectId/environments/:environmentId/port-forwards — one
+// cursor-paginated page of the environment's port forwards, oldest first
+// (page_size, cursor), with total_count.
 func (h *EnvironmentHandler) ListPortForwards(w http.ResponseWriter, r *http.Request) {
 	projectID, environmentID, err := h.parseEnvironment(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	forwards, err := h.svc.ListPortForwards(r.Context(), projectID, environmentID)
+	cursor, pageSize, err := parseEnvListParams(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	forwards, hasMore, total, err := h.svc.ListPortForwards(r.Context(), projectID, environmentID, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -646,7 +584,13 @@ func (h *EnvironmentHandler) ListPortForwards(w http.ResponseWriter, r *http.Req
 	for _, pf := range forwards {
 		resp = append(resp, dto.EnvironmentPortForwardFromEntity(pf))
 	}
-	presenter.OK(w, r, map[string]any{"port_forwards": resp})
+	var nextCursor *string
+	if hasMore && len(forwards) > 0 {
+		last := forwards[len(forwards)-1]
+		c := environmentdom.EncodeCursor(last.CreatedAt, last.ID)
+		nextCursor = &c
+	}
+	presenter.OK(w, r, pageBody(resp, pageSize, nextCursor, cursor == nil, total))
 }
 
 // GetPortForward handles GET

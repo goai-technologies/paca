@@ -266,8 +266,6 @@ services:
       PLUGINS_FRONTEND_DIR: /plugins-frontend
       PLUGINS_MCP_DIR: /plugins-mcp
       PLUGINS_SKILLS_DIR: /plugins-skills
-      # Pre-shared key matching PACA_API_KEY in the agent-runner service.
-      AGENT_API_KEY: ${AGENT_API_KEY:-}
       # Where the API calls into agent-runner's internal-only routes
       # (/agent-bridge/status, /agent-bridge/disconnect, /llm/models). The
       # env var keeps its historical AI_AGENT_* name (the Go
@@ -400,8 +398,6 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       PACA_API_URL: http://api:8080
       PACA_GATEWAY_URL: http://gateway:8080
-      # Must match AGENT_API_KEY in the api service.
-      PACA_API_KEY: ${AGENT_API_KEY:-}
       DOCKER_SOCKET: /var/run/docker.sock
       # The Goose-based sandbox image — built from
       # services/agent-server/Dockerfile (adds Node.js + the Paca MCP

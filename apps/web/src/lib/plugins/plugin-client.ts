@@ -17,7 +17,12 @@ export interface HostPluginApiClient {
 	listTasks(filters?: Record<string, unknown>): Promise<unknown[]>;
 	getTask(taskId: string): Promise<unknown>;
 	getProject(): Promise<unknown>;
-	listMembers(): Promise<unknown[]>;
+	listMembers(opts?: {
+		search?: string;
+		ids?: string[];
+		cursor?: string;
+		pageSize?: number;
+	}): Promise<unknown>;
 	pluginGet<T>(pluginId: string, path: string): Promise<T>;
 	pluginPost<T>(pluginId: string, path: string, body: unknown): Promise<T>;
 	pluginPatch<T>(pluginId: string, path: string, body: unknown): Promise<T>;
@@ -106,9 +111,18 @@ export function createPluginApiClient(projectId = ""): HostPluginApiClient {
 			requireProjectId(projectId, "getProject");
 			return request("GET", `${API_BASE_URL}/projects/${projectId}`);
 		},
-		listMembers: () => {
+		listMembers: (opts = {}) => {
 			requireProjectId(projectId, "listMembers");
-			return request("GET", `${API_BASE_URL}/projects/${projectId}/members`);
+			const params = new URLSearchParams();
+			if (opts.search) params.set("search", opts.search);
+			if (opts.ids?.length) params.set("ids", opts.ids.join(","));
+			if (opts.cursor) params.set("cursor", opts.cursor);
+			if (opts.pageSize) params.set("page_size", String(opts.pageSize));
+			const qs = params.toString();
+			return request(
+				"GET",
+				`${API_BASE_URL}/projects/${projectId}/members${qs ? `?${qs}` : ""}`,
+			);
 		},
 		pluginGet: (pluginId, path) => request("GET", pluginUrl(pluginId, path)),
 		pluginPost: (pluginId, path, body) =>

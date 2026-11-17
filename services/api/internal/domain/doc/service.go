@@ -18,8 +18,11 @@ type Service interface {
 
 // DocFolderService defines folder use-cases.
 type DocFolderService interface {
-	// ListFolders returns all folders for a project (flat list; clients build tree).
-	ListFolders(ctx context.Context, projectID uuid.UUID) ([]*DocFolder, error)
+	// ListFolders is the cursor-paginated listing of one level of the
+	// folder tree — see DocFolderRepository.ListFolders.
+	ListFolders(ctx context.Context, projectID uuid.UUID, parentID *uuid.UUID, cursorAfter *string, limit int) ([]*DocFolder, bool, error)
+	// FolderPath returns the folders from the root down to folderID.
+	FolderPath(ctx context.Context, projectID, folderID uuid.UUID) ([]*DocFolder, error)
 	// CreateFolder creates a new folder in the project.
 	CreateFolder(ctx context.Context, in CreateFolderInput) (*DocFolder, error)
 	// UpdateFolder updates the mutable fields of an existing folder.
@@ -52,9 +55,13 @@ type UpdateFolderInput struct {
 
 // DocumentService defines document use-cases.
 type DocumentService interface {
-	// ListDocuments — see Repository.ListDocuments's doc comment for the
-	// limit/cursor/hasMore pagination contract.
-	ListDocuments(ctx context.Context, projectID uuid.UUID, folderID *uuid.UUID, search *string, cursor *string, limit *int) (docs []*Document, hasMore bool, err error)
+	// ListDocuments is the cursor-paginated document listing — see
+	// DocumentRepository.ListDocuments.
+	ListDocuments(ctx context.Context, projectID uuid.UUID, filter DocumentFilter, cursorAfter *string, limit int) (docs []*Document, hasMore bool, err error)
+	// SearchDocuments finds documents whose title or body contains query and
+	// returns each with a match location and excerpt. limit is clamped to
+	// [1, 50] (default 20 when <= 0).
+	SearchDocuments(ctx context.Context, projectID uuid.UUID, query string, limit int) ([]SearchHit, error)
 	// GetDocument returns a single document by ID.
 	GetDocument(ctx context.Context, id uuid.UUID) (*Document, error)
 	// CreateDocument creates a new document in the project.
@@ -92,9 +99,10 @@ type UpdateDocumentInput struct {
 
 // DocSnapshotService defines snapshot use-cases.
 type DocSnapshotService interface {
-	// ListSnapshots returns all snapshots for a document, newest first.
+	// ListSnapshots returns one cursor-paginated page of a document's snapshots,
+	// newest first, without their bodies (see DocSnapshotRepository.ListSnapshots).
 	// projectID is used to verify the document belongs to the expected project.
-	ListSnapshots(ctx context.Context, projectID, documentID uuid.UUID) ([]*DocSnapshot, error)
+	ListSnapshots(ctx context.Context, projectID, documentID uuid.UUID, cursorAfter *string, limit int) ([]*DocSnapshot, bool, error)
 	// GetSnapshot returns a single snapshot by ID.
 	// projectID is used to verify the snapshot's document belongs to the
 	// expected project.

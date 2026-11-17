@@ -1,14 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
 import { listDocuments } from "./doc-api";
 import { listAllTasks } from "./interaction-api";
 import { listProjectMembers, type ProjectMember } from "./project-api";
+import { type AvatarIdentity, memberAvatar } from "./provider-logos";
 
 export interface TeamMember {
 	id: string;
 	name: string;
 	username: string;
+	avatar: AvatarIdentity;
 	avatarUrl?: string | null | undefined;
-	avatarThumbUrl?: string | null | undefined;
 }
 
 export interface MentionableTask {
@@ -35,16 +35,31 @@ export function excerptOf(body: string, max = 60): string {
 	return `${collapsed.slice(0, max - 1)}…`;
 }
 
-export interface MentionData {
-	teamMembers: TeamMember[];
-	documents: MentionableDocument[];
-}
+export const MENTIONABLE_MEMBERS_PAGE_SIZE = 20;
 
-const teamMembersQueryOptions = (projectId: string) => ({
-	queryKey: ["projects", projectId, "members"],
-	queryFn: () => listProjectMembers(projectId),
-	staleTime: 5 * 60 * 1000,
-});
+/** Live server-side search backing the "@" team-member mention menu: the
+ *  first page of members matching what the user has typed after "@". The
+ *  team has no fixed upper bound, so it is queried on demand rather than
+ *  preloaded in full. */
+export async function searchMentionableMembers(
+	projectId: string,
+	query: string,
+): Promise<TeamMember[]> {
+	const page = await listProjectMembers(projectId, {
+		search: query,
+		pageSize: MENTIONABLE_MEMBERS_PAGE_SIZE,
+	});
+	return page.items.map((member: ProjectMember) => ({
+		id:
+			member.member_type === "agent"
+				? (member.agent_id ?? member.user_id)
+				: member.user_id,
+		name: member.full_name,
+		username: member.username,
+		avatarUrl: member.avatar_url,
+		avatar: memberAvatar(member),
+	}));
+}
 
 export const MENTIONABLE_TASKS_PAGE_SIZE = 20;
 
@@ -69,42 +84,19 @@ export async function searchMentionableTasks(
 	}));
 }
 
-const documentsQueryOptions = (projectId: string) => ({
-	queryKey: ["projects", projectId, "docs", "mentions"],
-	queryFn: () => listDocuments(projectId),
-	staleTime: 2 * 60 * 1000,
-});
+export const MENTIONABLE_DOCS_PAGE_SIZE = 20;
 
-export function useMentionData(projectId?: string | null) {
-	const { data: members = [] } = useQuery({
-		...teamMembersQueryOptions(projectId ?? ""),
-		enabled: !!projectId,
+/** Live server-side search backing the document references in the "#"
+ *  mention menu: the first page of documents whose title matches what the
+ *  user has typed. A project's documents have no fixed upper bound, so they
+ *  are queried on demand rather than preloaded in full. */
+export async function searchMentionableDocuments(
+	projectId: string,
+	query: string,
+): Promise<MentionableDocument[]> {
+	const page = await listDocuments(projectId, {
+		search: query,
+		pageSize: MENTIONABLE_DOCS_PAGE_SIZE,
 	});
-
-	const { data: documents = [] } = useQuery({
-		...documentsQueryOptions(projectId ?? ""),
-		enabled: !!projectId,
-	});
-
-	const teamMembers: TeamMember[] = members.map((member: ProjectMember) => ({
-		id:
-			member.member_type === "agent"
-				? (member.agent_id ?? member.user_id)
-				: member.user_id,
-		name: member.full_name,
-		username: member.username,
-		avatarUrl: member.avatar_url,
-		avatarThumbUrl: member.avatar_thumb_url,
-	}));
-
-	const mentionDocs: MentionableDocument[] = documents.map((doc) => ({
-		id: doc.id,
-		title: doc.title,
-	}));
-
-	return {
-		teamMembers,
-		documents: mentionDocs,
-		isLoading: !projectId,
-	};
+	return page.items.map((doc) => ({ id: doc.id, title: doc.title }));
 }

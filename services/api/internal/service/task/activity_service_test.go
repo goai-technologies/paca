@@ -350,7 +350,7 @@ func TestActivitySvc_ListActivities_WrongProject_ReturnsNotFound(t *testing.T) {
 	memberRepo := &fakeCommentMemberRepo{}
 	svc := tasksvc.NewActivityService(activitysvc.New(repo.log, memberRepo, nil), repo, memberRepo)
 
-	_, err := svc.ListActivities(context.Background(), attackerProjectID, taskID)
+	_, _, err := svc.ListActivities(context.Background(), attackerProjectID, taskID, nil, 10)
 	if !errors.Is(err, taskdom.ErrTaskNotFound) {
 		t.Fatalf("expected ErrTaskNotFound for cross-project ListActivities, got %v", err)
 	}

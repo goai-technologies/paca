@@ -2,16 +2,21 @@ import type {
 	CreateFolderInput,
 	DocumentActivity,
 	DocumentFolder,
+	DocumentSearchHit,
 	DocumentSnapshot,
 	PacaConfig,
 	SuccessEnvelope,
 	UpdateFolderInput,
 } from "../types/index.js";
 import { formatApiRequestError, markdownToBlocknote } from "../utils/index.js";
+import { fetchAllPages, MAX_LISTED_ITEMS, withPaging } from "./paginate.js";
 
 /**
  * Extended API client for Document features.
  */
+/** Most timeline entries a tool call collects (the newest ones). */
+const MAX_ACTIVITY_ITEMS = 500;
+
 export class PacaAPIDocClient {
 	private config: PacaConfig;
 
@@ -29,9 +34,6 @@ export class PacaAPIDocClient {
 			"Content-Type": "application/json",
 			"X-API-Key": this.config.apiKey,
 		};
-		if (this.config.agentId) {
-			headers["X-Agent-ID"] = this.config.agentId;
-		}
 
 		const options: RequestInit = {
 			method,
@@ -92,13 +94,37 @@ export class PacaAPIDocClient {
 	// ==================== Document Folders ====================
 
 	async listFolders(projectId: string): Promise<DocumentFolder[]> {
-		const response = await this.get(
-			`/api/v1/projects/${projectId}/docs/folders`,
-		);
-		if (Array.isArray(response)) {
-			return response;
+		// The API lists one level of the tree per call, so walk it level by level.
+		const all: DocumentFolder[] = [];
+		let parents: (string | null)[] = [null];
+		while (parents.length > 0 && all.length < MAX_LISTED_ITEMS) {
+			const next: string[] = [];
+			for (let i = 0; i < parents.length; i += 8) {
+				const levels = await Promise.all(
+					parents
+						.slice(i, i + 8)
+						.map((parent) =>
+							fetchAllPages<DocumentFolder>((cursor) =>
+								this.get(
+									withPaging(
+										`/api/v1/projects/${projectId}/docs/folders?parent_id=${parent ?? "null"}`,
+										cursor,
+										200,
+									),
+								),
+							),
+						),
+				);
+				for (const folders of levels) {
+					for (const f of folders) {
+						all.push(f);
+						next.push(f.id);
+					}
+				}
+			}
+			parents = next;
 		}
-		return response.items || response.folders || response.data || [];
+		return all;
 	}
 
 	async createFolder(
@@ -129,13 +155,17 @@ export class PacaAPIDocClient {
 		projectId: string,
 		docId: string,
 	): Promise<DocumentSnapshot[]> {
-		const response = await this.get(
-			`/api/v1/projects/${projectId}/docs/${docId}/snapshots`,
+		// Newest first; list items carry no body (getSnapshot returns it).
+		return fetchAllPages(
+			(cursor) =>
+				this.get(
+					withPaging(
+						`/api/v1/projects/${projectId}/docs/${docId}/snapshots`,
+						cursor,
+					),
+				),
+			MAX_ACTIVITY_ITEMS,
 		);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.snapshots || response.data || [];
 	}
 
 	async getSnapshot(
@@ -154,13 +184,18 @@ export class PacaAPIDocClient {
 		projectId: string,
 		docId: string,
 	): Promise<DocumentActivity[]> {
-		const response = await this.get(
-			`/api/v1/projects/${projectId}/docs/${docId}/activities`,
+		// The API pages newest first; callers read the timeline oldest first.
+		const newestFirst = await fetchAllPages<DocumentActivity>(
+			(cursor) =>
+				this.get(
+					withPaging(
+						`/api/v1/projects/${projectId}/docs/${docId}/activities`,
+						cursor,
+					),
+				),
+			MAX_ACTIVITY_ITEMS,
 		);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.activities || response.data || [];
+		return newestFirst.reverse();
 	}
 
 	// ==================== Document Comments ====================
@@ -220,5 +255,21 @@ export class PacaAPIDocClient {
 		await this.delete(
 			`/api/v1/projects/${projectId}/docs/${docId}/files/${fileId}`,
 		);
+	}
+
+	/**
+	 * Searches a project's documents by title or body text
+	 * (GET /docs/search) — the list endpoint only matches titles.
+	 */
+	async searchDocuments(
+		projectId: string,
+		query: string,
+		limit = 20,
+	): Promise<DocumentSearchHit[]> {
+		const response = await this.get(
+			`/api/v1/projects/${projectId}/docs/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+		);
+		if (Array.isArray(response)) return response;
+		return response?.items ?? [];
 	}
 }

@@ -56,8 +56,20 @@ const sprintViewSelectCols = `id, sprint_id, project_id, name, view_type, config
 
 // ListViews returns all views for a sprint ordered by position.
 func (r *ViewRepository) ListViews(ctx context.Context, sprintID uuid.UUID) ([]*sprintdom.SprintView, error) {
+	sink := &argList{args: []any{sprintID.String()}}
+	clause, none, err := scopeSQL(ctx, "view", viewScopeColumns, sink)
+	if err != nil {
+		return nil, fmt.Errorf("view repo: list: %w", err)
+	}
+	if none {
+		return []*sprintdom.SprintView{}, nil
+	}
+	scopeAnd := ""
+	if clause != "" {
+		scopeAnd = " AND " + clause
+	}
 	var records []sprintViewRecord
-	if err := r.db.SelectContext(ctx, &records, `SELECT `+sprintViewSelectCols+` FROM sprint_views WHERE sprint_id = $1 ORDER BY position ASC, created_at ASC`, sprintID.String()); err != nil {
+	if err := r.db.SelectContext(ctx, &records, `SELECT `+sprintViewSelectCols+` FROM sprint_views WHERE sprint_id = $1`+scopeAnd+` ORDER BY position ASC, created_at ASC`, sink.args...); err != nil {
 		return nil, fmt.Errorf("view repo: list: %w", err)
 	}
 	out := make([]*sprintdom.SprintView, 0, len(records))
@@ -87,11 +99,23 @@ func (r *ViewRepository) FindViewByID(ctx context.Context, id uuid.UUID) (*sprin
 // ListProjectViews returns all views for a project filtered by viewCtx,
 // ordered by position.  Use ViewContextBacklog or ViewContextTimeline.
 func (r *ViewRepository) ListProjectViews(ctx context.Context, projectID uuid.UUID, viewCtx sprintdom.ViewContext) ([]*sprintdom.SprintView, error) {
+	sink := &argList{args: []any{projectID.String(), string(viewCtx)}}
+	clause, none, err := scopeSQL(ctx, "view", viewScopeColumns, sink)
+	if err != nil {
+		return nil, fmt.Errorf("view repo: list project views (%s): %w", viewCtx, err)
+	}
+	if none {
+		return []*sprintdom.SprintView{}, nil
+	}
+	scopeAnd := ""
+	if clause != "" {
+		scopeAnd = " AND " + clause
+	}
 	var records []sprintViewRecord
 	if err := r.db.SelectContext(ctx, &records, `
 		SELECT `+sprintViewSelectCols+` FROM sprint_views
-		WHERE project_id = $1 AND view_context = $2
-		ORDER BY position ASC, created_at ASC`, projectID.String(), string(viewCtx)); err != nil {
+		WHERE project_id = $1 AND view_context = $2`+scopeAnd+`
+		ORDER BY position ASC, created_at ASC`, sink.args...); err != nil {
 		return nil, fmt.Errorf("view repo: list project views (%s): %w", viewCtx, err)
 	}
 	out := make([]*sprintdom.SprintView, 0, len(records))
@@ -129,21 +153,43 @@ func (r *ViewRepository) CreateView(ctx context.Context, v *sprintdom.SprintView
 	return nil
 }
 
-// UpdateView persists changes to an existing sprint view.
-func (r *ViewRepository) UpdateView(ctx context.Context, v *sprintdom.SprintView) error {
-	configBytes, err := json.Marshal(v.Config)
+// UpdateViewAtomic implements sprintdom.ViewRepository — see its doc comment.
+func (r *ViewRepository) UpdateViewAtomic(ctx context.Context, id uuid.UUID, decide func(current *sprintdom.SprintView) error) (*sprintdom.SprintView, error) {
+	var out *sprintdom.SprintView
+	err := WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		var rec sprintViewRecord
+		err := tx.GetContext(ctx, &rec, `SELECT `+sprintViewSelectCols+` FROM sprint_views WHERE id = $1 FOR UPDATE`, id.String())
+		if errors.Is(err, sql.ErrNoRows) {
+			return sprintdom.ErrViewNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("view repo: find by id for update: %w", err)
+		}
+		v, err := toViewEntity(&rec)
+		if err != nil {
+			return err
+		}
+		if err := decide(v); err != nil {
+			return err
+		}
+		configBytes, err := json.Marshal(v.Config)
+		if err != nil {
+			return fmt.Errorf("view repo: marshal config: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE sprint_views SET name = $1, view_type = $2, config = $3, position = $4, updated_at = $5
+			WHERE id = $6`,
+			v.Name, string(v.ViewType), configBytes, v.Position, v.UpdatedAt, v.ID.String(),
+		); err != nil {
+			return fmt.Errorf("view repo: update: %w", err)
+		}
+		out = v
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("view repo: marshal config: %w", err)
+		return nil, err
 	}
-	_, err = r.db.ExecContext(ctx, `
-		UPDATE sprint_views SET name = $1, view_type = $2, config = $3, position = $4, updated_at = $5
-		WHERE id = $6`,
-		v.Name, string(v.ViewType), configBytes, v.Position, v.UpdatedAt, v.ID.String(),
-	)
-	if err != nil {
-		return fmt.Errorf("view repo: update: %w", err)
-	}
-	return nil
+	return out, nil
 }
 
 // DeleteView removes a sprint view by ID.
@@ -227,12 +273,26 @@ func (r *ViewRepository) ReorderViews(ctx context.Context, items []sprintdom.Vie
 	})
 }
 
-// ListTaskPositions returns all manual positions for a view ordered by position ASC.
+// ListTaskPositions returns all manual positions for a view ordered by position
+// ASC. When the context carries a task scope (see iam.WithScope), only the
+// positions of tasks the caller may read are returned, filtered in the query.
 func (r *ViewRepository) ListTaskPositions(ctx context.Context, viewID uuid.UUID) ([]*sprintdom.ViewTaskPosition, error) {
+	sink := &argList{args: []any{viewID.String()}}
+	clause, none, err := scopeSQL(ctx, "task", taskScopeColumns, sink)
+	if err != nil {
+		return nil, fmt.Errorf("view repo: list task positions: %w", err)
+	}
+	if none {
+		return []*sprintdom.ViewTaskPosition{}, nil
+	}
+	scopeAnd := ""
+	if clause != "" {
+		scopeAnd = " AND EXISTS (SELECT 1 FROM tasks WHERE tasks.id = view_task_positions.task_id AND " + clause + ")"
+	}
 	var records []viewTaskPositionRecord
 	if err := r.db.SelectContext(ctx, &records, `
 		SELECT id, view_id, task_id, position, group_key FROM view_task_positions
-		WHERE view_id = $1 ORDER BY position ASC`, viewID.String()); err != nil {
+		WHERE view_id = $1`+scopeAnd+` ORDER BY position ASC`, sink.args...); err != nil {
 		return nil, fmt.Errorf("view repo: list task positions: %w", err)
 	}
 	out := make([]*sprintdom.ViewTaskPosition, 0, len(records))

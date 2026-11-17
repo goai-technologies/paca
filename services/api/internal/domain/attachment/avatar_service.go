@@ -17,6 +17,9 @@ const (
 	AvatarOwnerAgent   AvatarOwnerKind = "agents"
 	AvatarOwnerProject AvatarOwnerKind = "projects"
 
+	// AvatarOwnerServiceAccount namespaces the avatars of service accounts.
+	AvatarOwnerServiceAccount AvatarOwnerKind = "service_accounts"
+
 	// AvatarOwnerWorkspaceLogo and AvatarOwnerWorkspaceFavicon namespace the
 	// two image slots on the singleton workspace_settings row (see
 	// settingsdom). Unlike the owner kinds above there's no per-row ID to

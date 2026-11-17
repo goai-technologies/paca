@@ -11,7 +11,9 @@ import { cn } from "@/lib/utils";
 import type { ActivityEntry } from "./types";
 
 export type ActivityNameMaps = {
-	members: Record<string, string>; // user_id → display name
+	/** Display name for a membership id; undefined while unresolved or for
+	 *  someone who is no longer a member. */
+	members: (id: string) => string | undefined;
 	sprints: Record<string, string>; // sprint_id → sprint name
 };
 
@@ -50,7 +52,7 @@ export function describeTaskChange(
 		change.new !== null && change.new !== undefined && change.new !== "";
 
 	const resolveMember = (id: unknown) =>
-		(id && names.members[String(id)]) ||
+		(id && names.members(String(id))) ||
 		(id ? String(id).slice(0, 8) : t("taskDetail.activity.none"));
 	const resolveSprint = (id: unknown) =>
 		(id && names.sprints[String(id)]) ||
@@ -231,7 +233,7 @@ export function activityDescription(
 
 export function ActivityItem({
 	entry,
-	names = { members: {}, sprints: {} },
+	names = { members: () => undefined, sprints: {} },
 }: {
 	entry: ActivityEntry;
 	names?: ActivityNameMaps;

@@ -15,11 +15,13 @@ Every agent has an `agent_type` of either `llm` or `acp` (default `llm` when omi
 
 ### `GET /api/v1/projects/:projectId/agents`
 
-List all agents in a project.
+List the agents visible in a project, ordered by name and cursor-paginated: the project's own agents plus any global agents invited into it. Query: `page_size` (1-100, default 30), `cursor` (the previous page's `next_cursor`), `search` (every word must appear in the name, handle or description), `ids` (up to 100 agent ids — a batch lookup), and `scope` (`project` or `global`) to keep only one kind. The same pagination applies to `GET /api/v1/admin/agents` and `GET /api/v1/agents` (the global agents).
 
 **Response:**
 ```json
 {
+  "page_size": 30,
+  "next_cursor": null,
   "items": [
     {
       "id": "uuid",
@@ -62,7 +64,7 @@ Create a new agent. This also creates the corresponding `project_members` row wi
   "system_prompt": "You are a senior software engineer...",
   "max_iterations": 50,
   "timeout_minutes": 30,
-  "project_role_id": "uuid"
+  "role_ids": ["uuid"]
 }
 ```
 
@@ -75,11 +77,11 @@ Create a new agent. This also creates the corresponding `project_members` row wi
   "handle": "local-claude",
   "agent_type": "acp",
   "acp_provider": "claude-code",
-  "project_role_id": "uuid"
+  "role_ids": ["uuid"]
 }
 ```
 
-`acp_provider` (one of `claude-code`, `codex`, `gemini-cli`, `goose`, `custom`) is required when `agent_type` is `acp`. `acp_command` is required only when `acp_provider` is `custom` — built-in providers resolve a default launch command themselves, via a small registry in the bridge daemon itself (`apps/acp-bridge/internal/provider`, e.g. `"goose"` → `["goose", "acp"]`), not anything Paca's own backend knows about. None of the `llm_*` fields apply to `acp` agents, nor do `system_prompt`, `git_committer_name`, or `git_committer_email` — the local ACP client owns its own system prompt and git identity, so Paca silently ignores those fields for `acp` agents rather than persisting them.
+`acp_provider` (one of `claude-code`, `codex`, `gemini-cli`, `goose`, `custom`) is required when `agent_type` is `acp`. `acp_command` is required only when `acp_provider` is `custom` — built-in providers resolve a default launch command themselves, via a small registry in the bridge daemon itself (`apps/acp-bridge/internal/provider`, e.g. `"goose"` → `["goose", "acp"]`), not anything Paca's own backend knows about. None of the `llm_*` fields apply to `acp` agents, nor do `system_prompt`, `git_committer_name`, or `git_committer_email` — the local ACP client owns its own system prompt and git identity, so Paca rejects a non-empty value for any of those fields on a non-`llm` agent (create and update, project-scoped and global) with `400` and code `AGENT_FIELD_NOT_SUPPORTED_FOR_TYPE`. The message and `error_details.fields` (comma-separated) name the offending fields, e.g. `field not supported for this agent type: system_prompt, git_committer_email`. Empty values are accepted, so clients that echo defaults keep working. The same applies to `provider_cli` agents (project-scoped only).
 
 **Response:** `201 Created` with the created agent object.
 

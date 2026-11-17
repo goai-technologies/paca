@@ -201,9 +201,6 @@ func Load() (*Config, error) {
 			// representing 32 bytes (AES-256).
 			// Backward compatibility: fall back to legacy GITHUB_ENCRYPTION_KEY.
 			EncryptionKey: env("ENCRYPTION_KEY", env("GITHUB_ENCRYPTION_KEY", "")),
-			// AGENT_API_KEY is optional; when set the API accepts it as a
-			// static service key for the AI agent without a DB lookup.
-			AgentAPIKey: env("AGENT_API_KEY", ""),
 		},
 		Plugins: PluginsConfig{
 			// PLUGINS_STORE controls where WASM binaries are loaded from.

@@ -19,7 +19,6 @@ import { useGlobalAgentRealtime } from "@/hooks/use-global-agent-realtime";
 import {
 	type AgentConversation,
 	CONVERSATION_HEARTBEAT_INTERVAL_MS,
-	chattableAgentsQueryOptions,
 	globalConversationEventsQueryOptions,
 	globalConversationQueryOptions,
 	heartbeatGlobalConversation,
@@ -30,6 +29,7 @@ import {
 	startGlobalChatSession,
 	stopGlobalConversation,
 } from "@/lib/agent-api";
+import { useAgentDirectory } from "@/lib/agent-directory";
 import { useContextInjectionStore } from "@/lib/context-injection-store";
 import { cn } from "@/lib/utils";
 import { ConversationErrorBox } from "./agents/conversation-error-box";
@@ -105,8 +105,8 @@ export function GlobalAIChatFloat() {
 	// GET /admin/agents/:id — any user chatting with a global agent may not
 	// have agents.read, but this list is deliberately unrestricted (see
 	// lib/agent-api.ts's listChattableAgents).
-	const { data: agents = [] } = useQuery(chattableAgentsQueryOptions);
-	const agent = agents.find((a) => a.id === conversation?.agent_id);
+	const getGlobalAgent = useAgentDirectory(null);
+	const agent = getGlobalAgent(conversation?.agent_id);
 	const isACP = agent?.agent_type === "acp";
 	const environmentReady = isEnvironmentReady(isACP, events);
 

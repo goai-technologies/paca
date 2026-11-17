@@ -40,6 +40,31 @@ The production compose file is intentionally self-hostable:
 
 That makes it a better open-source baseline: users can run the full platform immediately, while operators with managed infrastructure can still swap the bundled services for externally hosted equivalents by changing the connection settings.
 
+## Upgrading to IAM authorization (migrations 000064-000068)
+
+The release that introduced IAM-style roles ships five migrations that apply automatically the first time the new API starts: `000064_iam_roles.sql` (converts every role and membership, then self-checks before committing), `000065_plugin_manifest_actions.sql` (rewrites installed plugin manifests), `000066_relax_legacy_role_columns.sql` and `000067_project_role_resources.sql` (rewrites project-owned role policies to name only their own project) and `000068_add_roles_assign.sql` (adds `roles:assign` next to `project.members:write` so roles that could change a member's roles still can). They are up-only: **there is no down migration and no application downgrade**, so take and verify a database dump first (the bundled `db-backup` container's last dump may be hours old; see [Database backups](../../deploy/README.md#database-backups)). If the 000064 self-check finds any difference between the old and new access rules it aborts and rolls back, and the API does not start. Restricted agents and environments are **not** migrated and become open until an administrator recreates the restriction with a `Deny` role.
+
+## Upgrading to unified accounts and service accounts (migration 000066)
+
+Every actor (user, agent, service account) is now one `accounts` row; see [Accounts model](../architecture/database-schema.md#accounts-model) and the [service accounts API](../api/service-accounts.md). Migration `000066_unified_accounts.sql` applies automatically on first start and is **irreversible**: **back up the database first**. It moves name, description, avatar and the soft-delete flag from `users` and `agents` to `accounts`, replaces `role_attachments.principal_type/principal_id` and `project_members.user_id/agent_id/member_type` with `account_id`, and drops the legacy `users.role_id`, `agents.global_role_id` and `project_members.project_role_id`. Role attachments whose principal no longer exists are deleted (reported as a `NOTICE` with the count).
+
+- **`AGENT_API_KEY` is gone** (API, agent-runner `PACA_API_KEY`, Helm `secrets.agentApiKey`, the installer); it is ignored if still set. An agent authenticates with its own API key and is judged by its own roles only; the `X-Agent-ID` and `X-Actor-User-ID` headers are ignored. Anything that called the API with the shared key must use a real account's key.
+- **An agent never borrows a person's permissions.** A global agent chatting with someone used to attribute some actions (for example creating a project) to that person; it now acts, and is attributed, as itself, and needs roles that allow what it does.
+- agent-runner sandboxes get the agent's own key (`PACA_API_KEY`); existing environments are recreated once to pick it up. The `MCP key` an ACP agent already had keeps working.
+- Usernames and emails stay unique among live users, and agent handles unique per project (workspace-wide for global agents), now enforced by a trigger instead of partial indexes.
+- Plugins cannot write the new `accounts` table. First-party plugins that read core tables (time-logging, webhook, dashboard's "Open tasks by assignee" preset) queried `users.full_name`, `agents.name` and `project_members.user_id/agent_id`; their current sources use `accounts` and `project_members.account_id` and need a core that includes this migration (`minCoreVersion`). The dashboard plugin migrates saved panels that still hold the unchanged preset query; a panel edited by hand must be adapted. Plugin SQL naming a dropped column fails with a query error.
+- Built-in `ADMIN` does not get the new `service_accounts:*` actions; grant them through a role if needed.
+
+## Upgrading: public projects removed (migration 000065)
+
+Projects can no longer be made public: every `/projects/{projectId}/...` route requires a signed-in caller whose roles allow the action. Migration `000065_drop_project_is_public.sql` drops `projects.is_public` and is **irreversible**; formerly public projects become members-only and anonymous visitors get `401`. Before upgrading, list them:
+
+```sql
+SELECT id, name FROM projects WHERE is_public AND deleted_at IS NULL;
+```
+
+The `is_public` field is gone from the project create/update/read API (clients that still send it are ignored). A `Deny` (for example `tasks:read`) on a project is now honoured for tasks fetched by id and their activities, links and attachments; workspace-wide `projects:read` still lists and opens projects but no longer reads their contents.
+
 ## Object Storage
 
 All environments ship with [RustFS](https://rustfs.com), an S3-compatible object store, so file attachments work out of the box without an AWS account. The API service is storage-provider-agnostic: switching to AWS S3 only requires changing a handful of environment variables, and switching the self-hosted backend itself (as happened when this project moved off MinIO — see below) only ever requires changing the bundled container, never application code.

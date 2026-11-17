@@ -8,8 +8,15 @@ import (
 )
 
 const (
-	claudeCodeHomeDir    = ".claude"
-	claudeCodeConfigFile = ".claude.json"
+	claudeCodeHomeDir = ".claude"
+	// claudeCodeConfigFile lives INSIDE claudeCodeHomeDir, not at
+	// ~/.claude.json: the agent-server image sets CLAUDE_CONFIG_DIR to this
+	// provider's persisted volume directory (see services/agent-server/
+	// Dockerfile), and with that set Claude Code reads and writes its
+	// .claude.json (account state + mcpServers) from inside that directory
+	// — verified directly against claude 2.1.284. Written through the
+	// ~/.claude symlink, this path lands on exactly that file.
+	claudeCodeConfigFile = ".claude/.claude.json"
 )
 
 // claudeCode is the Claude Code CLI adapter. Confidence: MEDIUM-HIGH for

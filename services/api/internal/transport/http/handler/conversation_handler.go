@@ -14,6 +14,7 @@ import (
 	"github.com/Paca-AI/api/internal/apierr"
 	agentdom "github.com/Paca-AI/api/internal/domain/agent"
 	projectdom "github.com/Paca-AI/api/internal/domain/project"
+	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	"github.com/Paca-AI/api/internal/transport/http/dto"
 	"github.com/Paca-AI/api/internal/transport/http/middleware"
 	"github.com/Paca-AI/api/internal/transport/http/presenter"
@@ -70,6 +71,14 @@ func parseCreatedBeforeBound(raw string) (*time.Time, bool) {
 type ConversationHandler struct {
 	svc        agentdom.Service
 	memberRepo projectdom.MemberRepository
+	listScoper ListScoper
+}
+
+// WithConversationListScoper limits the project's conversation list to the
+// conversations the caller may read, inside the query (see scopedContext).
+func (h *ConversationHandler) WithConversationListScoper(s ListScoper) *ConversationHandler {
+	h.listScoper = s
+	return h
 }
 
 // NewConversationHandler returns a ConversationHandler wired to the agent service.
@@ -216,7 +225,12 @@ func (h *ConversationHandler) ListConversations(w http.ResponseWriter, r *http.R
 	filter.ProjectID = &projectID
 	filter.ViewerMemberID = &memberID
 
-	convs, hasMore, err := h.svc.ListConversations(r.Context(), filter, pageSize)
+	ctx, err := scopedContext(r, h.listScoper, iam.ActionConversationsRead, projectID, "conversation")
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	convs, hasMore, err := h.svc.ListConversations(ctx, filter, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -363,7 +377,7 @@ func currentConversationIDFromHeader(r *http.Request) uuid.UUID {
 }
 
 // GetConversationForAgent handles GET /agents/me/conversations/:conversationId
-// — an agent (X-Agent-ID authenticated, no human member/actor identity of
+// — an agent (authenticated with its own API key, no human member/actor identity of
 // its own) reading a conversation by ID, e.g. the read_conversation MCP
 // tool. See agentdom.Service.GetConversationForAgent's doc comment for the
 // full authorization rule; it's deliberately not projectId-scoped in the

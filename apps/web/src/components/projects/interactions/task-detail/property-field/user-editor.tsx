@@ -1,11 +1,12 @@
 import { Check, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { EntityAvatarContent } from "@/components/shared/entity-avatar";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import { SearchableList } from "./searchable-list";
 import type { UserOption } from "./types";
 
 export function UserEditor({
@@ -33,11 +34,7 @@ export function UserEditor({
 		}
 		return (
 			<div className="flex items-center gap-2.5">
-				<div className="flex size-6 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10 text-primary text-xs font-bold ring-1 ring-primary/20">
-					<EntityAvatarContent avatarUrl={userValue.avatarUrl}>
-						{userValue.initials}
-					</EntityAvatarContent>
-				</div>
+				<EntityAvatar {...userValue.avatar} size="sm" />
 				<span className="text-sm font-medium text-foreground">
 					{userValue.label}
 				</span>
@@ -57,11 +54,7 @@ export function UserEditor({
 			>
 				{userValue ? (
 					<>
-						<div className="flex size-6 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10 text-primary text-xs font-bold ring-1 ring-primary/20">
-							<EntityAvatarContent avatarUrl={userValue.avatarUrl}>
-								{userValue.initials}
-							</EntityAvatarContent>
-						</div>
+						<EntityAvatar {...userValue.avatar} size="sm" />
 						<span className="text-sm font-medium text-foreground">
 							{userValue.label}
 						</span>
@@ -77,37 +70,35 @@ export function UserEditor({
 				className="w-56 p-1 rounded-xl border border-border/40 shadow-lg"
 				align="start"
 			>
-				{showUnassigned && (
-					<button
-						type="button"
-						className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors duration-100"
-						onClick={() => onChange?.(null)}
-					>
-						<User className="size-3.5 opacity-60" />
-						<span className="flex-1 text-left">
-							{t("taskDetail.common.unassigned")}
-						</span>
-						{!userValue && <Check className="size-3.5 text-primary" />}
-					</button>
-				)}
-				{users.map((u) => (
-					<button
-						key={u.value}
-						type="button"
-						className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-muted/60 transition-colors duration-100"
-						onClick={() => onChange?.(u.value)}
-					>
-						<div className="flex size-5 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10 text-primary text-xs font-bold">
-							<EntityAvatarContent avatarUrl={u.avatarUrl}>
-								{u.initials}
-							</EntityAvatarContent>
-						</div>
-						<span className="flex-1 text-left truncate">{u.label}</span>
-						{u.value === userValue?.value && (
-							<Check className="size-3.5 text-primary" />
-						)}
-					</button>
-				))}
+				<SearchableList
+					pinned={
+						showUnassigned && (
+							<button
+								type="button"
+								className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors duration-100"
+								onClick={() => onChange?.(null)}
+							>
+								<User className="size-3.5 opacity-60" />
+								<span className="flex-1 text-left">
+									{t("taskDetail.common.unassigned")}
+								</span>
+								{!userValue && <Check className="size-3.5 text-primary" />}
+							</button>
+						)
+					}
+					items={users.map((u) => ({
+						key: u.value,
+						label: u.label,
+						selected: u.value === userValue?.value,
+						onSelect: () => onChange?.(u.value),
+						content: (
+							<>
+								<EntityAvatar {...u.avatar} size="xs" />
+								<span className="flex-1 text-left truncate">{u.label}</span>
+							</>
+						),
+					}))}
+				/>
 			</PopoverContent>
 		</Popover>
 	);

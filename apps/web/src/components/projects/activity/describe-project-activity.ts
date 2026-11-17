@@ -175,7 +175,7 @@ export function describeProjectActivity(
 		}
 		case "environment.access.granted":
 		case "environment.access.revoked": {
-			const member = names.members[str(c.member_id)];
+			const member = names.members(str(c.member_id));
 			return member
 				? { text, detail: t("activityLog.detail.member", { name: member }) }
 				: { text };

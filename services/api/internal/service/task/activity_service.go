@@ -136,20 +136,20 @@ func (s *ActivitySvc) RecordActivity(ctx context.Context, in taskdom.RecordActiv
 	return nil
 }
 
-// ListActivities returns all non-deleted activities for a task, oldest first.
-func (s *ActivitySvc) ListActivities(ctx context.Context, projectID, taskID uuid.UUID) ([]*taskdom.Activity, error) {
+// ListActivities returns one page of a task's activities, newest first.
+func (s *ActivitySvc) ListActivities(ctx context.Context, projectID, taskID uuid.UUID, cursor *string, limit int) ([]*taskdom.Activity, *string, error) {
 	if err := s.taskInProject(ctx, projectID, taskID, taskdom.ErrTaskNotFound); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	items, err := s.act.ListForEntity(ctx, events.EntityTask, taskID)
+	items, next, err := s.act.ListForEntity(ctx, events.EntityTask, taskID, cursor, limit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]*taskdom.Activity, 0, len(items))
 	for _, a := range items {
 		out = append(out, toTaskActivity(a))
 	}
-	return out, nil
+	return out, next, nil
 }
 
 // AddComment creates a comment on the task, then notifies @-mentioned users
@@ -230,8 +230,8 @@ func (s *ActivitySvc) triggerMentionedAgent(ctx context.Context, in taskdom.AddC
 	conv, err := s.agentTrigger.TriggerCommentMention(ctx, in.ProjectID, agentID, in.TaskID, commentID, member.ID, commentText)
 	if err != nil {
 		// The comment still succeeds — this is visibility only. Without it a
-		// restricted-agent denial is indistinguishable from the mention
-		// doing nothing.
+		// denied trigger (the mentioner may not use the agent or its
+		// environment) is indistinguishable from the mention doing nothing.
 		slog.WarnContext(ctx, "comment mention trigger failed", "error", err, "project_id", in.ProjectID, "agent_id", agentID, "task_id", in.TaskID)
 	}
 	if conv != nil {

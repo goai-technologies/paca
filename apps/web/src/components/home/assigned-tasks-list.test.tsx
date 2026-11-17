@@ -18,7 +18,6 @@ const defaultProjectsPage = {
 			id: "proj-a",
 			name: "Project Alpha",
 			description: "",
-			is_public: false,
 			task_id_prefix: "ALP",
 			settings: {},
 			created_at: "2026-01-01T00:00:00Z",
@@ -27,7 +26,6 @@ const defaultProjectsPage = {
 			id: "proj-b",
 			name: "Project Beta",
 			description: "",
-			is_public: false,
 			task_id_prefix: "BET",
 			settings: {},
 			created_at: "2026-01-01T00:00:00Z",
@@ -84,10 +82,6 @@ vi.mock("@/lib/project-api", async () => {
 		}),
 		taskTypesQueryOptions: (projectId: string) => ({
 			queryKey: ["test", "types", projectId],
-			queryFn: async () => [],
-		}),
-		projectMembersQueryOptions: (projectId: string) => ({
-			queryKey: ["test", "members", projectId],
 			queryFn: async () => [],
 		}),
 	};

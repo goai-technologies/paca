@@ -6,6 +6,7 @@ import {
 	DateRangeFilter,
 	FilterSectionLabel,
 } from "@/components/projects/activity/activity-filter-parts";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { Input } from "@/components/ui/input";
 import {
 	Popover,
@@ -13,11 +14,13 @@ import {
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
+import { useMemberSearch } from "@/hooks/use-member-search";
 import {
 	ACTIVITY_ENTITY_TYPES,
 	ACTIVITY_ORIGINS,
 	type ProjectActivityFilters as Filters,
 } from "@/lib/activity-api";
+import { useMemberDirectory } from "@/lib/member-directory";
 import type { ProjectMember } from "@/lib/project-api";
 import { cn } from "@/lib/utils";
 
@@ -37,17 +40,21 @@ export function memberDisplayName(m: ProjectMember): string {
 export interface ProjectActivityFiltersProps {
 	filters: Filters;
 	onFiltersChange: (next: Filters) => void;
-	members: ProjectMember[];
+	projectId: string;
 }
 
 export function ProjectActivityFilters({
 	filters,
 	onFiltersChange,
-	members,
+	projectId,
 }: ProjectActivityFiltersProps) {
 	const { t } = useTranslation("projects");
 	const [searchInput, setSearchInput] = useState(filters.search ?? "");
 	const [open, setOpen] = useState(false);
+	// The people list is searched and paged on the server, only while the
+	// filter popover is open.
+	const people = useMemberSearch(projectId, open);
+	const getMember = useMemberDirectory(projectId);
 
 	const debouncedSetSearch = useDebouncedCallback((value: string) => {
 		onFiltersChange({ ...filters, search: value || undefined });
@@ -134,8 +141,34 @@ export function ProjectActivityFilters({
 							<FilterSectionLabel>
 								{t("activityLog.filters.people")}
 							</FilterSectionLabel>
+							<Input
+								value={people.query}
+								onChange={(e) => people.onQueryChange(e.target.value)}
+								placeholder={t("taskDetail.searchableList.searchPlaceholder")}
+								aria-label={t("taskDetail.searchableList.searchPlaceholder")}
+								className="mb-1.5 h-7 text-xs"
+							/>
 							<div className="flex max-h-44 flex-col gap-0.5 overflow-y-auto">
-								{members.map((m) => (
+								{/* Selected people stay listed even when the results don't include them. */}
+								{(filters.actorIds ?? [])
+									.filter((id) => !people.members.some((m) => m.id === id))
+									.map((id) => {
+										const m = getMember(id);
+										return (
+											<CheckListRow
+												key={id}
+												label={m ? memberDisplayName(m) : id.slice(0, 8)}
+												checked
+												onChange={() =>
+													onFiltersChange({
+														...filters,
+														actorIds: toggle(filters.actorIds, id),
+													})
+												}
+											/>
+										);
+									})}
+								{people.members.map((m) => (
 									<CheckListRow
 										key={m.id}
 										label={memberDisplayName(m)}
@@ -148,6 +181,12 @@ export function ProjectActivityFilters({
 										}
 									/>
 								))}
+								<LoadMoreSentinel
+									hasMore={people.hasMore}
+									isLoadingMore={people.isLoadingMore}
+									isError={people.isError}
+									onLoadMore={people.onLoadMore}
+								/>
 							</div>
 						</section>
 

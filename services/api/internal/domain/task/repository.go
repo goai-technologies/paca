@@ -71,9 +71,24 @@ type TaskRepository interface {
 	// ignoring cursor-based pagination. fieldKey is "story_points" or a custom field key.
 	SumTaskField(ctx context.Context, projectID uuid.UUID, filter TaskFilter, fieldKey string) (float64, error)
 	FindTaskByID(ctx context.Context, id uuid.UUID) (*Task, error)
+	// ListCommitmentWork returns every live task, in any project, whose
+	// commitment_task_id is commitmentID, ordered by project then task number.
+	ListCommitmentWork(ctx context.Context, commitmentID uuid.UUID) ([]*Task, error)
+	// ProjectIsLive reports whether a project exists and is not deleted.
+	ProjectIsLive(ctx context.Context, projectID uuid.UUID) (bool, error)
+	// CountTasksOfType counts the tasks (deleted ones included, since they
+	// still reference the type) of a type.
+	CountTasksOfType(ctx context.Context, typeID uuid.UUID) (int, error)
 	FindTaskByNumber(ctx context.Context, projectID uuid.UUID, taskNumber int64) (*Task, error)
 	CreateTask(ctx context.Context, t *Task) error
 	UpdateTask(ctx context.Context, t *Task) error
+	// UpdateTaskFields writes only the listed fields of t (plus updated_at),
+	// leaving every other column as stored, so overlapping saves that touch
+	// different fields can't overwrite each other with stale values.
+	//
+	// For TaskFieldCustomFields, customFieldsPatch is merged key by key into
+	// the stored custom_fields in SQL rather than replacing it.
+	UpdateTaskFields(ctx context.Context, t *Task, fields []TaskField, customFieldsPatch map[string]any) error
 	// UpdateTaskAtomic loads id under a row-level lock (SELECT ... FOR
 	// UPDATE) and, within that same transaction, calls decide with the
 	// freshly-locked task. decide returns (nil, nil) to abort with no write
@@ -143,6 +158,9 @@ type TaskFilter struct {
 	// Search, when non-nil and non-blank, restricts results to tasks whose title
 	// or "#<task_number>" id contains the text (case-insensitive).
 	Search *string
+	// SearchContent, when true and Search is set, also matches the task's
+	// description text (inline BlockNote "text" nodes), not just title/number.
+	SearchContent bool
 	// CustomFieldFilters filters tasks by custom field values, keyed by field key.
 	CustomFieldFilters map[string]CustomFieldFilterQuery
 	// StartDateAfter/StartDateBefore filter tasks by start_date (inclusive,

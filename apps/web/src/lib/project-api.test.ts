@@ -25,23 +25,19 @@ vi.mock("./api-client", () => ({
 import {
 	addProjectMember,
 	createProject,
-	createProjectRole,
 	deleteProject,
-	deleteProjectRole,
 	findEpicType,
 	getNormalTaskTypes,
 	getProject,
 	isEpicType,
 	listProjectMembers,
-	listProjectRoles,
 	listProjects,
 	type Project,
 	type ProjectListResult,
 	type ProjectMember,
-	type ProjectRole,
-	projectMembersQueryOptions,
+	projectMembersInfiniteQueryOptions,
+	projectMembersKey,
 	projectQueryOptions,
-	projectRolesQueryOptions,
 	projectsInfiniteQueryOptions,
 	projectsLookupInfiniteQueryOptions,
 	projectsQueryOptions,
@@ -51,7 +47,6 @@ import {
 	taskTypesQueryOptions,
 	updateProject,
 	updateProjectMemberRole,
-	updateProjectRole,
 } from "./project-api";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -60,7 +55,6 @@ const mockProject: Project = {
 	id: "p1",
 	name: "Alpha",
 	description: "First project",
-	is_public: false,
 	task_id_prefix: "ALPH",
 	settings: {},
 	jev_configured: false,
@@ -74,20 +68,10 @@ const mockMember: ProjectMember = {
 	id: "m1",
 	project_id: "p1",
 	user_id: "u1",
-	project_role_id: "r1",
+	roles: [{ id: "r1", name: "Developer" }],
 	username: "alice",
 	full_name: "Alice Smith",
-	role_name: "Developer",
 	description: "",
-};
-
-const mockRole: ProjectRole = {
-	id: "r1",
-	project_id: "p1",
-	role_name: "Developer",
-	permissions: { "tasks.*": true },
-	created_at: "2026-01-01T00:00:00.000Z",
-	updated_at: "2026-01-01T00:00:00.000Z",
 };
 
 const mockTaskType: TaskType = {
@@ -170,17 +154,6 @@ describe("project-api", () => {
 		});
 	});
 
-	it("createProject forwards is_public when provided", async () => {
-		const publicProject = { ...mockProject, is_public: true };
-		mockPost.mockResolvedValue(ok(publicProject));
-
-		await createProject({ name: "Public", is_public: true });
-		expect(mockPost).toHaveBeenCalledWith("/projects", {
-			name: "Public",
-			is_public: true,
-		});
-	});
-
 	it("updateProject patches by id and unwraps the updated project", async () => {
 		const updated = { ...mockProject, name: "Alpha v2" };
 		mockPatch.mockResolvedValue(ok(updated));
@@ -193,16 +166,6 @@ describe("project-api", () => {
 		});
 	});
 
-	it("updateProject forwards is_public when toggling visibility", async () => {
-		const publicProject = { ...mockProject, is_public: true };
-		mockPatch.mockResolvedValue(ok(publicProject));
-
-		await expect(updateProject("p1", { is_public: true })).resolves.toEqual(
-			publicProject,
-		);
-		expect(mockPatch).toHaveBeenCalledWith("/projects/p1", { is_public: true });
-	});
-
 	it("deleteProject sends DELETE to correct URL and returns undefined", async () => {
 		mockDelete.mockResolvedValue({});
 
@@ -213,16 +176,39 @@ describe("project-api", () => {
 	// ── Members ────────────────────────────────────────────────────────────────
 
 	describe("members", () => {
-		it("listProjectMembers fetches members for a project and unwraps", async () => {
-			mockGet.mockResolvedValue(ok([mockMember]));
+		it("listProjectMembers requests one filtered page and unwraps it", async () => {
+			const page = {
+				items: [mockMember],
+				page_size: 20,
+				next_cursor: "c2",
+				total_count: 41,
+			};
+			mockGet.mockResolvedValue(ok(page));
 
-			await expect(listProjectMembers("p1")).resolves.toEqual([mockMember]);
-			expect(mockGet).toHaveBeenCalledWith("/projects/p1/members");
+			await expect(
+				listProjectMembers("p1", {
+					search: "  ann ",
+					roleId: "r1",
+					memberType: "agent",
+					cursor: "c1",
+					ids: ["a", "b"],
+				}),
+			).resolves.toEqual(page);
+			expect(mockGet).toHaveBeenCalledWith("/projects/p1/members", {
+				params: {
+					page_size: 20,
+					cursor: "c1",
+					search: "ann",
+					role_id: "r1",
+					member_type: "agent",
+					ids: "a,b",
+				},
+			});
 		});
 
 		it("addProjectMember posts payload and unwraps the created member", async () => {
 			mockPost.mockResolvedValue(ok(mockMember));
-			const payload = { user_id: "u1", project_role_id: "r1" };
+			const payload = { user_id: "u1", role_ids: ["r1"] };
 
 			await expect(addProjectMember("p1", payload)).resolves.toEqual(
 				mockMember,
@@ -230,19 +216,15 @@ describe("project-api", () => {
 			expect(mockPost).toHaveBeenCalledWith("/projects/p1/members", payload);
 		});
 
-		it("updateProjectMemberRole patches member role and unwraps the updated member", async () => {
-			const updated = {
-				...mockMember,
-				project_role_id: "r2",
-				role_name: "Lead",
-			};
+		it("updateProjectMemberRole patches the description and unwraps the updated member", async () => {
+			const updated = { ...mockMember, description: "frontend lead" };
 			mockPatch.mockResolvedValue(ok(updated));
 
 			await expect(
-				updateProjectMemberRole("p1", "u1", { project_role_id: "r2" }),
+				updateProjectMemberRole("p1", "m1", { description: "frontend lead" }),
 			).resolves.toEqual(updated);
-			expect(mockPatch).toHaveBeenCalledWith("/projects/p1/members/u1", {
-				project_role_id: "r2",
+			expect(mockPatch).toHaveBeenCalledWith("/projects/p1/members/m1", {
+				description: "frontend lead",
 			});
 		});
 
@@ -251,56 +233,6 @@ describe("project-api", () => {
 
 			await expect(removeProjectMember("p1", "u1")).resolves.toBeUndefined();
 			expect(mockDelete).toHaveBeenCalledWith("/projects/p1/members/u1");
-		});
-	});
-
-	// ── Roles ──────────────────────────────────────────────────────────────────
-
-	describe("roles", () => {
-		it("listProjectRoles fetches roles for a project and unwraps", async () => {
-			mockGet.mockResolvedValue(ok([mockRole]));
-
-			await expect(listProjectRoles("p1")).resolves.toEqual([mockRole]);
-			expect(mockGet).toHaveBeenCalledWith("/projects/p1/roles");
-		});
-
-		it("createProjectRole posts payload and unwraps the created role", async () => {
-			mockPost.mockResolvedValue(ok(mockRole));
-			const payload = {
-				role_name: "Developer",
-				permissions: { "tasks.*": true },
-			};
-
-			await expect(createProjectRole("p1", payload)).resolves.toEqual(mockRole);
-			expect(mockPost).toHaveBeenCalledWith("/projects/p1/roles", payload);
-		});
-
-		it("createProjectRole works without optional permissions field", async () => {
-			mockPost.mockResolvedValue(ok(mockRole));
-
-			await createProjectRole("p1", { role_name: "Viewer" });
-			expect(mockPost).toHaveBeenCalledWith("/projects/p1/roles", {
-				role_name: "Viewer",
-			});
-		});
-
-		it("updateProjectRole patches by role id and unwraps the updated role", async () => {
-			const updated = { ...mockRole, role_name: "Senior Developer" };
-			mockPatch.mockResolvedValue(ok(updated));
-
-			await expect(
-				updateProjectRole("p1", "r1", { role_name: "Senior Developer" }),
-			).resolves.toEqual(updated);
-			expect(mockPatch).toHaveBeenCalledWith("/projects/p1/roles/r1", {
-				role_name: "Senior Developer",
-			});
-		});
-
-		it("deleteProjectRole sends DELETE to correct URL and returns undefined", async () => {
-			mockDelete.mockResolvedValue({});
-
-			await expect(deleteProjectRole("p1", "r1")).resolves.toBeUndefined();
-			expect(mockDelete).toHaveBeenCalledWith("/projects/p1/roles/r1");
 		});
 	});
 
@@ -382,16 +314,13 @@ describe("project-api", () => {
 			expect(opts.staleTime).toBe(2 * 60 * 1000);
 		});
 
-		it("projectMembersQueryOptions exposes correct key and fn", () => {
-			const opts = projectMembersQueryOptions("p1");
-			expect(opts.queryKey).toEqual(["projects", "p1", "members"]);
-			expect(typeof opts.queryFn).toBe("function");
-		});
-
-		it("projectRolesQueryOptions exposes correct key and fn", () => {
-			const opts = projectRolesQueryOptions("p1");
-			expect(opts.queryKey).toEqual(["projects", "p1", "roles"]);
-			expect(typeof opts.queryFn).toBe("function");
+		it("projectMembersKey is the prefix of every members query", () => {
+			expect(projectMembersKey("p1")).toEqual(["projects", "p1", "members"]);
+			expect(
+				projectMembersInfiniteQueryOptions("p1", {
+					search: "x",
+				}).queryKey.slice(0, 3),
+			).toEqual(["projects", "p1", "members"]);
 		});
 
 		it("taskTypesQueryOptions exposes correct key and fn", () => {

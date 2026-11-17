@@ -10,4 +10,6 @@ var (
 	ErrNameInvalid = errors.New("api key: name must not be empty")
 	ErrNameTooLong = errors.New("api key: name must not exceed 100 characters")
 	ErrForbidden   = errors.New("api key: forbidden")
+	// ErrInvalidCursor reports a malformed pagination cursor.
+	ErrInvalidCursor = errors.New("api key: invalid cursor")
 )

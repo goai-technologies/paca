@@ -94,7 +94,7 @@ func (s *Service) publish(ctx context.Context, a *automationdom.Automation, topi
 
 // ListAutomations returns a project's automations, optionally filtered by
 // status and/or a case-insensitive name search.
-func (s *Service) ListAutomations(ctx context.Context, projectID uuid.UUID, status *automationdom.Status, search *string, cursor *string, limit *int) ([]*automationdom.Automation, bool, error) {
+func (s *Service) ListAutomations(ctx context.Context, projectID uuid.UUID, status *automationdom.Status, search *string, cursor *string, limit int) ([]*automationdom.Automation, bool, error) {
 	return s.repo.ListAutomations(ctx, projectID, status, search, cursor, limit)
 }
 
@@ -481,12 +481,12 @@ func (s *Service) RemoveEdge(ctx context.Context, projectID, automationID, edgeI
 
 // --- Runs -------------------------------------------------------------------
 
-// ListRuns returns an automation's most recent executions, newest first.
-func (s *Service) ListRuns(ctx context.Context, projectID, automationID uuid.UUID, limit int) ([]*automationdom.Run, error) {
+// ListRuns returns one page of an automation's executions, newest first.
+func (s *Service) ListRuns(ctx context.Context, projectID, automationID uuid.UUID, cursorAfter *string, limit int) ([]*automationdom.Run, bool, error) {
 	if _, err := s.findOwnedAutomation(ctx, projectID, automationID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return s.repo.ListRunsByAutomation(ctx, automationID, limit)
+	return s.repo.ListRunsByAutomation(ctx, automationID, cursorAfter, limit)
 }
 
 // ListRunSteps returns every node visited during one run, in execution order.
@@ -506,7 +506,7 @@ func (s *Service) ListRunSteps(ctx context.Context, projectID, automationID, run
 // configs in projectID, for the read-only, auto-generated dependency view.
 func (s *Service) DependencyMap(ctx context.Context, projectID uuid.UUID) ([]automationdom.DependencyMapEntry, error) {
 	active := automationdom.StatusActive
-	automations, _, err := s.repo.ListAutomations(ctx, projectID, &active, nil, nil, nil)
+	automations, err := s.repo.ListAllAutomations(ctx, projectID, &active)
 	if err != nil {
 		return nil, err
 	}

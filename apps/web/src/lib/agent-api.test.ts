@@ -26,7 +26,6 @@ import {
 	addGlobalEnvVar,
 	addGlobalMCPServer,
 	addGlobalSkill,
-	clearGlobalAgentRole,
 	createGlobalAgent,
 	deleteGlobalAgent,
 	deleteGlobalEnvVar,
@@ -38,6 +37,7 @@ import {
 	getGlobalConversation,
 	heartbeatGlobalConversation,
 	listAgents,
+	listChattableAgents,
 	listConversationEventWindow,
 	listConversations,
 	listGlobalAgents,
@@ -52,7 +52,6 @@ import {
 	sendConversationMessage,
 	sendGlobalChatMessage,
 	sendGlobalConversationMessage,
-	setGlobalAgentRole,
 	startChatSession,
 	startGlobalChatSession,
 	stopGlobalConversation,
@@ -86,23 +85,55 @@ describe("agent-api", () => {
 	});
 
 	describe("listAgents", () => {
-		it("sends no params when called without a scope", async () => {
-			mockGet.mockResolvedValue(ok({ items: [] }));
+		const page = { items: [], page_size: 30, next_cursor: null };
 
-			await listAgents(PROJECT_ID);
+		it("requests a first page with the default page size and no other params", async () => {
+			mockGet.mockResolvedValue(ok(page));
+
+			await expect(listAgents(PROJECT_ID)).resolves.toEqual(page);
 
 			expect(mockGet).toHaveBeenCalledWith(`/projects/${PROJECT_ID}/agents`, {
-				params: undefined,
+				params: { page_size: 30 },
 			});
 		});
 
-		it("forwards scope as a query param when given", async () => {
-			mockGet.mockResolvedValue(ok({ items: [] }));
+		it("forwards scope, search, ids and cursor", async () => {
+			mockGet.mockResolvedValue(ok(page));
 
-			await listAgents(PROJECT_ID, "project");
+			await listAgents(PROJECT_ID, {
+				scope: "project",
+				search: "  bot ",
+				ids: ["a", "b"],
+				cursor: "c1",
+				pageSize: 5,
+			});
 
 			expect(mockGet).toHaveBeenCalledWith(`/projects/${PROJECT_ID}/agents`, {
-				params: { scope: "project" },
+				params: {
+					page_size: 5,
+					search: "bot",
+					ids: "a,b",
+					cursor: "c1",
+					scope: "project",
+				},
+			});
+		});
+	});
+
+	describe("global agent lists", () => {
+		it("page the admin and chattable endpoints the same way", async () => {
+			mockGet.mockResolvedValue(
+				ok({ items: [], page_size: 30, next_cursor: null }),
+			);
+
+			await listGlobalAgents({ search: "x" });
+			await listChattableAgents({ cursor: "c" });
+
+			expect(mockGet).toHaveBeenNthCalledWith(1, "/admin/agents", {
+				params: { page_size: 30, search: "x" },
+			});
+			expect(mockGet).toHaveBeenNthCalledWith(2, "/agents", {
+				params: { page_size: 30, cursor: "c" },
 			});
 		});
 	});
@@ -202,7 +233,9 @@ describe("agent-api", () => {
 		it("listGlobalAgents fetches /admin/agents", async () => {
 			mockGet.mockResolvedValue(ok({ items: [] }));
 			await listGlobalAgents();
-			expect(mockGet).toHaveBeenCalledWith("/admin/agents");
+			expect(mockGet).toHaveBeenCalledWith("/admin/agents", {
+				params: { page_size: 30 },
+			});
 		});
 
 		it("getGlobalAgent fetches /admin/agents/:agentId", async () => {
@@ -234,30 +267,7 @@ describe("agent-api", () => {
 			expect(mockDelete).toHaveBeenCalledWith(`/admin/agents/${AGENT_ID}`);
 		});
 
-		it("setGlobalAgentRole puts the role to /admin/agents/:agentId/global-role", async () => {
-			mockPut.mockResolvedValue(ok({ id: AGENT_ID, global_role_id: "role-1" }));
-
-			const agent = await setGlobalAgentRole(AGENT_ID, "role-1");
-
-			expect(mockPut).toHaveBeenCalledWith(
-				`/admin/agents/${AGENT_ID}/global-role`,
-				{ global_role_id: "role-1" },
-			);
-			expect(agent.global_role_id).toBe("role-1");
-		});
-
-		it("clearGlobalAgentRole deletes /admin/agents/:agentId/global-role", async () => {
-			mockDelete.mockResolvedValue(ok({ id: AGENT_ID, global_role_id: null }));
-
-			const agent = await clearGlobalAgentRole(AGENT_ID);
-
-			expect(mockDelete).toHaveBeenCalledWith(
-				`/admin/agents/${AGENT_ID}/global-role`,
-			);
-			expect(agent.global_role_id).toBeNull();
-		});
-
-		// The server refuses global_role_id on create: a role is its own step (and
+		// The server accepts no roles on create: assigning them is its own step (and
 		// permission), so creating an agent sends none.
 		it("createGlobalAgent posts the payload as given, without any role", async () => {
 			mockPost.mockResolvedValue(ok({ id: AGENT_ID }));

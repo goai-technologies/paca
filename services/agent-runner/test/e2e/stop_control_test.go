@@ -54,11 +54,12 @@ func TestStopControl(t *testing.T) {
 	// — both far longer than this test's own patience, so Handle returning
 	// promptly can only be explained by the interrupt actually working, not
 	// by hitting either limit on its own.
+	seedAgentAccount(t, env.db, agentID, "E2E Stop Agent")
 	_, err = env.db.ExecContext(ctx, `
-		INSERT INTO agents (id, project_id, name, handle, llm_provider, llm_model,
+		INSERT INTO agents (id, project_id, handle, llm_provider, llm_model,
 		                     llm_api_key_secret, llm_base_url, system_prompt,
 		                     max_iterations, git_committer_name, git_committer_email, agent_type)
-		VALUES ($1, $2, 'E2E Stop Agent', $3, 'openai', 'fake-model', $4, $5,
+		VALUES ($1, $2, $3, 'openai', 'fake-model', $4, $5,
 		        'You are a test agent.', 1000, 'paca-agent', 'agent@example.com', 'llm')
 	`, agentID, env.projectID, "e2e-stop-agent-"+agentID.String()[:8], encryptedKey, llm.BaseURL(gatewayIP))
 	if err != nil {

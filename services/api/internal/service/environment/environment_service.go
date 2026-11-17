@@ -224,8 +224,6 @@ const (
 	TopicEnvironmentRestarted          = "environment.restarted"
 	TopicEnvironmentSSHKeyAdded        = "environment.ssh_key.added"
 	TopicEnvironmentSSHKeyRemoved      = "environment.ssh_key.removed"
-	TopicEnvironmentAccessGranted      = "environment.access.granted"
-	TopicEnvironmentAccessRevoked      = "environment.access.revoked"
 	TopicEnvironmentPortForwardAdded   = "environment.port_forward.added"
 	TopicEnvironmentPortForwardRemoved = "environment.port_forward.removed"
 )
@@ -275,29 +273,15 @@ func (s *Service) decryptSecret(stored string) (string, error) {
 // Environments
 // -------------------------------------------------------------------------
 
-// ListEnvironments returns every environment in a project.
-func (s *Service) ListEnvironments(ctx context.Context, projectID uuid.UUID) ([]*environmentdom.Environment, error) {
-	return s.repo.ListEnvironments(ctx, projectID)
+// ListEnvironments returns one page of a project's environments.
+func (s *Service) ListEnvironments(ctx context.Context, projectID uuid.UUID, filter environmentdom.EnvironmentFilter, cursorAfter *string, limit int) ([]*environmentdom.Environment, bool, error) {
+	return s.repo.ListEnvironments(ctx, projectID, filter, cursorAfter, limit)
 }
 
-// GetEnvironment returns a single environment visible in projectID, with
-// its Folders populated. Unlike FindVisibleEnvironmentInProject — used
-// internally by every other operation in this file (Start/Stop/AddFolder/
-// etc.), none of which need Folders and shouldn't pay for the extra
-// query — this is the one path a client actually reads Folders back from
-// (see dto.EnvironmentFromEntity), so the fetch-then-attach happens here
-// rather than inside FindVisibleEnvironmentInProject itself.
+// GetEnvironment returns a single environment visible in projectID. Its
+// folders are listed separately (ListFolders) rather than embedded.
 func (s *Service) GetEnvironment(ctx context.Context, projectID, environmentID uuid.UUID) (*environmentdom.Environment, error) {
-	env, err := s.repo.FindVisibleEnvironmentInProject(ctx, projectID, environmentID)
-	if err != nil {
-		return nil, err
-	}
-	folders, err := s.repo.ListFolders(ctx, env.ID)
-	if err != nil {
-		return nil, err
-	}
-	env.Folders = folders
-	return env, nil
+	return s.repo.FindVisibleEnvironmentInProject(ctx, projectID, environmentID)
 }
 
 // CreateEnvironment writes the environment row (status StatusCreating) and
@@ -499,12 +483,6 @@ func (s *Service) UpdateEnvironment(ctx context.Context, projectID, environmentI
 			v = defaultIdleTimeoutMinutes
 		}
 		env.IdleTimeoutMinutes = v
-	}
-	if in.AccessMode != nil {
-		if *in.AccessMode != environmentdom.AccessModeOpen && *in.AccessMode != environmentdom.AccessModeRestricted {
-			return nil, environmentdom.ErrEnvironmentAccessModeInvalid
-		}
-		env.AccessMode = *in.AccessMode
 	}
 	env.UpdatedAt = time.Now()
 	if err := s.repo.UpdateEnvironment(ctx, env); err != nil {
@@ -973,11 +951,12 @@ func (s *Service) ResolveConversationWorkdir(ctx context.Context, projectID uuid
 		return env, folder, nil
 	}
 
-	folders, err := s.repo.ListFolders(ctx, env.ID)
+	// Two rows are enough to tell "exactly one" from "none" or "ambiguous".
+	folders, hasMore, _, err := s.repo.ListFolders(ctx, env.ID, environmentdom.FolderFilter{}, nil, 2)
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(folders) != 1 {
+	if len(folders) != 1 || hasMore {
 		// Zero folders: nothing to auto-select. More than one: ambiguous —
 		// the caller must ask the user to pick.
 		return nil, nil, environmentdom.ErrFolderNotFound
@@ -989,14 +968,14 @@ func (s *Service) ResolveConversationWorkdir(ctx context.Context, projectID uuid
 // Folders
 // -------------------------------------------------------------------------
 
-// ListFolders returns every folder in an environment, verifying the
+// ListFolders returns one page of an environment's folders, verifying the
 // environment itself is visible in projectID first.
-func (s *Service) ListFolders(ctx context.Context, projectID, environmentID uuid.UUID) ([]*environmentdom.EnvironmentFolder, error) {
+func (s *Service) ListFolders(ctx context.Context, projectID, environmentID uuid.UUID, filter environmentdom.FolderFilter, cursorAfter *string, limit int) ([]*environmentdom.EnvironmentFolder, bool, int64, error) {
 	env, err := s.repo.FindVisibleEnvironmentInProject(ctx, projectID, environmentID)
 	if err != nil {
-		return nil, err
+		return nil, false, 0, err
 	}
-	return s.repo.ListFolders(ctx, env.ID)
+	return s.repo.ListFolders(ctx, env.ID, filter, cursorAfter, limit)
 }
 
 // AddFolder creates the folder row and asks agent-runner to mkdir it into
@@ -1131,13 +1110,13 @@ func (s *Service) DeleteFolder(ctx context.Context, projectID, environmentID, fo
 // environmentdom.SSHKeyService's doc comment).
 // -------------------------------------------------------------------------
 
-// ListSSHKeys returns every SSH key registered on an environment.
-func (s *Service) ListSSHKeys(ctx context.Context, projectID, environmentID uuid.UUID) ([]*environmentdom.EnvironmentSSHKey, error) {
+// ListSSHKeys returns one page of the SSH keys registered on an environment.
+func (s *Service) ListSSHKeys(ctx context.Context, projectID, environmentID uuid.UUID, cursorAfter *string, limit int) ([]*environmentdom.EnvironmentSSHKey, bool, int64, error) {
 	env, err := s.repo.FindVisibleEnvironmentInProject(ctx, projectID, environmentID)
 	if err != nil {
-		return nil, err
+		return nil, false, 0, err
 	}
-	return s.repo.ListSSHKeys(ctx, env.ID)
+	return s.repo.ListSSHKeys(ctx, env.ID, cursorAfter, limit)
 }
 
 // AddSSHKey parses PublicKey, derives its fingerprint, and registers it —
@@ -1219,96 +1198,20 @@ func (s *Service) syncSSHKeys(ctx context.Context, env *environmentdom.Environme
 }
 
 // -------------------------------------------------------------------------
-// Access grants — see environmentdom.AccessGrantService's doc comment.
-// -------------------------------------------------------------------------
-
-// HasEnvironmentUsageAccess reports whether memberID may use environmentID
-// — see environmentdom.AccessGrantService.HasEnvironmentUsageAccess.
-func (s *Service) HasEnvironmentUsageAccess(ctx context.Context, projectID, environmentID, memberID uuid.UUID) (bool, error) {
-	env, err := s.repo.FindVisibleEnvironmentInProject(ctx, projectID, environmentID)
-	if err != nil {
-		return false, err
-	}
-	return s.hasEnvironmentUsageAccess(ctx, env, memberID)
-}
-
-// hasEnvironmentUsageAccess is the internal check reused wherever the
-// caller already has the *Environment in hand (avoids a redundant
-// FindVisibleEnvironmentInProject round-trip).
-func (s *Service) hasEnvironmentUsageAccess(ctx context.Context, env *environmentdom.Environment, memberID uuid.UUID) (bool, error) {
-	if env.AccessMode != environmentdom.AccessModeRestricted {
-		return true, nil
-	}
-	return s.repo.HasEnvironmentAccessGrant(ctx, env.ID, memberID)
-}
-
-// ListEnvironmentAccessGrants returns every member explicitly granted
-// access to a restricted environment (regardless of its current
-// access_mode — see the repository method's doc comment).
-func (s *Service) ListEnvironmentAccessGrants(ctx context.Context, projectID, environmentID uuid.UUID) ([]*environmentdom.EnvironmentAccessGrant, error) {
-	env, err := s.repo.FindVisibleEnvironmentInProject(ctx, projectID, environmentID)
-	if err != nil {
-		return nil, err
-	}
-	return s.repo.ListEnvironmentAccessGrants(ctx, env.ID)
-}
-
-// AddEnvironmentAccessGrant grants memberID access to a restricted
-// environment.
-func (s *Service) AddEnvironmentAccessGrant(ctx context.Context, projectID, environmentID, memberID uuid.UUID, grantedBy *uuid.UUID) (*environmentdom.EnvironmentAccessGrant, error) {
-	env, err := s.repo.FindVisibleEnvironmentInProject(ctx, projectID, environmentID)
-	if err != nil {
-		return nil, err
-	}
-	g := &environmentdom.EnvironmentAccessGrant{
-		ID:            uuid.New(),
-		EnvironmentID: env.ID,
-		MemberID:      memberID,
-		GrantedBy:     grantedBy,
-		CreatedAt:     time.Now(),
-	}
-	if err := s.repo.AddEnvironmentAccessGrant(ctx, g); err != nil {
-		return nil, err
-	}
-	s.record(ctx, env, TopicEnvironmentAccessGranted, map[string]any{"member_id": memberID.String()})
-	return g, nil
-}
-
-// RemoveEnvironmentAccessGrant revokes memberID's access to a restricted
-// environment. A no-op if memberID had no grant.
-func (s *Service) RemoveEnvironmentAccessGrant(ctx context.Context, projectID, environmentID, memberID uuid.UUID) error {
-	env, err := s.repo.FindVisibleEnvironmentInProject(ctx, projectID, environmentID)
-	if err != nil {
-		return err
-	}
-	if err := s.repo.RemoveEnvironmentAccessGrant(ctx, env.ID, memberID); err != nil {
-		return err
-	}
-	s.record(ctx, env, TopicEnvironmentAccessRevoked, map[string]any{"member_id": memberID.String()})
-	return nil
-}
-
-// ListGrantedEnvironmentIDsForMember returns every restricted environment
-// memberID currently holds a grant for.
-func (s *Service) ListGrantedEnvironmentIDsForMember(ctx context.Context, memberID uuid.UUID) ([]uuid.UUID, error) {
-	return s.repo.ListGrantedEnvironmentIDsForMember(ctx, memberID)
-}
-
-// -------------------------------------------------------------------------
 // Port forwards — user-managed, one row per container port they want
 // reachable from outside (see environmentdom.PortForwardService's doc
 // comment for how this differs from the environment's own auto-created
 // SSHPort).
 // -------------------------------------------------------------------------
 
-// ListPortForwards returns every port forward on an environment, verifying
-// the environment itself is visible in projectID first.
-func (s *Service) ListPortForwards(ctx context.Context, projectID, environmentID uuid.UUID) ([]*environmentdom.EnvironmentPortForward, error) {
+// ListPortForwards returns one page of an environment's port forwards,
+// verifying the environment itself is visible in projectID first.
+func (s *Service) ListPortForwards(ctx context.Context, projectID, environmentID uuid.UUID, cursorAfter *string, limit int) ([]*environmentdom.EnvironmentPortForward, bool, int64, error) {
 	env, err := s.repo.FindVisibleEnvironmentInProject(ctx, projectID, environmentID)
 	if err != nil {
-		return nil, err
+		return nil, false, 0, err
 	}
-	return s.repo.ListPortForwards(ctx, env.ID)
+	return s.repo.ListPortForwards(ctx, env.ID, cursorAfter, limit)
 }
 
 // GetPortForward returns a single port forward, verifying it belongs to

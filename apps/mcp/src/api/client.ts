@@ -18,6 +18,7 @@ import type {
 	UpdateTaskInput,
 } from "../types/index.js";
 import { formatApiRequestError, markdownToBlocknote } from "../utils/index.js";
+import { fetchAllPages, withPaging } from "./paginate.js";
 
 /**
  * Paca API client for interacting with the Paca backend.
@@ -48,17 +49,6 @@ export class PacaAPIClient {
 			"Content-Type": "application/json",
 			"X-API-Key": this.config.apiKey,
 		};
-		if (this.config.agentId) {
-			headers["X-Agent-ID"] = this.config.agentId;
-		}
-		// Only ever meaningful alongside X-Agent-ID (see PacaConfig.actorUserId's
-		// doc comment: "unset for a personal API key"). Gating on agentId here
-		// too — not just trusting actorUserId's own truthiness — means a stray
-		// or misconfigured PACA_ACTOR_USER_ID can never reach the server
-		// without an agent identity attached to it.
-		if (this.config.agentId && this.config.actorUserId) {
-			headers["X-Actor-User-ID"] = this.config.actorUserId;
-		}
 
 		const options: RequestInit = {
 			method,
@@ -160,6 +150,8 @@ export class PacaAPIClient {
 			assigneeId?: string;
 			taskTypeIds?: string[];
 			parentTaskId?: string;
+			search?: string;
+			searchContent?: boolean;
 			pageSize?: number;
 			cursor?: string;
 		} = {},
@@ -178,6 +170,10 @@ export class PacaAPIClient {
 			params.push(`task_type_ids=${options.taskTypeIds.join(",")}`);
 		if (options.parentTaskId !== undefined)
 			params.push(`parent_task_id=${options.parentTaskId}`);
+		if (options.search) {
+			params.push(`search=${encodeURIComponent(options.search)}`);
+			if (options.searchContent) params.push("search_content=true");
+		}
 
 		const queryString = params.length > 0 ? `?${params.join("&")}` : "";
 		const response = await this.get(
@@ -337,13 +333,11 @@ export class PacaAPIClient {
 		folderId?: string,
 	): Promise<Document[]> {
 		const queryString = folderId ? `?folder_id=${folderId}` : "";
-		const response = await this.get(
-			`/api/v1/projects/${projectId}/docs${queryString}`,
+		return fetchAllPages((cursor) =>
+			this.get(
+				withPaging(`/api/v1/projects/${projectId}/docs${queryString}`, cursor),
+			),
 		);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.documents || response.data || [];
 	}
 
 	async getDocument(projectId: string, docId: string): Promise<Document> {

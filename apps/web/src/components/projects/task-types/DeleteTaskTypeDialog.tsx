@@ -60,6 +60,10 @@ export function DeleteTaskTypeDialog({
 				setError(t("taskTypes.deleteDialog.isSystem"));
 				return;
 			}
+			if (code === ApiErrorCode.CommitmentsProjectOnlyCommitments) {
+				setError(t("taskTypes.deleteDialog.commitmentsProjectOnly"));
+				return;
+			}
 			setError(t("taskTypes.deleteDialog.deleteFailed"));
 		},
 	});

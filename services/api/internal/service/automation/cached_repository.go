@@ -168,8 +168,13 @@ func (c *CachedRepository) FindAutomationByID(ctx context.Context, id uuid.UUID)
 }
 
 // ListAutomations delegates to the underlying repository.
-func (c *CachedRepository) ListAutomations(ctx context.Context, projectID uuid.UUID, status *automationdom.Status, search *string, cursor *string, limit *int) ([]*automationdom.Automation, bool, error) {
+func (c *CachedRepository) ListAutomations(ctx context.Context, projectID uuid.UUID, status *automationdom.Status, search *string, cursor *string, limit int) ([]*automationdom.Automation, bool, error) {
 	return c.repo.ListAutomations(ctx, projectID, status, search, cursor, limit)
+}
+
+// ListAllAutomations delegates to the underlying repository.
+func (c *CachedRepository) ListAllAutomations(ctx context.Context, projectID uuid.UUID, status *automationdom.Status) ([]*automationdom.Automation, error) {
+	return c.repo.ListAllAutomations(ctx, projectID, status)
 }
 
 // UpdateAutomation delegates to the underlying repository.
@@ -218,8 +223,8 @@ func (c *CachedRepository) FindRunByID(ctx context.Context, id uuid.UUID) (*auto
 }
 
 // ListRunsByAutomation delegates to the underlying repository.
-func (c *CachedRepository) ListRunsByAutomation(ctx context.Context, automationID uuid.UUID, limit int) ([]*automationdom.Run, error) {
-	return c.repo.ListRunsByAutomation(ctx, automationID, limit)
+func (c *CachedRepository) ListRunsByAutomation(ctx context.Context, automationID uuid.UUID, cursorAfter *string, limit int) ([]*automationdom.Run, bool, error) {
+	return c.repo.ListRunsByAutomation(ctx, automationID, cursorAfter, limit)
 }
 
 // CreateRunStep delegates to the underlying repository.

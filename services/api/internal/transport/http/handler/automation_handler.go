@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -11,6 +10,7 @@ import (
 	"github.com/Paca-AI/api/internal/apierr"
 	automationdom "github.com/Paca-AI/api/internal/domain/automation"
 	plugindom "github.com/Paca-AI/api/internal/domain/plugin"
+	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	"github.com/Paca-AI/api/internal/transport/http/dto"
 	"github.com/Paca-AI/api/internal/transport/http/middleware"
 	"github.com/Paca-AI/api/internal/transport/http/presenter"
@@ -26,6 +26,14 @@ type pluginAutomationNodeLister interface {
 type AutomationHandler struct {
 	svc           automationdom.Service
 	pluginRuntime pluginAutomationNodeLister
+	listScoper    ListScoper
+}
+
+// WithAutomationListScoper limits automation lists to the automations the
+// caller may read, inside the query (see scopedContext).
+func (h *AutomationHandler) WithAutomationListScoper(s ListScoper) *AutomationHandler {
+	h.listScoper = s
+	return h
 }
 
 // NewAutomationHandler returns an AutomationHandler wired to the automation service.
@@ -84,21 +92,19 @@ func (h *AutomationHandler) ListAutomations(w http.ResponseWriter, r *http.Reque
 		search = &raw
 	}
 
-	var limit *int
-	if raw := r.URL.Query().Get("page_size"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > 200 {
-			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "page_size must be an integer between 1 and 200"))
-			return
-		}
-		limit = &n
+	limit, err := parsePageSize(r, 50, 200)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
 	}
-	var cursor *string
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		cursor = &raw
-	}
+	cursor := parseCursorParam(r)
 
-	automations, hasMore, err := h.svc.ListAutomations(r.Context(), projectID, status, search, cursor, limit)
+	ctx, err := scopedContext(r, h.listScoper, iam.ActionWorkflowsRead, projectID, "workflow")
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	automations, hasMore, err := h.svc.ListAutomations(ctx, projectID, status, search, cursor, limit)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -443,7 +449,10 @@ func (h *AutomationHandler) RemoveAutomationEdge(w http.ResponseWriter, r *http.
 
 // --- Runs -------------------------------------------------------------------
 
-// ListAutomationRuns handles GET /projects/:projectId/automations/:automationId/runs.
+// ListAutomationRuns handles GET /projects/:projectId/automations/:automationId/runs —
+// one cursor-paginated page of the run history, newest first:
+//   - page_size=<1-200>  (default 50)
+//   - cursor=<opaque>    from the previous page's next_cursor
 func (h *AutomationHandler) ListAutomationRuns(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
@@ -455,13 +464,13 @@ func (h *AutomationHandler) ListAutomationRuns(w http.ResponseWriter, r *http.Re
 		presenter.Error(w, r, err)
 		return
 	}
-	limit := 50
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			limit = n
-		}
+	pageSize, err := parsePageSize(r, 50, 200)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
 	}
-	runs, err := h.svc.ListRuns(r.Context(), projectID, automationID, limit)
+	cursor := parseCursorParam(r)
+	runs, hasMore, err := h.svc.ListRuns(r.Context(), projectID, automationID, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -470,7 +479,12 @@ func (h *AutomationHandler) ListAutomationRuns(w http.ResponseWriter, r *http.Re
 	for _, run := range runs {
 		resp = append(resp, dto.NewAutomationRunResponse(run))
 	}
-	presenter.OK(w, r, map[string]any{"items": resp})
+	var nextCursor *string
+	if hasMore && len(runs) > 0 {
+		c := automationdom.EncodeRunCursor(runs[len(runs)-1])
+		nextCursor = &c
+	}
+	presenter.OK(w, r, map[string]any{"items": resp, "next_cursor": nextCursor})
 }
 
 // ListAutomationRunSteps handles GET /projects/:projectId/automations/:automationId/runs/:runId/steps.

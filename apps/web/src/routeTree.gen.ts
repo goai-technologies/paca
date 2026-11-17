@@ -23,6 +23,7 @@ import { Route as AuthenticatedConversationsConversationIdRouteImport } from './
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated/projects/$projectId/index'
 import { Route as AuthenticatedAdminUsersIndexRouteImport } from './routes/_authenticated/admin/users/index'
 import { Route as AuthenticatedAdminSettingsIndexRouteImport } from './routes/_authenticated/admin/settings/index'
+import { Route as AuthenticatedAdminServiceAccountsIndexRouteImport } from './routes/_authenticated/admin/service-accounts/index'
 import { Route as AuthenticatedAdminPluginsIndexRouteImport } from './routes/_authenticated/admin/plugins/index'
 import { Route as AuthenticatedAdminGlobalRolesIndexRouteImport } from './routes/_authenticated/admin/global-roles/index'
 import { Route as AuthenticatedAdminChangelogIndexRouteImport } from './routes/_authenticated/admin/changelog/index'
@@ -36,6 +37,7 @@ import { Route as AuthenticatedProjectsProjectIdConversationsIndexRouteImport } 
 import { Route as AuthenticatedProjectsProjectIdAutomationIndexRouteImport } from './routes/_authenticated/projects/$projectId/automation/index'
 import { Route as AuthenticatedProjectsProjectIdAgentsIndexRouteImport } from './routes/_authenticated/projects/$projectId/agents/index'
 import { Route as AuthenticatedProjectsProjectIdActivityIndexRouteImport } from './routes/_authenticated/projects/$projectId/activity/index'
+import { Route as AuthenticatedAdminServiceAccountsServiceAccountIdIndexRouteImport } from './routes/_authenticated/admin/service-accounts/$serviceAccountId/index'
 import { Route as AuthenticatedAdminAgentsAgentIdIndexRouteImport } from './routes/_authenticated/admin/agents/$agentId/index'
 import { Route as AuthenticatedProjectsProjectIdTasksTaskIdRouteImport } from './routes/_authenticated/projects/$projectId/tasks/$taskId'
 import { Route as AuthenticatedProjectsProjectIdInteractionsTimelineRouteImport } from './routes/_authenticated/projects/$projectId/interactions/timeline'
@@ -131,6 +133,12 @@ const AuthenticatedAdminSettingsIndexRoute =
     path: '/admin/settings/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedAdminServiceAccountsIndexRoute =
+  AuthenticatedAdminServiceAccountsIndexRouteImport.update({
+    id: '/admin/service-accounts/',
+    path: '/admin/service-accounts/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAdminPluginsIndexRoute =
   AuthenticatedAdminPluginsIndexRouteImport.update({
     id: '/admin/plugins/',
@@ -208,6 +216,12 @@ const AuthenticatedProjectsProjectIdActivityIndexRoute =
     id: '/activity/',
     path: '/activity/',
     getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedAdminServiceAccountsServiceAccountIdIndexRoute =
+  AuthenticatedAdminServiceAccountsServiceAccountIdIndexRouteImport.update({
+    id: '/admin/service-accounts/$serviceAccountId/',
+    path: '/admin/service-accounts/$serviceAccountId/',
+    getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedAdminAgentsAgentIdIndexRoute =
   AuthenticatedAdminAgentsAgentIdIndexRouteImport.update({
@@ -332,6 +346,7 @@ export interface FileRoutesByFullPath {
   '/admin/changelog/': typeof AuthenticatedAdminChangelogIndexRoute
   '/admin/global-roles/': typeof AuthenticatedAdminGlobalRolesIndexRoute
   '/admin/plugins/': typeof AuthenticatedAdminPluginsIndexRoute
+  '/admin/service-accounts/': typeof AuthenticatedAdminServiceAccountsIndexRoute
   '/admin/settings/': typeof AuthenticatedAdminSettingsIndexRoute
   '/admin/users/': typeof AuthenticatedAdminUsersIndexRoute
   '/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
@@ -343,6 +358,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId/interactions/timeline': typeof AuthenticatedProjectsProjectIdInteractionsTimelineRoute
   '/projects/$projectId/tasks/$taskId': typeof AuthenticatedProjectsProjectIdTasksTaskIdRoute
   '/admin/agents/$agentId/': typeof AuthenticatedAdminAgentsAgentIdIndexRoute
+  '/admin/service-accounts/$serviceAccountId/': typeof AuthenticatedAdminServiceAccountsServiceAccountIdIndexRoute
   '/projects/$projectId/activity/': typeof AuthenticatedProjectsProjectIdActivityIndexRoute
   '/projects/$projectId/agents/': typeof AuthenticatedProjectsProjectIdAgentsIndexRoute
   '/projects/$projectId/automation/': typeof AuthenticatedProjectsProjectIdAutomationIndexRoute
@@ -373,6 +389,7 @@ export interface FileRoutesByTo {
   '/admin/changelog': typeof AuthenticatedAdminChangelogIndexRoute
   '/admin/global-roles': typeof AuthenticatedAdminGlobalRolesIndexRoute
   '/admin/plugins': typeof AuthenticatedAdminPluginsIndexRoute
+  '/admin/service-accounts': typeof AuthenticatedAdminServiceAccountsIndexRoute
   '/admin/settings': typeof AuthenticatedAdminSettingsIndexRoute
   '/admin/users': typeof AuthenticatedAdminUsersIndexRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdIndexRoute
@@ -384,6 +401,7 @@ export interface FileRoutesByTo {
   '/projects/$projectId/interactions/timeline': typeof AuthenticatedProjectsProjectIdInteractionsTimelineRoute
   '/projects/$projectId/tasks/$taskId': typeof AuthenticatedProjectsProjectIdTasksTaskIdRoute
   '/admin/agents/$agentId': typeof AuthenticatedAdminAgentsAgentIdIndexRoute
+  '/admin/service-accounts/$serviceAccountId': typeof AuthenticatedAdminServiceAccountsServiceAccountIdIndexRoute
   '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityIndexRoute
   '/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsIndexRoute
   '/projects/$projectId/automation': typeof AuthenticatedProjectsProjectIdAutomationIndexRoute
@@ -419,6 +437,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/changelog/': typeof AuthenticatedAdminChangelogIndexRoute
   '/_authenticated/admin/global-roles/': typeof AuthenticatedAdminGlobalRolesIndexRoute
   '/_authenticated/admin/plugins/': typeof AuthenticatedAdminPluginsIndexRoute
+  '/_authenticated/admin/service-accounts/': typeof AuthenticatedAdminServiceAccountsIndexRoute
   '/_authenticated/admin/settings/': typeof AuthenticatedAdminSettingsIndexRoute
   '/_authenticated/admin/users/': typeof AuthenticatedAdminUsersIndexRoute
   '/_authenticated/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
@@ -430,6 +449,7 @@ export interface FileRoutesById {
   '/_authenticated/projects/$projectId/interactions/timeline': typeof AuthenticatedProjectsProjectIdInteractionsTimelineRoute
   '/_authenticated/projects/$projectId/tasks/$taskId': typeof AuthenticatedProjectsProjectIdTasksTaskIdRoute
   '/_authenticated/admin/agents/$agentId/': typeof AuthenticatedAdminAgentsAgentIdIndexRoute
+  '/_authenticated/admin/service-accounts/$serviceAccountId/': typeof AuthenticatedAdminServiceAccountsServiceAccountIdIndexRoute
   '/_authenticated/projects/$projectId/activity/': typeof AuthenticatedProjectsProjectIdActivityIndexRoute
   '/_authenticated/projects/$projectId/agents/': typeof AuthenticatedProjectsProjectIdAgentsIndexRoute
   '/_authenticated/projects/$projectId/automation/': typeof AuthenticatedProjectsProjectIdAutomationIndexRoute
@@ -465,6 +485,7 @@ export interface FileRouteTypes {
     | '/admin/changelog/'
     | '/admin/global-roles/'
     | '/admin/plugins/'
+    | '/admin/service-accounts/'
     | '/admin/settings/'
     | '/admin/users/'
     | '/projects/$projectId/'
@@ -476,6 +497,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/interactions/timeline'
     | '/projects/$projectId/tasks/$taskId'
     | '/admin/agents/$agentId/'
+    | '/admin/service-accounts/$serviceAccountId/'
     | '/projects/$projectId/activity/'
     | '/projects/$projectId/agents/'
     | '/projects/$projectId/automation/'
@@ -506,6 +528,7 @@ export interface FileRouteTypes {
     | '/admin/changelog'
     | '/admin/global-roles'
     | '/admin/plugins'
+    | '/admin/service-accounts'
     | '/admin/settings'
     | '/admin/users'
     | '/projects/$projectId'
@@ -517,6 +540,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId/interactions/timeline'
     | '/projects/$projectId/tasks/$taskId'
     | '/admin/agents/$agentId'
+    | '/admin/service-accounts/$serviceAccountId'
     | '/projects/$projectId/activity'
     | '/projects/$projectId/agents'
     | '/projects/$projectId/automation'
@@ -551,6 +575,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/changelog/'
     | '/_authenticated/admin/global-roles/'
     | '/_authenticated/admin/plugins/'
+    | '/_authenticated/admin/service-accounts/'
     | '/_authenticated/admin/settings/'
     | '/_authenticated/admin/users/'
     | '/_authenticated/projects/$projectId/'
@@ -562,6 +587,7 @@ export interface FileRouteTypes {
     | '/_authenticated/projects/$projectId/interactions/timeline'
     | '/_authenticated/projects/$projectId/tasks/$taskId'
     | '/_authenticated/admin/agents/$agentId/'
+    | '/_authenticated/admin/service-accounts/$serviceAccountId/'
     | '/_authenticated/projects/$projectId/activity/'
     | '/_authenticated/projects/$projectId/agents/'
     | '/_authenticated/projects/$projectId/automation/'
@@ -687,6 +713,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/admin/service-accounts/': {
+      id: '/_authenticated/admin/service-accounts/'
+      path: '/admin/service-accounts'
+      fullPath: '/admin/service-accounts/'
+      preLoaderRoute: typeof AuthenticatedAdminServiceAccountsIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/admin/plugins/': {
       id: '/_authenticated/admin/plugins/'
       path: '/admin/plugins'
@@ -777,6 +810,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/projects/$projectId/activity/'
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdActivityIndexRouteImport
       parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/admin/service-accounts/$serviceAccountId/': {
+      id: '/_authenticated/admin/service-accounts/$serviceAccountId/'
+      path: '/admin/service-accounts/$serviceAccountId'
+      fullPath: '/admin/service-accounts/$serviceAccountId/'
+      preLoaderRoute: typeof AuthenticatedAdminServiceAccountsServiceAccountIdIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/admin/agents/$agentId/': {
       id: '/_authenticated/admin/agents/$agentId/'
@@ -1016,10 +1056,12 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAdminChangelogIndexRoute: typeof AuthenticatedAdminChangelogIndexRoute
   AuthenticatedAdminGlobalRolesIndexRoute: typeof AuthenticatedAdminGlobalRolesIndexRoute
   AuthenticatedAdminPluginsIndexRoute: typeof AuthenticatedAdminPluginsIndexRoute
+  AuthenticatedAdminServiceAccountsIndexRoute: typeof AuthenticatedAdminServiceAccountsIndexRoute
   AuthenticatedAdminSettingsIndexRoute: typeof AuthenticatedAdminSettingsIndexRoute
   AuthenticatedAdminUsersIndexRoute: typeof AuthenticatedAdminUsersIndexRoute
   AuthenticatedAdminPluginsPluginIdSlugRoute: typeof AuthenticatedAdminPluginsPluginIdSlugRoute
   AuthenticatedAdminAgentsAgentIdIndexRoute: typeof AuthenticatedAdminAgentsAgentIdIndexRoute
+  AuthenticatedAdminServiceAccountsServiceAccountIdIndexRoute: typeof AuthenticatedAdminServiceAccountsServiceAccountIdIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
@@ -1034,12 +1076,16 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdminGlobalRolesIndexRoute:
     AuthenticatedAdminGlobalRolesIndexRoute,
   AuthenticatedAdminPluginsIndexRoute: AuthenticatedAdminPluginsIndexRoute,
+  AuthenticatedAdminServiceAccountsIndexRoute:
+    AuthenticatedAdminServiceAccountsIndexRoute,
   AuthenticatedAdminSettingsIndexRoute: AuthenticatedAdminSettingsIndexRoute,
   AuthenticatedAdminUsersIndexRoute: AuthenticatedAdminUsersIndexRoute,
   AuthenticatedAdminPluginsPluginIdSlugRoute:
     AuthenticatedAdminPluginsPluginIdSlugRoute,
   AuthenticatedAdminAgentsAgentIdIndexRoute:
     AuthenticatedAdminAgentsAgentIdIndexRoute,
+  AuthenticatedAdminServiceAccountsServiceAccountIdIndexRoute:
+    AuthenticatedAdminServiceAccountsServiceAccountIdIndexRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

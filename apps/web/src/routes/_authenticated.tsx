@@ -48,9 +48,7 @@ const PROJECT_ROUTE_RE = /^\/projects\/[^/]+/;
 const CONVERSATIONS_ROUTE_RE = /^\/conversations(\/|$)/;
 
 export const Route = createFileRoute("/_authenticated")({
-	beforeLoad: async ({ context: { queryClient }, location }) => {
-		const isProjectRoute = PROJECT_ROUTE_RE.test(location.pathname);
-
+	beforeLoad: async ({ context: { queryClient } }) => {
 		const user = await queryClient
 			.fetchQuery(currentUserQueryOptions)
 			.catch((err: unknown) => {
@@ -60,10 +58,9 @@ export const Route = createFileRoute("/_authenticated")({
 				return null;
 			});
 
-		// Project routes tolerate an anonymous user (some project pages are
-		// reachable without being signed in); every other authenticated route
-		// requires one.
-		if (!user && !isProjectRoute) {
+		// Every authenticated route, project routes included, needs a signed-in
+		// user: there are no public projects.
+		if (!user) {
 			throw redirect({ to: "/" });
 		}
 

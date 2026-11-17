@@ -4,7 +4,9 @@ import "errors"
 
 // Sentinel errors for the automation aggregate.
 var (
-	ErrNotFound               = errors.New("automation: not found")
+	ErrNotFound = errors.New("automation: not found")
+	// ErrInvalidCursor is returned when a run-list cursor cannot be decoded.
+	ErrInvalidCursor          = errors.New("automation: invalid pagination cursor")
 	ErrNameInvalid            = errors.New("automation: name is required")
 	ErrNodeNotFound           = errors.New("automation: node not found")
 	ErrNodeInvalidKind        = errors.New("automation: node kind must be trigger, condition, or action")

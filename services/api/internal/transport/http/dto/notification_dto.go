@@ -24,6 +24,7 @@ type NotificationResponse struct {
 	ActorAgentType        string     `json:"actor_agent_type,omitempty"`
 	ActorAgentLLMProvider string     `json:"actor_agent_llm_provider,omitempty"`
 	ActorAgentACPProvider *string    `json:"actor_agent_acp_provider,omitempty"`
+	ActorAgentCLIProvider *string    `json:"actor_agent_cli_provider,omitempty"`
 	TaskID                *uuid.UUID `json:"task_id"`
 	TaskTitle             string     `json:"task_title"`
 	TaskNumber            int        `json:"task_number"`
@@ -44,6 +45,7 @@ func NotificationFromEntity(n *notificationdom.Notification) NotificationRespons
 		ActorAgentType:        n.ActorAgentType,
 		ActorAgentLLMProvider: n.ActorAgentLLMProvider,
 		ActorAgentACPProvider: n.ActorAgentACPProvider,
+		ActorAgentCLIProvider: n.ActorAgentCLIProvider,
 		TaskID:                n.TaskID,
 		TaskTitle:             n.TaskTitle,
 		TaskNumber:            n.TaskNumber,

@@ -1,8 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	useInfiniteQuery,
+	useMutation,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Copy, Key, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -31,7 +36,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import {
-	apiKeysQueryOptions,
+	apiKeysInfiniteQueryOptions,
 	type CreateAPIKeyResponse,
 	createAPIKey,
 	revokeAPIKey,
@@ -54,7 +59,9 @@ function formatDate(iso: string | null): string {
 function APIKeysPage() {
 	const { t } = useTranslation("profile");
 	const queryClient = useQueryClient();
-	const { data: keys = [], isLoading } = useQuery(apiKeysQueryOptions);
+	const keysQuery = useInfiniteQuery(apiKeysInfiniteQueryOptions);
+	const { isLoading } = keysQuery;
+	const keys = keysQuery.data?.pages.flatMap((p) => p.items) ?? [];
 
 	// Create dialog state
 	const [createOpen, setCreateOpen] = useState(false);
@@ -211,47 +218,55 @@ function APIKeysPage() {
 							</p>
 						</div>
 					) : (
-						<Table>
-							<TableHeader>
-								<TableRow>
-									<TableHead>{t("apiKeys.table.name")}</TableHead>
-									<TableHead>{t("apiKeys.table.prefix")}</TableHead>
-									<TableHead>{t("apiKeys.table.created")}</TableHead>
-									<TableHead>{t("apiKeys.table.expires")}</TableHead>
-									<TableHead>{t("apiKeys.table.lastUsed")}</TableHead>
-									<TableHead className="w-10" />
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{keys.map((key) => (
-									<TableRow key={key.id}>
-										<TableCell className="font-medium">{key.name}</TableCell>
-										<TableCell className="font-mono text-xs text-muted-foreground">
-											paca_{key.key_prefix}…
-										</TableCell>
-										<TableCell>{formatDate(key.created_at)}</TableCell>
-										<TableCell>{formatDate(key.expires_at)}</TableCell>
-										<TableCell>{formatDate(key.last_used_at)}</TableCell>
-										<TableCell>
-											<Button
-												variant="ghost"
-												size="icon"
-												className="size-8 text-muted-foreground hover:text-destructive"
-												aria-label={t("apiKeys.actions.revokeKeyAria")}
-												onClick={() =>
-													setRevokeTarget({
-														id: key.id,
-														name: key.name,
-													})
-												}
-											>
-												<Trash2 className="size-4" />
-											</Button>
-										</TableCell>
+						<>
+							<Table>
+								<TableHeader>
+									<TableRow>
+										<TableHead>{t("apiKeys.table.name")}</TableHead>
+										<TableHead>{t("apiKeys.table.prefix")}</TableHead>
+										<TableHead>{t("apiKeys.table.created")}</TableHead>
+										<TableHead>{t("apiKeys.table.expires")}</TableHead>
+										<TableHead>{t("apiKeys.table.lastUsed")}</TableHead>
+										<TableHead className="w-10" />
 									</TableRow>
-								))}
-							</TableBody>
-						</Table>
+								</TableHeader>
+								<TableBody>
+									{keys.map((key) => (
+										<TableRow key={key.id}>
+											<TableCell className="font-medium">{key.name}</TableCell>
+											<TableCell className="font-mono text-xs text-muted-foreground">
+												paca_{key.key_prefix}…
+											</TableCell>
+											<TableCell>{formatDate(key.created_at)}</TableCell>
+											<TableCell>{formatDate(key.expires_at)}</TableCell>
+											<TableCell>{formatDate(key.last_used_at)}</TableCell>
+											<TableCell>
+												<Button
+													variant="ghost"
+													size="icon"
+													className="size-8 text-muted-foreground hover:text-destructive"
+													aria-label={t("apiKeys.actions.revokeKeyAria")}
+													onClick={() =>
+														setRevokeTarget({
+															id: key.id,
+															name: key.name,
+														})
+													}
+												>
+													<Trash2 className="size-4" />
+												</Button>
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+							<LoadMoreSentinel
+								hasMore={keysQuery.hasNextPage}
+								isLoadingMore={keysQuery.isFetchingNextPage}
+								isError={keysQuery.isFetchNextPageError}
+								onLoadMore={() => void keysQuery.fetchNextPage()}
+							/>
+						</>
 					)}
 				</CardContent>
 			</Card>

@@ -3,6 +3,7 @@ package docsvc
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -33,9 +34,14 @@ func New(repo docdom.Repository, memberRepo memberLookup) *Service {
 
 // --- Folder Service ---------------------------------------------------------
 
-// ListFolders returns all folders for a project.
-func (s *Service) ListFolders(ctx context.Context, projectID uuid.UUID) ([]*docdom.DocFolder, error) {
-	return s.repo.ListFolders(ctx, projectID)
+// ListFolders returns one cursor-paginated level of the folder tree.
+func (s *Service) ListFolders(ctx context.Context, projectID uuid.UUID, parentID *uuid.UUID, cursorAfter *string, limit int) ([]*docdom.DocFolder, bool, error) {
+	return s.repo.ListFolders(ctx, projectID, parentID, cursorAfter, limit)
+}
+
+// FolderPath returns the folders from the root down to folderID.
+func (s *Service) FolderPath(ctx context.Context, projectID, folderID uuid.UUID) ([]*docdom.DocFolder, error) {
+	return s.repo.FolderPath(ctx, projectID, folderID)
 }
 
 // CreateFolder creates a new folder.
@@ -73,48 +79,58 @@ func (s *Service) CreateFolder(ctx context.Context, in docdom.CreateFolderInput)
 	return f, nil
 }
 
-// UpdateFolder updates the mutable fields of a folder.
+// UpdateFolder updates the mutable fields of a folder. Validation runs inside
+// the repository's locked read-modify-write so concurrent moves can't combine
+// into a parent cycle.
 func (s *Service) UpdateFolder(ctx context.Context, id uuid.UUID, in docdom.UpdateFolderInput) (*docdom.DocFolder, error) {
-	f, err := s.repo.FindFolderByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	if f.ProjectID != in.ProjectID {
-		return nil, docdom.ErrFolderNotFound
-	}
-
-	if name := strings.TrimSpace(in.Name); name != "" && name != f.Name {
-		if strings.Contains(name, "/") {
-			return nil, docdom.ErrFolderNameInvalid
+	return s.repo.UpdateFolderAtomic(ctx, id, func(f *docdom.DocFolder, find func(uuid.UUID) (*docdom.DocFolder, error)) error {
+		if f.ProjectID != in.ProjectID {
+			return docdom.ErrFolderNotFound
 		}
-		f.Name = name
-	}
-	if in.ParentID != nil { // double-pointer present → update parent
-		if *in.ParentID != nil {
-			newParentID := **in.ParentID
-			if newParentID == id {
-				return nil, docdom.ErrFolderSelfParent
-			}
-			parent, err := s.repo.FindFolderByID(ctx, newParentID)
-			if err != nil {
-				return nil, err
-			}
-			if parent.ProjectID != f.ProjectID {
-				return nil, docdom.ErrFolderNotInProject
-			}
-		}
-		f.ParentID = *in.ParentID
-	}
-	if in.Position != nil {
-		f.Position = *in.Position
-	}
-	f.UpdatedAt = time.Now()
 
-	if err := s.repo.UpdateFolder(ctx, f); err != nil {
-		return nil, err
-	}
-	return f, nil
+		if name := strings.TrimSpace(in.Name); name != "" && name != f.Name {
+			if strings.Contains(name, "/") {
+				return docdom.ErrFolderNameInvalid
+			}
+			f.Name = name
+		}
+		if in.ParentID != nil { // double-pointer present → update parent
+			if *in.ParentID != nil {
+				newParentID := **in.ParentID
+				if newParentID == id {
+					return docdom.ErrFolderSelfParent
+				}
+				parent, err := find(newParentID)
+				if err != nil {
+					return err
+				}
+				if parent.ProjectID != f.ProjectID {
+					return docdom.ErrFolderNotInProject
+				}
+				// Walk up from the new parent; reaching f means f would end up
+				// inside its own subtree.
+				const maxDepth = 100
+				cur := parent
+				for range maxDepth {
+					if cur.ParentID == nil {
+						break
+					}
+					if *cur.ParentID == id {
+						return docdom.ErrFolderCycle
+					}
+					if cur, err = find(*cur.ParentID); err != nil {
+						return err
+					}
+				}
+			}
+			f.ParentID = *in.ParentID
+		}
+		if in.Position != nil {
+			f.Position = *in.Position
+		}
+		f.UpdatedAt = time.Now()
+		return nil
+	})
 }
 
 // DeleteFolder deletes a folder.
@@ -131,9 +147,32 @@ func (s *Service) DeleteFolder(ctx context.Context, id uuid.UUID, projectID uuid
 
 // --- Document Service -------------------------------------------------------
 
-// ListDocuments returns non-deleted documents for a project.
-func (s *Service) ListDocuments(ctx context.Context, projectID uuid.UUID, folderID *uuid.UUID, search *string, cursor *string, limit *int) ([]*docdom.Document, bool, error) {
-	return s.repo.ListDocuments(ctx, projectID, folderID, search, cursor, limit)
+// ListDocuments returns one cursor-paginated page of a project's documents.
+func (s *Service) ListDocuments(ctx context.Context, projectID uuid.UUID, filter docdom.DocumentFilter, cursorAfter *string, limit int) ([]*docdom.Document, bool, error) {
+	return s.repo.ListDocuments(ctx, projectID, filter, cursorAfter, limit)
+}
+
+// SearchDocuments finds documents whose title or body contains query.
+func (s *Service) SearchDocuments(ctx context.Context, projectID uuid.UUID, query string, limit int) ([]docdom.SearchHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	docs, err := s.repo.SearchDocuments(ctx, projectID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	hits := make([]docdom.SearchHit, 0, len(docs))
+	for _, d := range docs {
+		hits = append(hits, docdom.NewSearchHit(d, query))
+	}
+	return hits, nil
 }
 
 // GetDocument returns a single document.
@@ -182,56 +221,61 @@ func (s *Service) CreateDocument(ctx context.Context, in docdom.CreateDocumentIn
 }
 
 // UpdateDocument updates a document's mutable fields and creates a snapshot
-// when the content changes.
+// when the content changes. The read-modify-write runs under a row lock so a
+// concurrent save isn't reverted and a concurrent delete isn't undone.
 func (s *Service) UpdateDocument(ctx context.Context, projectID, id uuid.UUID, in docdom.UpdateDocumentInput) (*docdom.Document, error) {
-	d, err := s.repo.FindDocumentByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if d.ProjectID != projectID {
-		return nil, docdom.ErrDocNotFound
-	}
-
 	contentChanged := false
-	oldContent := d.Content
-	oldTitle := d.Title
+	var oldContent json.RawMessage
+	var oldTitle string
 
-	if in.Title != nil {
-		title := strings.TrimSpace(*in.Title)
-		if title == "" {
-			return nil, docdom.ErrDocTitleInvalid
+	// Lookups that don't depend on the locked row run before the transaction,
+	// so the row lock isn't held across extra round trips on other connections.
+	if in.FolderID != nil && *in.FolderID != nil {
+		folder, ferr := s.repo.FindFolderByID(ctx, **in.FolderID)
+		if ferr != nil {
+			return nil, ferr
 		}
-		if title != d.Title && strings.Contains(title, "/") {
-			return nil, docdom.ErrDocTitleInvalid
+		if folder.ProjectID != projectID {
+			return nil, docdom.ErrFolderNotInProject
 		}
-		d.Title = title
 	}
-	if in.Content != nil {
-		// Only treat as changed if the raw JSON differs.
-		if string(*in.Content) != string(d.Content) {
-			contentChanged = true
-		}
-		d.Content = *in.Content
-	}
-	if in.FolderID != nil { // double-pointer present → update folder
-		if *in.FolderID != nil {
-			folder, ferr := s.repo.FindFolderByID(ctx, **in.FolderID)
-			if ferr != nil {
-				return nil, ferr
-			}
-			if folder.ProjectID != d.ProjectID {
-				return nil, docdom.ErrFolderNotInProject
-			}
-		}
-		d.FolderID = *in.FolderID
-	}
-	if in.Position != nil {
-		d.Position = *in.Position
-	}
-	d.UpdatedBy = s.resolveMember(ctx, in.UpdatedBy, d.ProjectID)
-	d.UpdatedAt = time.Now()
+	updatedBy := s.resolveMember(ctx, in.UpdatedBy, projectID)
 
-	if err := s.repo.UpdateDocument(ctx, d); err != nil {
+	d, err := s.repo.UpdateDocumentAtomic(ctx, id, func(d *docdom.Document) error {
+		if d.ProjectID != projectID {
+			return docdom.ErrDocNotFound
+		}
+		oldContent = d.Content
+		oldTitle = d.Title
+
+		if in.Title != nil {
+			title := strings.TrimSpace(*in.Title)
+			if title == "" {
+				return docdom.ErrDocTitleInvalid
+			}
+			if title != d.Title && strings.Contains(title, "/") {
+				return docdom.ErrDocTitleInvalid
+			}
+			d.Title = title
+		}
+		if in.Content != nil {
+			// Only treat as changed if the raw JSON differs.
+			if string(*in.Content) != string(d.Content) {
+				contentChanged = true
+			}
+			d.Content = *in.Content
+		}
+		if in.FolderID != nil { // double-pointer present → update folder
+			d.FolderID = *in.FolderID
+		}
+		if in.Position != nil {
+			d.Position = *in.Position
+		}
+		d.UpdatedBy = updatedBy
+		d.UpdatedAt = time.Now()
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -272,16 +316,16 @@ func (s *Service) DeleteDocument(ctx context.Context, projectID, id uuid.UUID) e
 
 // --- Snapshot Service -------------------------------------------------------
 
-// ListSnapshots returns snapshots for a document, newest first.
-func (s *Service) ListSnapshots(ctx context.Context, projectID, documentID uuid.UUID) ([]*docdom.DocSnapshot, error) {
+// ListSnapshots returns one page of a document's snapshots, newest first.
+func (s *Service) ListSnapshots(ctx context.Context, projectID, documentID uuid.UUID, cursorAfter *string, limit int) ([]*docdom.DocSnapshot, bool, error) {
 	d, err := s.repo.FindDocumentByID(ctx, documentID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if d.ProjectID != projectID {
-		return nil, docdom.ErrDocNotFound
+		return nil, false, docdom.ErrDocNotFound
 	}
-	return s.repo.ListSnapshots(ctx, documentID)
+	return s.repo.ListSnapshots(ctx, documentID, cursorAfter, limit)
 }
 
 // GetSnapshot returns a single snapshot.

@@ -5,7 +5,6 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { ShortcutHelpDialog } from "@/components/shortcuts/shortcut-help-dialog";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
-import { currentUserQueryOptions } from "@/lib/auth-api";
 import { sprintsQueryOptions } from "@/lib/interaction-api";
 import { useShortcutHelpStore } from "./help-dialog-store";
 import { useHoveredTaskStore } from "./hovered-task-store";
@@ -31,18 +30,16 @@ function isTypingTarget(target: EventTarget | null): boolean {
 export function ShortcutProvider({ children }: { children: ReactNode }) {
 	const navigate = useNavigate();
 	const { projectId } = useParams({ strict: false });
-	const { data: user } = useQuery(currentUserQueryOptions);
-	const isAnonymous = !user;
 	const { hasPermission } = usePermissions();
 	const { hasProjectPermission } = useProjectPermissions(projectId ?? "");
 
 	const canViewSprints =
 		!!projectId &&
-		(hasPermission("sprints.read") || hasProjectPermission("sprints.read"));
+		(hasPermission("sprints:read") || hasProjectPermission("sprints:read"));
 
 	const { data: sprints = [] } = useQuery({
 		...sprintsQueryOptions(projectId ?? ""),
-		enabled: !!projectId && (canViewSprints || isAnonymous),
+		enabled: !!projectId && canViewSprints,
 	});
 
 	const openSprints = useMemo(
@@ -62,8 +59,8 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
 		[navigate],
 	);
 
-	// Mirrors ANON_HIDDEN_SEGMENTS / canViewSprints gating in app-sidebar.tsx so
-	// a shortcut never navigates somewhere the sidebar wouldn't show.
+	// Mirrors the permission gating in app-sidebar.tsx so a shortcut never
+	// navigates somewhere the sidebar wouldn't show.
 	const runGotoAction = useCallback(
 		(action: ShortcutActionId) => {
 			if (action === "goto.home") {
@@ -72,42 +69,41 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
 			}
 			if (!projectId) return;
 			const base = `/projects/${projectId}`;
-			const sprintsAllowed = canViewSprints || isAnonymous;
 			switch (action) {
 				case "goto.timeline":
-					if (sprintsAllowed) goto(`${base}/interactions/timeline`);
+					if (canViewSprints) goto(`${base}/interactions/timeline`);
 					return;
 				case "goto.backlog":
-					if (sprintsAllowed) goto(`${base}/interactions/backlog`);
+					if (canViewSprints) goto(`${base}/interactions/backlog`);
 					return;
 				case "goto.activeSprint":
-					if (sprintsAllowed && openSprints[0]) {
+					if (canViewSprints && openSprints[0]) {
 						goto(`${base}/interactions/sprints/${openSprints[0].id}`);
 					}
 					return;
 				case "goto.agents":
-					if (!isAnonymous) goto(`${base}/agents`);
+					goto(`${base}/agents`);
 					return;
 				case "goto.conversations":
-					if (!isAnonymous) goto(`${base}/conversations`);
+					goto(`${base}/conversations`);
 					return;
 				case "goto.automation":
-					if (!isAnonymous) goto(`${base}/automation`);
+					goto(`${base}/automation`);
 					return;
 				case "goto.team":
-					if (!isAnonymous) goto(`${base}/team`);
+					goto(`${base}/team`);
 					return;
 				case "goto.docs":
 					goto(`${base}/docs`);
 					return;
 				case "goto.settings":
-					if (!isAnonymous) goto(`${base}/settings`);
+					goto(`${base}/settings`);
 					return;
 				default:
 					return;
 			}
 		},
-		[goto, projectId, canViewSprints, isAnonymous, openSprints],
+		[goto, projectId, canViewSprints, openSprints],
 	);
 
 	// Read the latest handler via a ref so the keydown listener effect below

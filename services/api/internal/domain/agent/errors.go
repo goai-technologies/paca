@@ -1,16 +1,28 @@
 package agentdom
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // Agent errors
 var (
-	ErrAgentNotFound      = errors.New("agent not found")
+	ErrAgentNotFound = errors.New("agent not found")
+	// ErrInvalidCursor is returned when an agent-list cursor cannot be decoded.
+	ErrInvalidCursor      = errors.New("agent: invalid pagination cursor")
 	ErrAgentHandleTaken   = errors.New("agent handle already in use")
 	ErrAgentHandleInvalid = errors.New("agent handle is invalid")
 	ErrAgentNameInvalid   = errors.New("agent name is empty or invalid")
 	ErrAgentTypeInvalid   = errors.New("agent_type must be one of: llm, acp, provider_cli")
 	ErrACPProviderInvalid = errors.New("acp_provider must be one of: claude-code, codex, gemini-cli, goose, custom")
 	ErrACPCommandRequired = errors.New("acp_command is required when acp_provider is custom")
+	// ErrFieldNotSupportedForAgentType is returned when a create/update
+	// request sets an LLM-only field (system_prompt, git_committer_name,
+	// git_committer_email) on an ACP or provider_cli agent. Those agents'
+	// local CLI owns its own system prompt and git identity, so storing the
+	// value would silently never take effect. Callers wrap it with the
+	// offending field names.
+	ErrFieldNotSupportedForAgentType = errors.New("field not supported for this agent type")
 	// ErrNotSupportedForACPAgent is returned when a caller tries to manage
 	// an MCP server, skill, or environment variable on an ACP-type agent.
 	// ACP agents run entirely in the user's own local CLI via the
@@ -134,18 +146,18 @@ var (
 	ErrChatSessionNotFound = errors.New("chat session not found")
 )
 
-// Access grant errors
-var (
-	// ErrAgentAccessModeInvalid is returned when access_mode is set to
-	// anything other than AccessModeOpen/AccessModeRestricted.
-	ErrAgentAccessModeInvalid = errors.New(`access_mode must be "open" or "restricted"`)
-	// ErrAgentAccessGrantExists is returned when a member already has a
-	// grant for this agent.
-	ErrAgentAccessGrantExists = errors.New("this member already has access to this agent")
-	// ErrAgentAccessRestricted is returned by usage actions (starting/
-	// driving a conversation) on a restricted agent the caller has no grant
-	// for — distinct from ErrAgentNotFound: a restricted agent stays
-	// visible (listed, readable), just not usable, so callers must map this
-	// to 403, not 404.
-	ErrAgentAccessRestricted = errors.New("this agent is restricted — you don't have access to use it")
-)
+// FieldNotSupportedError is the concrete error behind
+// ErrFieldNotSupportedForAgentType; it carries the offending field names so
+// the transport layer can expose them as structured details.
+type FieldNotSupportedError struct {
+	Fields []string
+}
+
+func (e *FieldNotSupportedError) Error() string {
+	return ErrFieldNotSupportedForAgentType.Error() + ": " + strings.Join(e.Fields, ", ")
+}
+
+// Is makes errors.Is(err, ErrFieldNotSupportedForAgentType) match.
+func (e *FieldNotSupportedError) Is(target error) bool {
+	return target == ErrFieldNotSupportedForAgentType
+}

@@ -1,23 +1,30 @@
-import { useQuery } from "@tanstack/react-query";
+import {
+	keepPreviousData,
+	useInfiniteQuery,
+	useQuery,
+} from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Bot, Plus } from "lucide-react";
-import { useState } from "react";
+import { Bot, Plus, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { AgentCard } from "@/components/projects/agents/agent-card";
 import {
 	AcpSetupDialog,
 	CreateAgentDialog,
 } from "@/components/projects/agents/create-agent-dialog";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useCanAssignProjectRole } from "@/hooks/use-can-assign-project-role";
+import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import {
 	type AcpBridgeToken,
 	type Agent,
+	agentsInfiniteQueryOptions,
 	llmModelsQueryOptions,
-	projectScopedAgentsQueryOptions,
 } from "@/lib/agent-api";
 import { isForbiddenError } from "@/lib/api-error";
 import { projectQueryOptions } from "@/lib/project-api";
@@ -49,30 +56,50 @@ function AgentsPage() {
 	const navigate = Route.useNavigate();
 	const { hasProjectPermission, isLoading: isPermissionsLoading } =
 		useProjectPermissions(projectId);
-	const canWrite = hasProjectPermission("agents.write");
-	const canRead = hasProjectPermission("agents.read");
+	const canWrite = hasProjectPermission("agents:write");
+	const canRead = hasProjectPermission("agents:read");
 	// Creating an agent also grants it project membership at the chosen role,
 	// so the API requires project.members.write in addition to agents.write
 	// (GHSA-xxc8-ggm7-vmxp) — gate the create affordances on both so this
 	// button doesn't invite a 403 for an agents.write-only Editor. Managing
 	// an *existing* agent (AgentCard below, ACP bridge regen) stays on
-	// canWrite alone — those routes weren't changed.
-	const canCreate = canWrite && hasProjectPermission("project.members.write");
+	// canWrite alone — those routes weren't changed. The new agent's role_ids
+	// are checked per role against roles:assign (hand-out is its own privilege,
+	// like iam:PassRole), so that is required too.
+	const { canAssignRoles } = useCanAssignProjectRole(projectId);
+	const canCreate =
+		canWrite && hasProjectPermission("project.members:write") && canAssignRoles;
 
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	// projectScopedAgentsQueryOptions server-side-filters out global-scope
 	// agents invited into this project as members (see agent-api.ts's
 	// AgentScope doc comment) — this page manages project-owned agents only;
 	// global agents are configured from /admin/agents.
+	// Search runs on the server (debounced) and agents page in by cursor.
+	const [agentSearch, setAgentSearch] = useState("");
+	const [debouncedAgentSearch, setDebouncedAgentSearch] = useState("");
+	const applyAgentSearch = useDebouncedCallback(setDebouncedAgentSearch, 300);
 	const {
-		data: agents = [],
+		data: agentPages,
 		isLoading: isDataLoading,
 		isError,
 		error,
-	} = useQuery({
-		...projectScopedAgentsQueryOptions(projectId),
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+		isFetchNextPageError,
+	} = useInfiniteQuery({
+		...agentsInfiniteQueryOptions(projectId, {
+			scope: "project",
+			search: debouncedAgentSearch,
+		}),
 		enabled: canRead,
+		placeholderData: keepPreviousData,
 	});
+	const agents = useMemo(
+		() => agentPages?.pages.flatMap((p) => p.items) ?? [],
+		[agentPages],
+	);
 	// While permissions are still loading, canRead defaults to false same as
 	// a confirmed denial — guard on isPermissionsLoading (and fold it into
 	// isLoading) so the page shows the skeleton instead of flashing
@@ -152,7 +179,7 @@ function AgentsPage() {
 							<Skeleton key={i} className="h-36 rounded-xl" />
 						))}
 					</div>
-				) : agents.length === 0 ? (
+				) : agents.length === 0 && !debouncedAgentSearch.trim() ? (
 					<div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
 						<div className="flex size-16 items-center justify-center rounded-2xl bg-muted/50">
 							<Bot className="size-8 text-muted-foreground/50" />
@@ -173,16 +200,38 @@ function AgentsPage() {
 						)}
 					</div>
 				) : (
-					<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-						{agents.map((agent) => (
-							<AgentCard
-								key={agent.id}
-								agent={agent}
-								projectId={projectId}
-								canWrite={canWrite}
+					<>
+						<div className="relative mb-4 max-w-sm">
+							<Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+							<Input
+								type="search"
+								value={agentSearch}
+								onChange={(e) => {
+									setAgentSearch(e.target.value);
+									applyAgentSearch(e.target.value);
+								}}
+								placeholder={t("agents.page.searchPlaceholder")}
+								aria-label={t("agents.page.searchPlaceholder")}
+								className="pl-8"
 							/>
-						))}
-					</div>
+						</div>
+						<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+							{agents.map((agent) => (
+								<AgentCard
+									key={agent.id}
+									agent={agent}
+									projectId={projectId}
+									canWrite={canWrite}
+								/>
+							))}
+						</div>
+						<LoadMoreSentinel
+							hasMore={!!hasNextPage}
+							isLoadingMore={isFetchingNextPage}
+							isError={isFetchNextPageError}
+							onLoadMore={() => void fetchNextPage()}
+						/>
+					</>
 				)}
 			</div>
 

@@ -33,6 +33,7 @@ export interface ListGroupProps {
 	statuses: TaskStatus[];
 	taskTypes: TaskType[];
 	members: ProjectMember[];
+	reporters?: ProjectMember[];
 	customFields: CustomFieldDefinition[];
 	epics?: Task[];
 	/** Load-more state for the epic picker, shared by every row in this group. */
@@ -99,6 +100,7 @@ export function ListGroup({
 	statuses,
 	taskTypes,
 	members,
+	reporters,
 	customFields,
 	epics = [],
 	epicsPagination,
@@ -429,7 +431,6 @@ export function ListGroup({
 				task={task}
 				statuses={statuses}
 				taskTypes={taskTypes}
-				members={members}
 				epics={epics}
 				epicsPagination={epicsPagination}
 				canEdit={!!canEdit}
@@ -446,7 +447,6 @@ export function ListGroup({
 					taskIdPrefix={taskIdPrefix}
 					statuses={statuses}
 					taskTypes={taskTypes}
-					members={members}
 					epics={epics}
 					epicsPagination={epicsPagination}
 					customFields={customFields}
@@ -610,6 +610,7 @@ export function ListGroup({
 								statuses,
 								taskTypes,
 								members,
+								reporters,
 								customFields,
 							};
 							const laneTasks =

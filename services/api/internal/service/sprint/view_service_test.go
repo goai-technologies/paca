@@ -38,7 +38,11 @@ func (permissiveSprintRepo) FindSprintByID(_ context.Context, id uuid.UUID) (*sp
 }
 func (permissiveSprintRepo) CreateSprint(context.Context, *sprintdom.Sprint) error { return nil }
 func (permissiveSprintRepo) UpdateSprint(context.Context, *sprintdom.Sprint) error { return nil }
-func (permissiveSprintRepo) DeleteSprint(context.Context, uuid.UUID) error         { return nil }
+func (permissiveSprintRepo) UpdateSprintAtomic(_ context.Context, id uuid.UUID, decide func(*sprintdom.Sprint) error) (*sprintdom.Sprint, error) {
+	sp := &sprintdom.Sprint{ID: id}
+	return sp, decide(sp)
+}
+func (permissiveSprintRepo) DeleteSprint(context.Context, uuid.UUID) error { return nil }
 
 var _ sprintdom.SprintRepository = permissiveSprintRepo{}
 
@@ -60,6 +64,9 @@ func (permissiveTaskRepo) FindTaskByNumber(context.Context, uuid.UUID, int64) (*
 	return nil, taskdom.ErrTaskNotFound
 }
 func (permissiveTaskRepo) CreateTask(context.Context, *taskdom.Task) error { return nil }
+func (permissiveTaskRepo) UpdateTaskFields(context.Context, *taskdom.Task, []taskdom.TaskField, map[string]any) error {
+	return nil
+}
 func (permissiveTaskRepo) UpdateTask(context.Context, *taskdom.Task) error { return nil }
 func (permissiveTaskRepo) UpdateTaskAtomic(_ context.Context, id uuid.UUID, decide func(current *taskdom.Task) (*taskdom.Task, error)) (*taskdom.Task, error) {
 	next, err := decide(&taskdom.Task{ID: id})
@@ -197,6 +204,22 @@ func (r *fakeViewRepo) UpdateView(_ context.Context, v *sprintdom.SprintView) er
 	cp := *v
 	r.views[v.ID] = &cp
 	return nil
+}
+
+func (r *fakeViewRepo) UpdateViewAtomic(ctx context.Context, id uuid.UUID, decide func(*sprintdom.SprintView) error) (*sprintdom.SprintView, error) {
+	cur, err := r.FindViewByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cp := *cur
+	if err := decide(&cp); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := cp
+	r.views[id] = &st
+	return &cp, nil
 }
 
 func (r *fakeViewRepo) DeleteView(_ context.Context, id uuid.UUID) error {
@@ -1620,3 +1643,11 @@ func TestViewService_BulkMoveTasks_WrongProject_ReturnsNotFound(t *testing.T) {
 		t.Errorf("no task position should have been persisted, found %d", len(repo.positions))
 	}
 }
+
+func (permissiveTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
+	return nil, nil
+}
+
+func (permissiveTaskRepo) ProjectIsLive(context.Context, uuid.UUID) (bool, error) { return true, nil }
+
+func (permissiveTaskRepo) CountTasksOfType(context.Context, uuid.UUID) (int, error) { return 0, nil }

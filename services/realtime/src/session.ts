@@ -31,7 +31,7 @@ export interface Session {
 	// projectPermissions caches the permission map returned by
 	// GET /api/v1/projects/:projectId/members/me/permissions.
 	// Key: projectId (UUID string)
-	// Value: permission key → boolean (e.g. "tasks.read" → true)
+	// Value: permission key → boolean (e.g. "tasks:read" → true)
 	projectPermissions: Record<string, Record<string, boolean>>;
 }
 

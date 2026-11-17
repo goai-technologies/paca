@@ -6,8 +6,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/Paca-AI/api/internal/apierr"
+	accountdom "github.com/Paca-AI/api/internal/domain/account"
+	activitydom "github.com/Paca-AI/api/internal/domain/activity"
 	agentdom "github.com/Paca-AI/api/internal/domain/agent"
 	annotationdom "github.com/Paca-AI/api/internal/domain/annotation"
 	apikeydom "github.com/Paca-AI/api/internal/domain/apikey"
@@ -16,10 +19,10 @@ import (
 	automationdom "github.com/Paca-AI/api/internal/domain/automation"
 	docdom "github.com/Paca-AI/api/internal/domain/doc"
 	environmentdom "github.com/Paca-AI/api/internal/domain/environment"
-	globalroledom "github.com/Paca-AI/api/internal/domain/globalrole"
 	notificationdom "github.com/Paca-AI/api/internal/domain/notification"
 	pluginom "github.com/Paca-AI/api/internal/domain/plugin"
 	projectdom "github.com/Paca-AI/api/internal/domain/project"
+	roledom "github.com/Paca-AI/api/internal/domain/role"
 	settingsdom "github.com/Paca-AI/api/internal/domain/settings"
 	sprintdom "github.com/Paca-AI/api/internal/domain/sprint"
 	ssodom "github.com/Paca-AI/api/internal/domain/sso"
@@ -39,7 +42,10 @@ type envelope struct {
 	// renders its own translated message by interpolating these values
 	// rather than displaying Error, which is English-only prose.
 	ErrorDetails map[string]string `json:"error_details,omitempty"`
-	RequestID    string            `json:"request_id,omitempty"`
+	// Issues lists the located problems of a body that failed validation
+	// (see apierr.Error.Issues), e.g. the problems of a role policy.
+	Issues    []apierr.Issue `json:"issues,omitempty"`
+	RequestID string         `json:"request_id,omitempty"`
 }
 
 // OK writes a 200 success response.
@@ -101,8 +107,14 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 	}
 
 	var details map[string]string
+	var issues []apierr.Issue
 	if apiErr != nil {
 		details = apiErr.Details
+		issues = apiErr.Issues
+	}
+	var fieldErr *agentdom.FieldNotSupportedError
+	if details == nil && errors.As(err, &fieldErr) {
+		details = map[string]string{"fields": strings.Join(fieldErr.Fields, ",")}
 	}
 
 	httpx.WriteJSON(w, status, envelope{
@@ -110,6 +122,7 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 		ErrorCode:    string(code),
 		Error:        publicMsg,
 		ErrorDetails: details,
+		Issues:       issues,
 		RequestID:    httpx.RequestIDFromContext(r.Context()),
 	})
 }
@@ -136,28 +149,52 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusConflict, apierr.CodeUsernameTaken
 	case errors.Is(err, userdom.ErrEmailTaken):
 		return http.StatusConflict, apierr.CodeEmailTaken
+	case errors.Is(err, userdom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeUserInvalidCursor
 	case errors.Is(err, userdom.ErrForbidden):
 		return http.StatusForbidden, apierr.CodeForbidden
 	case errors.Is(err, userdom.ErrInvalidCurrentPassword):
 		return http.StatusUnprocessableEntity, apierr.CodeInvalidCurrentPassword
 	case errors.Is(err, userdom.ErrPasswordSetTokenInvalid):
 		return http.StatusUnprocessableEntity, apierr.CodePasswordSetTokenInvalid
-	case errors.Is(err, globalroledom.ErrNotFound):
-		return http.StatusNotFound, apierr.CodeGlobalRoleNotFound
-	case errors.Is(err, globalroledom.ErrNameTaken):
-		return http.StatusConflict, apierr.CodeGlobalRoleNameTaken
-	case errors.Is(err, globalroledom.ErrInvalidName):
-		return http.StatusBadRequest, apierr.CodeGlobalRoleNameInvalid
-	case errors.Is(err, globalroledom.ErrHasAssignedUsers):
-		return http.StatusConflict, apierr.CodeGlobalRoleHasUsers
-	case errors.Is(err, globalroledom.ErrIsDefault):
-		return http.StatusConflict, apierr.CodeGlobalRoleIsDefault
-	case errors.Is(err, globalroledom.ErrNoDefault):
-		return http.StatusConflict, apierr.CodeGlobalRoleNoDefault
+	case errors.Is(err, roledom.ErrNotFound):
+		return http.StatusNotFound, apierr.CodeRoleNotFound
+	case errors.Is(err, roledom.ErrNameTaken):
+		return http.StatusConflict, apierr.CodeRoleNameTaken
+	case errors.Is(err, roledom.ErrNameInvalid):
+		return http.StatusBadRequest, apierr.CodeRoleNameInvalid
+	case errors.Is(err, roledom.ErrSystemRole):
+		return http.StatusConflict, apierr.CodeRoleIsSystem
+	case errors.Is(err, roledom.ErrIsDefault):
+		return http.StatusConflict, apierr.CodeRoleIsDefault
+	case errors.Is(err, roledom.ErrLastWildcard):
+		return http.StatusConflict, apierr.CodeRoleLastAdmin
+	case errors.Is(err, roledom.ErrNotAttachable):
+		return http.StatusUnprocessableEntity, apierr.CodeRoleNotAttachable
+	case errors.Is(err, roledom.ErrNoDefault):
+		return http.StatusConflict, apierr.CodeRoleNoDefault
+	case errors.Is(err, roledom.ErrRoleRequired):
+		return http.StatusBadRequest, apierr.CodeRoleRequired
+	case errors.Is(err, roledom.ErrUserNotFound):
+		return http.StatusNotFound, apierr.CodeUserNotFound
+	case errors.Is(err, accountdom.ErrServiceAccountNotFound), errors.Is(err, roledom.ErrServiceAccountNotFound):
+		return http.StatusNotFound, apierr.CodeServiceAccountNotFound
+	case errors.Is(err, accountdom.ErrNameInvalid):
+		return http.StatusBadRequest, apierr.CodeServiceAccountNameInvalid
+	case errors.Is(err, accountdom.ErrDescriptionTooLong):
+		return http.StatusBadRequest, apierr.CodeServiceAccountDescriptionTooLong
+	case errors.Is(err, roledom.ErrAgentNotFound):
+		return http.StatusNotFound, apierr.CodeAgentNotFound
+	case errors.Is(err, roledom.ErrProjectNotFound):
+		return http.StatusNotFound, apierr.CodeProjectNotFound
+	case errors.Is(err, roledom.ErrMemberNotFound):
+		return http.StatusNotFound, apierr.CodeProjectMemberNotFound
 	case errors.Is(err, projectdom.ErrNotFound):
 		return http.StatusNotFound, apierr.CodeProjectNotFound
 	case errors.Is(err, projectdom.ErrNameTaken):
 		return http.StatusConflict, apierr.CodeProjectNameTaken
+	case errors.Is(err, projectdom.ErrWorkstreamInvalid):
+		return http.StatusBadRequest, apierr.CodeProjectWorkstreamInvalid
 	case errors.Is(err, projectdom.ErrNameInvalid):
 		return http.StatusBadRequest, apierr.CodeProjectNameInvalid
 	case errors.Is(err, projectdom.ErrPrefixInvalid):
@@ -174,14 +211,8 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeBadRequest
 	case errors.Is(err, settingsdom.ErrBrandNameTooLong):
 		return http.StatusBadRequest, apierr.CodeBadRequest
-	case errors.Is(err, projectdom.ErrRoleNotFound):
-		return http.StatusNotFound, apierr.CodeProjectRoleNotFound
-	case errors.Is(err, projectdom.ErrRoleNameTaken):
-		return http.StatusConflict, apierr.CodeProjectRoleNameTaken
-	case errors.Is(err, projectdom.ErrRoleNameInvalid):
-		return http.StatusBadRequest, apierr.CodeProjectRoleNameInvalid
-	case errors.Is(err, projectdom.ErrRoleHasMembers):
-		return http.StatusConflict, apierr.CodeProjectRoleHasMembers
+	case errors.Is(err, projectdom.ErrInvalidMemberCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
 	case errors.Is(err, projectdom.ErrMemberNotFound):
 		return http.StatusNotFound, apierr.CodeProjectMemberNotFound
 	case errors.Is(err, projectdom.ErrMemberAlreadyAdded):
@@ -192,6 +223,28 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeTaskTitleInvalid
 	case errors.Is(err, taskdom.ErrEpicCannotHaveParent):
 		return http.StatusBadRequest, apierr.CodeEpicCannotHaveParent
+	case errors.Is(err, taskdom.ErrCommitmentNotFound):
+		return http.StatusNotFound, apierr.CodeCommitmentNotFound
+	case errors.Is(err, taskdom.ErrCommitmentSelf),
+		errors.Is(err, taskdom.ErrCommitmentOnChildTask),
+		errors.Is(err, taskdom.ErrCommitmentOnCommitment),
+		errors.Is(err, taskdom.ErrCommitmentTargetNotCommitment),
+		errors.Is(err, taskdom.ErrCommitmentOutsideCatalog):
+		return http.StatusBadRequest, apierr.CodeCommitmentInvalid
+	case errors.Is(err, taskdom.ErrCommitmentClosed):
+		return http.StatusConflict, apierr.CodeCommitmentClosed
+	case errors.Is(err, taskdom.ErrCommitmentsProjectNotConfigured):
+		return http.StatusConflict, apierr.CodeCommitmentsProjectNotConfigured
+	case errors.Is(err, taskdom.ErrHomeProjectInvalid):
+		return http.StatusUnprocessableEntity, apierr.CodeHomeProjectInvalid
+	case errors.Is(err, taskdom.ErrHomeProjectNotFound):
+		return http.StatusUnprocessableEntity, apierr.CodeHomeProjectNotFound
+	case errors.Is(err, taskdom.ErrCommitmentsProjectOnlyCommitments):
+		return http.StatusConflict, apierr.CodeCommitmentsProjectOnlyCommitments
+	case errors.Is(err, taskdom.ErrCommitmentOutsideCommitmentsProject):
+		return http.StatusConflict, apierr.CodeCommitmentOutsideCommitmentsProject
+	case errors.Is(err, taskdom.ErrCommitmentsProjectTypeInUse):
+		return http.StatusConflict, apierr.CodeCommitmentsProjectTypeInUse
 	case errors.Is(err, taskdom.ErrTaskCannotBeOwnParent):
 		return http.StatusBadRequest, apierr.CodeTaskCannotBeOwnParent
 	case errors.Is(err, taskdom.ErrTaskParentCycleDetected):
@@ -301,6 +354,20 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusConflict, apierr.CodeTaskLinkDuplicate
 	case errors.Is(err, taskdom.ErrTaskLinkCrossProject):
 		return http.StatusBadRequest, apierr.CodeTaskLinkCrossProject
+	case errors.Is(err, environmentdom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, agentdom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, apikeydom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, accountdom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, automationdom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, activitydom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, docdom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
 	case errors.Is(err, docdom.ErrDocNotFound):
 		return http.StatusNotFound, apierr.CodeDocNotFound
 	case errors.Is(err, docdom.ErrDocTitleInvalid):
@@ -313,6 +380,8 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeDocFolderNotInProject
 	case errors.Is(err, docdom.ErrFolderSelfParent):
 		return http.StatusBadRequest, apierr.CodeDocFolderSelfParent
+	case errors.Is(err, docdom.ErrFolderCycle):
+		return http.StatusBadRequest, apierr.CodeDocFolderCycle
 	case errors.Is(err, docdom.ErrSnapshotNotFound):
 		return http.StatusNotFound, apierr.CodeDocSnapshotNotFound
 	case errors.Is(err, docdom.ErrActivityNotFound):
@@ -360,6 +429,8 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeAgentACPProviderInvalid
 	case errors.Is(err, agentdom.ErrACPCommandRequired):
 		return http.StatusBadRequest, apierr.CodeAgentACPCommandRequired
+	case errors.Is(err, agentdom.ErrFieldNotSupportedForAgentType):
+		return http.StatusBadRequest, apierr.CodeAgentFieldNotSupportedForType
 	case errors.Is(err, agentdom.ErrMCPServerNotFound):
 		return http.StatusNotFound, apierr.CodeAgentMCPServerNotFound
 	case errors.Is(err, agentdom.ErrSkillNotFound):
@@ -412,12 +483,6 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeAgentCLIProviderNotSupportedForGlobalAgents
 	case errors.Is(err, agentdom.ErrAgentNotProviderCLI):
 		return http.StatusBadRequest, apierr.CodeAgentNotProviderCLI
-	case errors.Is(err, agentdom.ErrAgentAccessModeInvalid):
-		return http.StatusBadRequest, apierr.CodeAgentAccessModeInvalid
-	case errors.Is(err, agentdom.ErrAgentAccessGrantExists):
-		return http.StatusConflict, apierr.CodeAgentAccessGrantExists
-	case errors.Is(err, agentdom.ErrAgentAccessRestricted):
-		return http.StatusForbidden, apierr.CodeAgentAccessRestricted
 	// --- Environment errors -------------------------------------------------
 	case errors.Is(err, environmentdom.ErrEnvironmentNotFound):
 		return http.StatusNotFound, apierr.CodeEnvironmentNotFound
@@ -451,12 +516,6 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeEnvironmentPortForwardContainerPortInvalid
 	case errors.Is(err, environmentdom.ErrPortForwardContainerPortTaken):
 		return http.StatusConflict, apierr.CodeEnvironmentPortForwardContainerPortTaken
-	case errors.Is(err, environmentdom.ErrEnvironmentAccessModeInvalid):
-		return http.StatusBadRequest, apierr.CodeEnvironmentAccessModeInvalid
-	case errors.Is(err, environmentdom.ErrEnvironmentAccessGrantExists):
-		return http.StatusConflict, apierr.CodeEnvironmentAccessGrantExists
-	case errors.Is(err, environmentdom.ErrEnvironmentAccessRestricted):
-		return http.StatusForbidden, apierr.CodeEnvironmentAccessRestricted
 	// --- Automation errors -----------------------------------------------------
 	case errors.Is(err, automationdom.ErrNotFound):
 		return http.StatusNotFound, apierr.CodeAutomationNotFound
@@ -526,7 +585,7 @@ func httpStatusForCode(code apierr.Code) int {
 		apierr.CodeTokenInvalid,
 		apierr.CodeUnauthenticated:
 		return http.StatusUnauthorized
-	case apierr.CodeUserNotFound, apierr.CodeSSOProviderNotFound:
+	case apierr.CodeUserNotFound, apierr.CodeSSOProviderNotFound, apierr.CodeServiceAccountNotFound:
 		return http.StatusNotFound
 	case apierr.CodeSSOProviderSlugTaken:
 		return http.StatusConflict
@@ -540,14 +599,15 @@ func httpStatusForCode(code apierr.Code) int {
 		return http.StatusConflict
 	case apierr.CodeForbidden:
 		return http.StatusForbidden
-	case apierr.CodeGlobalRoleNotFound:
+	case apierr.CodeRoleNotFound:
 		return http.StatusNotFound
-	case apierr.CodeGlobalRoleNameTaken:
+	case apierr.CodeRoleNameTaken, apierr.CodeRoleIsSystem, apierr.CodeRoleIsDefault, apierr.CodeRoleLastAdmin,
+		apierr.CodeRoleNoDefault:
 		return http.StatusConflict
-	case apierr.CodeGlobalRoleNameInvalid:
+	case apierr.CodeRoleNameInvalid, apierr.CodeRoleRequired:
 		return http.StatusBadRequest
-	case apierr.CodeGlobalRoleHasUsers:
-		return http.StatusConflict
+	case apierr.CodeRolePolicyInvalid, apierr.CodeRoleNotAttachable:
+		return http.StatusUnprocessableEntity
 	case apierr.CodeProjectNotFound:
 		return http.StatusNotFound
 	case apierr.CodeProjectNameTaken:
@@ -555,14 +615,6 @@ func httpStatusForCode(code apierr.Code) int {
 	case apierr.CodeProjectNameInvalid,
 		apierr.CodeProjectPrefixInvalid:
 		return http.StatusBadRequest
-	case apierr.CodeProjectRoleNotFound:
-		return http.StatusNotFound
-	case apierr.CodeProjectRoleNameTaken:
-		return http.StatusConflict
-	case apierr.CodeProjectRoleNameInvalid:
-		return http.StatusBadRequest
-	case apierr.CodeProjectRoleHasMembers:
-		return http.StatusConflict
 	case apierr.CodeProjectMemberNotFound:
 		return http.StatusNotFound
 	case apierr.CodeProjectMemberAlreadyAdded:
@@ -628,6 +680,7 @@ func httpStatusForCode(code apierr.Code) int {
 		apierr.CodeDocFolderNameInvalid,
 		apierr.CodeDocFolderNotInProject,
 		apierr.CodeDocFolderSelfParent,
+		apierr.CodeDocFolderCycle,
 		apierr.CodeDocActivityNotAComment,
 		apierr.CodeDocCommentContentInvalid,
 		apierr.CodeDocCommentActorUnidentified:
@@ -691,6 +744,7 @@ func httpStatusForCode(code apierr.Code) int {
 		apierr.CodeAgentTypeInvalid,
 		apierr.CodeAgentACPProviderInvalid,
 		apierr.CodeAgentACPCommandRequired,
+		apierr.CodeAgentFieldNotSupportedForType,
 		apierr.CodeAgentEnvVarKeyInvalid,
 		apierr.CodeAgentEnvVarKeyReserved,
 		apierr.CodeAgentSkillNameReserved,
@@ -706,13 +760,15 @@ func httpStatusForCode(code apierr.Code) int {
 		apierr.CodeAgentCLIProviderNoAPIKeyAuth,
 		apierr.CodeAgentDefaultEnvironmentRequiredForCLIProvider,
 		apierr.CodeAgentCLIProviderNotSupportedForGlobalAgents,
-		apierr.CodeAgentNotProviderCLI,
-		apierr.CodeAgentAccessModeInvalid:
+		apierr.CodeAgentNotProviderCLI:
 		return http.StatusBadRequest
-	case apierr.CodeAgentAccessGrantExists:
+	case apierr.CodeProjectExportNotFound:
+		return http.StatusNotFound
+	case apierr.CodeProjectExportInProgress,
+		apierr.CodeProjectExportNotReady:
 		return http.StatusConflict
-	case apierr.CodeAgentAccessRestricted:
-		return http.StatusForbidden
+	case apierr.CodeProjectExportExpired:
+		return http.StatusGone
 	case apierr.CodeEnvironmentNotFound,
 		apierr.CodeEnvironmentFolderNotFound,
 		apierr.CodeEnvironmentSSHKeyNotFound,
@@ -730,13 +786,8 @@ func httpStatusForCode(code apierr.Code) int {
 		apierr.CodeEnvironmentSSHKeyInvalid,
 		apierr.CodeEnvironmentPortForwardContainerPortInvalid,
 		apierr.CodeEnvironmentCPULimitInvalid,
-		apierr.CodeEnvironmentMemoryLimitInvalid,
-		apierr.CodeEnvironmentAccessModeInvalid:
+		apierr.CodeEnvironmentMemoryLimitInvalid:
 		return http.StatusBadRequest
-	case apierr.CodeEnvironmentAccessGrantExists:
-		return http.StatusConflict
-	case apierr.CodeEnvironmentAccessRestricted:
-		return http.StatusForbidden
 	case apierr.CodeAutomationNotFound,
 		apierr.CodeAutomationNodeNotFound,
 		apierr.CodeAutomationEdgeNotFound:

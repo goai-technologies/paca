@@ -12,7 +12,8 @@
 				"customFields": "Пользовательские поля",
 				"jev": "Jev ИИ",
 				"dangerZone": "Опасная зона",
-				"plugins": "Плагины"
+				"plugins": "Плагины",
+				"export": "Экспорт"
 			},
 			"pluginTab": {
 				"noPermission": {
@@ -101,7 +102,6 @@
 			"configure": "Настроить",
 			"delete": "Удалить",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This agent is restricted — ask a project admin to grant you access before you can chat with it.",
 			"acpStatusConnected": "В сети",
 			"acpStatusDisconnected": "Не в сети",
 			"deleteDialog": {
@@ -114,6 +114,7 @@
 			}
 		},
 		"page": {
+			"searchPlaceholder": "Поиск агентов по названию или имени…",
 			"title": "AI-агенты",
 			"subtitle": "Автономные агенты, которые работают над задачами и общаются с командой",
 			"newAgent": "Новый агент",
@@ -172,7 +173,6 @@
 				"skills": "Навыки",
 				"envVars": "Окружение",
 				"globalRole": "Глобальная роль",
-				"access": "Access",
 				"activity": "Активность"
 			},
 			"globalRole": {
@@ -291,6 +291,11 @@
 					"urlLabel": "URL",
 					"cancel": "Отмена",
 					"addServer": "Добавить сервер"
+				},
+				"system": {
+					"title": "Системные MCP-серверы",
+					"description": "Предоставляются Paca всем агентам. Их нельзя изменить.",
+					"pacaDetail": "Встроенные инструменты Paca (проекты, задачи, документы)"
 				}
 			},
 			"envVars": {
@@ -342,16 +347,11 @@
 					"nameReserved": "Это имя зарезервировано для внутренней структуры Paca. Выберите другое.",
 					"nameInvalid": "Имя навыка не может быть «.», «..» или содержать косую черту.",
 					"addFailed": "Не удалось добавить навык. Попробуйте ещё раз."
+				},
+				"system": {
+					"title": "Системные навыки",
+					"description": "Входят в состав Paca и доступны всем агентам. Их нельзя изменить."
 				}
-			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may chat with this agent. Everyone who can manage agents can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
 			},
 			"activity": {
 				"commented": "оставил комментарий",
@@ -376,6 +376,9 @@
 					"dateTo": "По",
 					"clearAll": "Сбросить фильтры"
 				}
+			},
+			"system": {
+				"badge": "Система"
 			}
 		},
 		"conversationView": {
@@ -391,9 +394,8 @@
 			"connect": "Подключиться",
 			"conversationEnded": "Этот диалог завершён.",
 			"textOnlyMessage": "Поддерживаются только текстовые сообщения.",
-			"agentAccessRestricted": "Этот агент имеет ограниченный доступ. Попросите администратора проекта предоставить вам доступ, прежде чем вы сможете общаться с ним.",
-			"environmentAccessRestricted": "Окружение этого диалога имеет ограниченный доступ. Попросите администратора проекта предоставить вам доступ, прежде чем вы сможете общаться с этим агентом.",
 			"chatNoPermission": "У вас нет разрешения отправлять сообщения в этом диалоге.",
+			"cliProviderNeedsEnvironment": "Этот агент использует CLI-провайдер и нуждается в среде по умолчанию, но пригодной среды у него нет. Попросите администратора проекта задать для агента среду по умолчанию.",
 			"failed": "Диалог завершился с ошибкой",
 			"noOutput": "Агент не выдал результат.",
 			"loadingOlder": "Загрузка…",
@@ -493,7 +495,6 @@
 			"subtitle": "Именованные, долгоживущие песочницы, к которым ваши агенты могут подключаться между разговорами",
 			"newEnvironment": "Новое окружение",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This environment is restricted — ask a project admin to grant you access before you can use it.",
 			"empty": {
 				"title": "Пока нет окружений",
 				"description": "Создайте статическое окружение, чтобы файлы и фоновые процессы сохранялись между разговорами, вместо одноразовой песочницы каждый раз.",
@@ -536,8 +537,7 @@
 			"tabs": {
 				"overview": "Обзор",
 				"folders": "Папки",
-				"portForwards": "Проброс портов",
-				"access": "Access"
+				"portForwards": "Проброс портов"
 			},
 			"busy": "Это окружение уже запускается, останавливается или перезапускается. Повторите попытку через некоторое время.",
 			"actionFailed": "Не удалось выполнить действие. Попробуйте ещё раз.",
@@ -653,15 +653,6 @@
 					"restartFailed": "Не удалось перезапустить окружение. Попробуйте ещё раз."
 				}
 			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may browse, SSH into, forward ports on, or open a terminal in this environment. Everyone who can manage environments can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
-			},
 			"sshKeys": {
 				"connectHint": "Замените <bastion-host> адресом SSH-бастиона, настроенным в этом развёртывании.",
 				"connectUnavailable": "SSH-доступ ещё не настроен в этом развёртывании.",
@@ -760,7 +751,6 @@
 			"deleteRole": "Удалить роль",
 			"errors": {
 				"notFound": "Эта роль больше не существует.",
-				"hasMembers": "Эту роль нельзя удалить, потому что она всё ещё назначена одному или нескольким участникам.",
 				"forbidden": "У вас нет прав на удаление этой роли.",
 				"internalError": "Что-то пошло не так. Попробуйте ещё раз.",
 				"generic": "Что-то пошло не так."
@@ -774,7 +764,6 @@
 			"roleNameLabel": "Название роли",
 			"roleNamePlaceholder": "например, PROJECT_REVIEWER",
 			"permissionsLabel": "Разрешения",
-			"fullAccessBadge": "Полный доступ",
 			"fullAccessDescription": "Эта роль автоматически включает все разрешения, в том числе те, что будут добавлены в будущем. Изменение любого переключателя ниже преобразует её в фиксированный набор текущих разрешений.",
 			"enabledCount_one": "{{count}} включено",
 			"enabledCount_few": "{{count}} включено",
@@ -782,17 +771,13 @@
 			"enabledCount_other": "{{count}} включено",
 			"cancel": "Отмена",
 			"saveChanges": "Сохранить изменения",
-			"createRole": "Создать роль",
-			"errors": {
-				"nameTaken": "Роль с таким названием уже существует.",
-				"nameInvalid": "Название роли должно содержать заглавные буквы, цифры и подчёркивания.",
-				"notFound": "Эта роль больше не существует. Возможно, она уже удалена.",
-				"forbidden": "У вас нет прав на это действие.",
-				"internalError": "На сервере что-то пошло не так. Попробуйте ещё раз.",
-				"generic": "Что-то пошло не так."
-			}
+			"createRole": "Создать роль"
 		},
 		"permissions": {
+			"projectsRead": {
+				"label": "Просмотр проекта",
+				"description": "Открывать проект и видеть основные сведения"
+			},
 			"projectsWrite": {
 				"label": "Редактировать проект",
 				"description": "Обновлять название, описание и настройки проекта"
@@ -807,7 +792,7 @@
 			},
 			"membersWrite": {
 				"label": "Управлять участниками",
-				"description": "Добавлять, удалять и переназначать участников проекта"
+				"description": "Добавлять и удалять участников проекта (для смены их ролей нужно право «Назначение ролей»)"
 			},
 			"rolesRead": {
 				"label": "Просматривать роли",
@@ -816,6 +801,10 @@
 			"rolesWrite": {
 				"label": "Управлять ролями",
 				"description": "Создавать, редактировать и удалять роли проекта"
+			},
+			"rolesAssign": {
+				"label": "Назначение ролей",
+				"description": "Назначать участникам и агентам любые роли этого проекта или снимать их"
 			},
 			"settingsTaskTypesWrite": {
 				"label": "Manage Task Types",
@@ -912,6 +901,10 @@
 			"activitiesRead": {
 				"label": "Просмотр журнала активности",
 				"description": "Просмотр всей активности, записанной в этом проекте"
+			},
+			"projectExport": {
+				"label": "Экспорт данных проекта",
+				"description": "Экспортировать задачи (с комментариями и действиями) и документацию этого проекта"
 			}
 		},
 		"permissionGroups": {
@@ -951,9 +944,6 @@
 			"taskIdPrefixPlaceholder": "PROJ",
 			"descriptionLabel": "Описание",
 			"descriptionPlaceholder": "Опишите, о чём этот проект…",
-			"publicProjectLabel": "Публичный проект",
-			"publicProjectHintPublic": "Любой, у кого есть ссылка, сможет просматривать этот проект. Анонимным пользователям доступен только просмотр.",
-			"publicProjectHintPrivate": "Доступ есть только у участников команды.",
 			"saveChanges": "Сохранить изменения",
 			"saved": "Сохранено ✓",
 			"noPermission": "У вас нет прав на редактирование этого проекта.",
@@ -968,7 +958,6 @@
 			"title": "Роли проекта",
 			"description": "Управляйте ролями и разрешениями участников этого проекта.",
 			"newRole": "Новая роль",
-			"noPermissionsAssigned": "Разрешения не назначены",
 			"editRole": "Редактировать роль",
 			"deleteRole": "Удалить роль",
 			"rolesDefined_one": "роль создана",
@@ -983,14 +972,15 @@
 			},
 			"table": {
 				"name": "Название",
-				"permissions": "Разрешения",
+				"description": "Описание",
 				"created": "Создана"
 			},
-			"systemRolesNote": "Системные роли являются общими шаблонами, их нельзя редактировать или удалять.",
+			"systemRolesNote": "Общие роли рабочего пространства можно изменить только в настройках ролей рабочего пространства.",
 			"noPermission": {
 				"title": "You don't have permission to view roles",
 				"description": "Ask a project admin to grant you the project.roles.read permission."
-			}
+			},
+			"noDescription": "Нет описания"
 		},
 		"taskStatuses": {
 			"title": "Статусы задач",
@@ -1186,6 +1176,41 @@
 				"cancel": "Отмена",
 				"deletePermanently": "Удалить навсегда"
 			}
+		},
+		"export": {
+			"title": "Экспорт",
+			"description": "Скачайте данные проекта. Экспорт создаётся в фоновом режиме и хранится 7 дней.",
+			"recent": {
+				"title": "Недавние экспорты",
+				"empty": "Экспортов пока нет."
+			},
+			"status": {
+				"pending": "В очереди",
+				"processing": "Создаётся…",
+				"completed": "Готов",
+				"failed": "Ошибка",
+				"expired": "Истёк"
+			},
+			"rows": "Задач: {{count}}",
+			"availableUntil": "Доступно до {{date}}",
+			"download": "Скачать",
+			"failedMessage": "Не удалось создать экспорт. Повторите попытку.",
+			"errors": {
+				"inProgress": "Для этого проекта экспорт уже выполняется.",
+				"requestFailed": "Не удалось запустить экспорт. Повторите попытку.",
+				"downloadFailed": "Не удалось скачать экспорт. Повторите попытку.",
+				"expired": "Срок действия этого экспорта истёк. Запросите новый."
+			},
+			"noPermission": {
+				"title": "У вас нет прав на экспорт этого проекта",
+				"description": "Попросите владельца или администратора проекта выдать вам право на экспорт."
+			},
+			"archive": {
+				"title": "Данные проекта (ZIP)",
+				"description": "Все задачи в формате CSV, их комментарии и действия в отдельных CSV-файлах, а также документация в файлах Markdown.",
+				"button": "Экспортировать проект",
+				"inProgress": "Экспорт…"
+			}
 		}
 	},
 	"taskStatuses": {
@@ -1242,29 +1267,43 @@
 			"noUsersAvailable": "Нет пользователей, которых можно добавить.",
 			"loadingMore": "Загрузка…",
 			"roleLabel": "Роль",
-			"rolePlaceholder": "Выберите роль…",
 			"cancel": "Отмена",
 			"addMember": "Добавить участника",
 			"errors": {
 				"addFailed": "Не удалось добавить участника. Попробуйте ещё раз.",
 				"alreadyAdded": "Этот пользователь или агент уже является участником проекта.",
+				"roleForbidden": "У вас нет прав назначить одну из этих ролей.",
 				"roleNotFound": "Этой роли больше не существует. Выберите другую роль."
 			},
 			"modeUser": "Пользователь",
 			"modeAgent": "ИИ-агент",
 			"agentLabel": "Агент",
-			"noAgentsAvailable": "Нет доступных глобальных агентов для приглашения."
+			"noAgentsAvailable": "Нет доступных глобальных агентов для приглашения.",
+			"modeServiceAccount": "Сервисный аккаунт",
+			"serviceAccountLabel": "Сервисный аккаунт",
+			"noServiceAccountsAvailable": "Нет сервисных аккаунтов для добавления.",
+			"searchAgentsPlaceholder": "Поиск по имени или хендлу…",
+			"noAgentsMatch": "Нет агентов, соответствующих поиску.",
+			"searchServiceAccountsPlaceholder": "Поиск по названию или описанию…",
+			"noServiceAccountsMatch": "Нет сервисных аккаунтов, соответствующих поиску."
 		},
 		"roleChip": {
 			"changeRole": "Изменить роль",
+			"dialogDescription": "Выберите роли для {{name}}. У участника остаётся минимум одна роль.",
+			"assign": "Назначить роль",
+			"assigning": "Назначение…",
 			"errors": {
 				"memberNotFound": "Этот участник больше не состоит в проекте.",
+				"roleForbidden": "У вас нет прав назначить или снять одну из этих ролей.",
 				"roleNotFound": "Этой роли больше не существует.",
 				"changeFailed": "Не удалось изменить роль."
 			}
 		},
 		"memberRow": {
-			"removeMember": "Удалить участника"
+			"removeMember": "Удалить участника",
+			"agentBadge": "Агент",
+			"actions": "Действия с участником",
+			"serviceAccountBadge": "Сервисный аккаунт"
 		},
 		"removeDialog": {
 			"title": "Удалить участника",
@@ -1286,6 +1325,19 @@
 			"placeholder": "Чем занимается этот человек?",
 			"save": "Сохранить",
 			"saveFailed": "Не удалось сохранить описание."
+		},
+		"filters": {
+			"searchPlaceholder": "Поиск по имени или логину…",
+			"searchLabel": "Поиск участников",
+			"roleLabel": "Фильтр по роли",
+			"allRoles": "Все",
+			"clearSearch": "Очистить поиск",
+			"showingOf": "Показано {{shown}} из {{total}}"
+		},
+		"noMatch": {
+			"title": "Участники не найдены",
+			"description": "Попробуйте другой запрос или фильтр роли.",
+			"clear": "Сбросить фильтры"
 		}
 	},
 	"aiChat": {
@@ -1306,6 +1358,7 @@
 			"deleteFailed": "Не удалось удалить тип задачи. Попробуйте ещё раз.",
 			"isDefault": "Тип по умолчанию нельзя удалить. Сначала сделайте типом по умолчанию другой.",
 			"isSystem": "Системные типы нельзя удалить.",
+			"commitmentsProjectOnly": "Тип обязательства нельзя удалить: в этом проекте могут быть только обязательства.",
 			"cancel": "Отмена",
 			"deleteType": "Удалить тип"
 		},
@@ -1330,7 +1383,8 @@
 				"nameInvalid": "Название типа пустое или некорректное.",
 				"nameReserved": "Это имя зарезервировано для встроенного типа.",
 				"saveFailed": "Не удалось сохранить тип задачи. Попробуйте ещё раз.",
-				"isSystem": "Системные типы нельзя редактировать."
+				"isSystem": "Системные типы нельзя редактировать.",
+				"commitmentsProjectOnly": "В этом проекте могут быть только обязательства: нельзя добавить другие типы задач или переименовать тип обязательства."
 			}
 		}
 	},
@@ -1386,12 +1440,18 @@
 			"viewParent": "Открыть родительскую",
 			"removeParent": "Убрать родительскую",
 			"addFields": "Добавить поля",
-			"autoAssign": "Авто"
+			"autoAssign": "Авто",
+			"sprintGroup": {
+				"active": "Активные",
+				"planned": "Предстоящие",
+				"completed": "Завершённые"
+			}
 		},
 		"description": {
 			"title": "Описание",
 			"writeWithAI": "Написать с AI",
 			"writeWithAIDialog": {
+				"searchAgents": "Поиск агентов…",
 				"title": "Написать с AI",
 				"description": "Выберите агента, который напишет описание задачи.",
 				"noAgents": "Для этого проекта агенты не настроены.",
@@ -1471,6 +1531,7 @@
 			"searchPlaceholder": "Поиск задач по названию или номеру...",
 			"loadingTasks": "Загрузка задач…",
 			"noTasksFound": "Задачи не найдены",
+			"loadError": "Не удалось загрузить задачи. Повторите попытку.",
 			"linkTypes": {
 				"blocks": {
 					"label": "Блокирует",
@@ -1572,6 +1633,35 @@
 			"descriptionChangeDiff": "Diff изменения описания",
 			"autoAssignSkippedLowConfidence": "не смог уверенно выбрать исполнителя (уверенность {{confidence}}%) — задача осталась без назначения",
 			"autoAssignSkipped": "пропустил автоназначение — задача осталась без назначения"
+		},
+		"searchableList": {
+			"searchPlaceholder": "Поиск…",
+			"noResults": "Ничего не найдено"
+		},
+		"commitment": {
+			"label": "Обязательство",
+			"inherited": "унаследовано",
+			"inheritedHint": "Задаётся на тикете верхнего уровня; этот тикет его наследует.",
+			"searchPlaceholder": "Поиск обязательств…",
+			"open": "Открыть обязательство",
+			"remove": "Убрать из обязательства",
+			"loading": "Загрузка…",
+			"empty": "Нет открытых обязательств",
+			"workTitle": "Работа по этому обязательству",
+			"workEmpty": "К этому обязательству пока не привязано ни одного тикета.",
+			"workError": "Не удалось загрузить связанную работу.",
+			"hiddenProjects_one": "{{count}} проект, недоступный вам, не показан.",
+			"hiddenProjects_few": "{{count}} проекта, недоступных вам, не показаны.",
+			"hiddenProjects_many": "{{count}} проектов, недоступных вам, не показаны.",
+			"hiddenProjects_other": "{{count}} проекта, недоступных вам, не показаны.",
+			"groupThisProject": "Этот проект",
+			"groupOtherProjects": "Другие проекты",
+			"projectLabel": "Проект",
+			"projectHint": "Для какого проекта это обязательство",
+			"projectSearchPlaceholder": "Поиск проектов…",
+			"projectClear": "Убрать проект",
+			"projectEmpty": "Нет проектов для выбора",
+			"projectUnknown": "Неизвестный проект"
 		}
 	},
 	"portForwardDetail": {
@@ -1773,6 +1863,7 @@
 			"error": "Не удалось удалить разговор. Повторите попытку."
 		},
 		"filters": {
+			"searchAgents": "Поиск агентов…",
 			"title": "Фильтры",
 			"agent": "Агент",
 			"status": "Статус",
@@ -2479,5 +2570,12 @@
 			"comment": "прокомментировал(а)",
 			"fallback": "выполнил(а) {{type}} для"
 		}
+	},
+	"workstream": {
+		"label": "Направление",
+		"hint": "Панель, на которой по умолчанию показываются обязательства этого проекта. Поле «Направление» самого обязательства имеет приоритет.",
+		"delivery": "Delivery",
+		"platform": "PPE",
+		"internal": "Internal"
 	}
 }

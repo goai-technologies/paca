@@ -140,9 +140,9 @@ func (o Origin) OrSystem() Origin {
 // comment operations and system-generated activity recording.
 type ActivityService interface {
 	ActivityRecorder
-	// ListActivities returns all activities (system + comments) for a task.
-	// projectID is used to verify the task belongs to the expected project.
-	ListActivities(ctx context.Context, projectID, taskID uuid.UUID) ([]*Activity, error)
+	// ListActivities returns one page of the task's activities NEWEST
+	// first and the cursor for the next, older page (nil on the last page).
+	ListActivities(ctx context.Context, projectID, taskID uuid.UUID, cursor *string, limit int) ([]*Activity, *string, error)
 	// AddComment creates a new user comment on the task.
 	// in.ProjectID is used to verify the task belongs to the expected
 	// project, in addition to resolving the actor to a project member.

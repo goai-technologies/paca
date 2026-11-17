@@ -92,7 +92,6 @@
 			"loadingMore": "読み込み中…"
 		},
 		"projectCard": {
-			"public": "公開",
 			"noDescription": "説明はありません"
 		},
 		"gettingStarted": {
@@ -152,11 +151,6 @@
 			"descriptionLabel": "説明",
 			"optionalHint": "（任意）",
 			"descriptionPlaceholder": "このプロジェクトについて教えてください",
-			"publicProject": {
-				"label": "公開プロジェクト",
-				"publicHint": "リンクを知っている人は誰でもこのプロジェクトを閲覧できます。匿名ユーザーは読み取り専用でアクセスできます。",
-				"privateHint": "チームメンバーのみがこのプロジェクトにアクセスできます。"
-			},
 			"cancel": "キャンセル",
 			"submit": "プロジェクトを作成",
 			"errors": {
@@ -166,6 +160,39 @@
 				"prefixInvalid": "プレフィックスは1〜10文字の大文字英数字で入力してください（例: PACA）。",
 				"generic": "問題が発生しました。もう一度お試しください。"
 			}
+		},
+		"legacyPluginsBanner": {
+			"title_one": "プラグインの更新が必要です",
+			"title_other": "プラグインの更新が必要です",
+			"description_one": "{{names}} は旧式の権限モデル requirePermissions を使用しています。動作は続きますが、作者が requireActions を使うバージョンを公開するまで、再インストールもアップグレードもできません。",
+			"description_other": "{{names}} は旧式の権限モデル requirePermissions を使用しています。動作は続きますが、作者が requireActions を使うバージョンを公開するまで、再インストールもアップグレードもできません。",
+			"manage": "プラグインを管理",
+			"dismiss": "閉じる"
 		}
+	},
+	"roleChange": {
+		"adding": "追加",
+		"removing": "削除",
+		"noChanges": "まだ変更はありません。上でロールを選択または解除してください。"
+	},
+	"roleBadge": {
+		"fullAccess": "フルアクセス",
+		"builtIn": "組み込み",
+		"default": "デフォルト",
+		"current": "現在",
+		"noDescription": "説明なし",
+		"noRoles": "ロールなし",
+		"showMore": "他のロールを表示 (+{{count}})",
+		"allRoles": "すべてのロール ({{count}})"
+	},
+	"roleSelect": {
+		"searchLabel": "ロールを検索",
+		"searchPlaceholder": "ロールを検索…",
+		"clearSearch": "検索をクリア",
+		"noMatch": "「{{query}}」に一致するロールはありません",
+		"selectedCount": "選択中: {{count}}",
+		"minOne": "ロールは1つ以上必要です。",
+		"clear": "クリア",
+		"placeholder": "ロールを選択"
 	}
 }

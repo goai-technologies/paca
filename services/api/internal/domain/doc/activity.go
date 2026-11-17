@@ -63,9 +63,9 @@ type FieldChange struct {
 // ActivityService defines use-cases for doc activity and comments.
 type ActivityService interface {
 	ActivityRecorder
-	// ListActivities returns all activities (system + comments) for a document.
-	// projectID is used to verify the document belongs to the expected project.
-	ListActivities(ctx context.Context, projectID, documentID uuid.UUID) ([]*Activity, error)
+	// ListActivities returns one page of the document's activities
+	// NEWEST first and the cursor for the next, older page (nil on the last).
+	ListActivities(ctx context.Context, projectID, documentID uuid.UUID, cursor *string, limit int) ([]*Activity, *string, error)
 	// AddComment creates a new user comment on the document.
 	// in.ProjectID is used to verify the document belongs to the expected
 	// project, in addition to resolving the actor to a project member.

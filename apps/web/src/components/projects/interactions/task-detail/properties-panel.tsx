@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
 	ArrowRight,
 	BookOpen,
@@ -20,6 +21,10 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useJevEnabled } from "@/hooks/use-jev-enabled";
+import {
+	commitmentsProjectIdQueryOptions,
+	isCommitmentType,
+} from "@/lib/commitment-api";
 import type { Sprint, Task } from "@/lib/interaction-api";
 import {
 	findEpicType,
@@ -27,8 +32,9 @@ import {
 	type TaskStatus,
 	type TaskType,
 } from "@/lib/project-api";
-import { resolveMemberAvatarUrl } from "@/lib/provider-logos";
+import { memberAvatar } from "@/lib/provider-logos";
 import { getTaskTypeIconComponent } from "../../task-types/task-type-icons";
+import { AssigneePicker } from "../assignee-picker";
 import type { PriorityMeta } from "../priority";
 import {
 	getImportanceBucket,
@@ -44,10 +50,11 @@ import {
 	isAutoAssignPending,
 } from "../view-utils";
 import { AddFieldDialog } from "./add-field-dialog";
+import { CommitmentField } from "./commitment-field";
+import { CommitmentProjectField } from "./commitment-project-field";
 import { FieldRow } from "./primitives";
 import type { SelectOption, UserOption } from "./property-field";
 import { PropertyField } from "./property-field";
-import { MultiUserEditor } from "./property-field/multi-user-editor";
 import { NumberEditor } from "./property-field/number-editor";
 import { StoryPointsEditor } from "./property-field/story-points-editor";
 import type { CustomFieldDef } from "./types";
@@ -64,6 +71,8 @@ type UpdatePayload = Partial<{
 	tags: string[];
 	sprint_id: string | null;
 	parent_task_id: string | null;
+	commitment_task_id: string | null;
+	home_project_id: string | null;
 	custom_fields: Record<string, unknown>;
 	assignment_mode: "manual" | "auto";
 }>;
@@ -73,11 +82,9 @@ interface PropertiesPanelProps {
 	status: TaskStatus | undefined;
 	taskType: TaskType | undefined;
 	priority: PriorityMeta;
-	assignees: ProjectMember[];
 	reporter: ProjectMember | undefined;
 	statuses?: TaskStatus[];
 	taskTypes?: TaskType[];
-	members?: ProjectMember[];
 	sprints?: Sprint[];
 	projectId?: string;
 	initialCustomFields?: CustomFieldDef[];
@@ -99,20 +106,19 @@ function toUserOption(m: ProjectMember): UserOption {
 	return {
 		value: m.id,
 		label: m.full_name || m.username,
-		initials: (m.full_name || m.username).slice(0, 1).toUpperCase(),
-		avatarUrl: resolveMemberAvatarUrl(m),
+		avatar: memberAvatar(m),
 	};
 }
+
+const SPRINT_GROUP_ORDER = { active: 0, planned: 1, completed: 2 } as const;
 
 export function PropertiesPanel({
 	task,
 	status,
 	taskType,
-	assignees,
 	reporter,
 	statuses = [],
 	taskTypes = [],
-	members = [],
 	sprints = [],
 	projectId,
 	initialCustomFields = [],
@@ -141,6 +147,14 @@ export function PropertiesPanel({
 		pagination: epicSearchPagination,
 	} = useEpicSearch(task.project_id, epicTypeId, epicMenuOpen);
 
+	// A commitment in the Commitments project says which project it is for.
+	// Only commitments ask for the Commitments project id.
+	const isCommitment = isCommitmentType(taskType);
+	const { data: commitmentsProjectId } = useQuery({
+		...commitmentsProjectIdQueryOptions(),
+		enabled: isCommitment,
+	});
+
 	useEffect(() => {
 		setLocalCustomFields(initialCustomFields);
 	}, [initialCustomFields]);
@@ -151,27 +165,36 @@ export function PropertiesPanel({
 		colorDot: s.color ?? undefined,
 	}));
 
+	const selectableSprints = sprints.filter(
+		(s) => s.status !== "completed" || s.id === task.sprint_id,
+	);
 	const sprintOptions: SelectOption[] = [
 		{
 			value: "__backlog__",
 			label: t("taskDetail.properties.productBacklog"),
 			icon: <BookOpen className="size-3 shrink-0 opacity-60" />,
 		},
-		...sprints.map((s) => ({
-			value: s.id,
-			label: s.name,
-			icon: (
-				<KanbanSquare className="size-3 shrink-0 text-muted-foreground/70" />
-			),
-			hint:
-				s.status === "planned"
-					? t("taskDetail.properties.sprintNotStarted")
-					: undefined,
-		})),
+		// Completed sprints can't be assigned to, but keep the task's current
+		// sprint so the select still shows its value. Grouped by status (stable
+		// sort keeps the API order within each group).
+		...[...selectableSprints]
+			.sort(
+				(a, b) => SPRINT_GROUP_ORDER[a.status] - SPRINT_GROUP_ORDER[b.status],
+			)
+			.map((s) => ({
+				value: s.id,
+				label: s.name,
+				group: t(`taskDetail.properties.sprintGroup.${s.status}`),
+				icon: (
+					<KanbanSquare className="size-3 shrink-0 text-muted-foreground/70" />
+				),
+				hint:
+					s.status === "planned"
+						? t("taskDetail.properties.sprintNotStarted")
+						: undefined,
+			})),
 	];
 
-	const memberUserOptions: UserOption[] = members.map(toUserOption);
-	const assigneeUserOptions: UserOption[] = assignees.map(toUserOption);
 	const reporterUserOption = reporter ? toUserOption(reporter) : null;
 
 	return (
@@ -210,31 +233,15 @@ export function PropertiesPanel({
 				)}
 
 				<FieldRow label={t("taskDetail.properties.assignees")}>
-					<MultiUserEditor
-						userValues={isAutoAssign ? [] : assigneeUserOptions}
-						users={memberUserOptions}
-						onChange={(v) =>
-							onUpdate?.(
-								isAutoAssign
-									? { assignment_mode: "manual", assignee_ids: v }
-									: { assignee_ids: v },
-							)
-						}
-						canEdit={canEdit && members.length > 0}
-						autoOption={
-							jevEnabled
-								? {
-										isSelected: isAutoAssign,
-										label: t("taskDetail.properties.autoAssign"),
-										onToggle: () =>
-											onUpdate?.(
-												isAutoAssign
-													? { assignment_mode: "manual" }
-													: { assignment_mode: "auto", assignee_ids: [] },
-											),
-									}
-								: undefined
-						}
+					<AssigneePicker
+						projectId={task.project_id}
+						assigneeIds={task.assignee_ids ?? []}
+						isAutoAssign={isAutoAssign}
+						autoEnabled={jevEnabled}
+						canEdit={canEdit}
+						size="md"
+						showNames
+						onChange={(patch) => onUpdate?.(patch)}
 					/>
 				</FieldRow>
 
@@ -361,9 +368,29 @@ export function PropertiesPanel({
 								v === "__backlog__" ? null : typeof v === "string" ? v : null,
 						})
 					}
-					canEdit={canEdit && sprints.length > 0}
-					hidden={!task.sprint_id && !(canEdit && sprints.length > 0)}
+					canEdit={canEdit && selectableSprints.length > 0}
+					hidden={!task.sprint_id && !(canEdit && selectableSprints.length > 0)}
 				/>
+
+				{/* Commitment – any ticket except a commitment itself; children inherit.
+				 * A commitment gets the Project field instead: which project it is for. */}
+				{isCommitment ? (
+					commitmentsProjectId === task.project_id && (
+						<CommitmentProjectField
+							task={task}
+							commitmentsProjectId={task.project_id}
+							canEdit={canEdit}
+							onChange={(id) => onUpdate?.({ home_project_id: id })}
+						/>
+					)
+				) : (
+					<CommitmentField
+						task={task}
+						canEdit={canEdit}
+						inherited={!!task.parent_task_id}
+						onChange={(id) => onUpdate?.({ commitment_task_id: id })}
+					/>
+				)}
 
 				{/* Epic field – normal tasks only */}
 				{taskRole === "normal" &&
@@ -552,10 +579,8 @@ export function PropertiesPanel({
 						customRawValue={task.custom_fields?.[cf.field_key]}
 						onCustomChange={(v) => {
 							onUpdate?.({
-								custom_fields: {
-									...task.custom_fields,
-									[cf.field_key]: v,
-								},
+								// Only the edited key: the API merges custom_fields by key.
+								custom_fields: { [cf.field_key]: v },
 							});
 						}}
 						customOptions={cf.options}

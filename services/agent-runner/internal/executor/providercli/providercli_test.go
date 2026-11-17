@@ -2,6 +2,8 @@ package providercli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -274,5 +276,36 @@ func TestRegistryHasAllFourProviders(t *testing.T) {
 		if _, ok := Get(name); !ok {
 			t.Errorf("provider %q not registered", name)
 		}
+	}
+}
+
+// TestDockerfileCLIHomeSymlinks keeps services/agent-server/Dockerfile's
+// baked-in ~/<HomeDirName> -> HomeRoot/<Name> symlinks in step with the
+// registered adapters. If they drift, a login made before the first
+// conversation lands in a real directory instead of on the persistent
+// volume — the "Authentication required" bug these symlinks exist to prevent.
+func TestDockerfileCLIHomeSymlinks(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "agent-server", "Dockerfile"))
+	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("agent-server Dockerfile not reachable from this checkout: %v", err)
+		}
+		t.Skipf("agent-server Dockerfile not reachable from this checkout: %v", err)
+	}
+	df := strings.Join(strings.Fields(strings.ReplaceAll(string(raw), "\\\n", " ")), " ")
+	for _, a := range All() {
+		want := " " + a.Name() + ":" + a.HomeDirName() + " "
+		if !strings.Contains(strings.ReplaceAll(df, ";", " ;")+" ", want) {
+			t.Errorf("Dockerfile is missing %q", want)
+		}
+	}
+	if want := "/home/paca/workspaces/.cli-home"; HomeRoot != want || !strings.Contains(df, `"`+want+`/$provider"`) {
+		t.Errorf("Dockerfile symlink loop does not target HomeRoot %q", HomeRoot)
+	}
+	if want := "dir=\"" + sandboxHomeDir + "/"; !strings.Contains(df, want) {
+		t.Errorf("Dockerfile symlink loop is missing %s", want)
+	}
+	if want := "CLAUDE_CONFIG_DIR=" + HomeRoot + "/claude-code"; !strings.Contains(df, want) {
+		t.Errorf("Dockerfile is missing ENV %s", want)
 	}
 }

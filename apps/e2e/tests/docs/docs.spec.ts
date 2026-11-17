@@ -111,7 +111,7 @@ async function listSnapshots(
   docId: string,
 ): Promise<DocSnapshot[]> {
   const resp = await request.get(
-    `${BASE_URL}/api/v1/projects/${projectId}/docs/${docId}/snapshots`,
+    `${BASE_URL}/api/v1/projects/${projectId}/docs/${docId}/snapshots?page_size=100`,
   );
   const body = await resp.json();
   return (body?.data?.items ?? []) as DocSnapshot[];

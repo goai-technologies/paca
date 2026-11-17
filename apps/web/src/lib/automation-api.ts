@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
 
@@ -408,40 +408,29 @@ export interface ActionConfig {
 
 // ── API calls ─────────────────────────────────────────────────────────────────
 
+export const AUTOMATIONS_PAGE_SIZE = 50;
+
+/** One page of a project's automations, newest first. `status` and `search`
+ *  (a case-insensitive name match) narrow the list; follow next_cursor for
+ *  further pages. */
 export async function listAutomations(
 	projectId: string,
-	status?: AutomationStatus,
-	/** Case-insensitive name match, server-side (mirrors task/doc search) —
-	 *  used by hooks/use-context-item-search.ts's Automation tab. */
-	search?: string,
-): Promise<Automation[]> {
-	const params: Record<string, string> = {};
-	if (status) params.status = status;
-	if (search?.trim()) params.search = search.trim();
-	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<{ items: Automation[] }>
-	>(`/projects/${projectId}/automations`, { params });
-	return data.data.items;
-}
-
-/** Paginated sibling of listAutomations for the context-injection search
- *  picker (hooks/use-context-item-search.ts): same endpoint, but requests a
- *  bounded, cursor-paginated page instead of every matching automation at
- *  once. Returns the page envelope (not just the array) so the caller can
- *  keep paging via next_cursor. */
-export async function listAutomationsPage(
-	projectId: string,
-	opts: { search?: string; cursor?: string; pageSize?: number } = {},
+	opts: {
+		status?: AutomationStatus;
+		search?: string;
+		cursor?: string;
+		pageSize?: number;
+	} = {},
 ): Promise<AutomationListResult> {
-	const params: Record<string, string | number> = {};
+	const params: Record<string, string | number> = {
+		page_size: opts.pageSize ?? AUTOMATIONS_PAGE_SIZE,
+	};
+	if (opts.status) params.status = opts.status;
 	if (opts.search?.trim()) params.search = opts.search.trim();
 	if (opts.cursor) params.cursor = opts.cursor;
-	if (opts.pageSize) params.page_size = opts.pageSize;
 	const { data } = await apiClient.instance.get<
 		SuccessEnvelope<AutomationListResult>
-	>(`/projects/${projectId}/automations`, {
-		params: Object.keys(params).length > 0 ? params : undefined,
-	});
+	>(`/projects/${projectId}/automations`, { params });
 	return data.data;
 }
 
@@ -604,17 +593,24 @@ export async function removeAutomationEdge(
 	);
 }
 
+export const AUTOMATION_RUNS_PAGE_SIZE = 50;
+
+/** One page of an automation's run history, newest first; follow next_cursor
+ *  for older runs. */
 export async function listAutomationRuns(
 	projectId: string,
 	automationId: string,
-	limit = 50,
-): Promise<AutomationRun[]> {
+	cursor?: string,
+): Promise<{ items: AutomationRun[]; next_cursor?: string | null }> {
 	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<{ items: AutomationRun[] }>
+		SuccessEnvelope<{ items: AutomationRun[]; next_cursor?: string | null }>
 	>(`/projects/${projectId}/automations/${automationId}/runs`, {
-		params: { limit },
+		params: {
+			page_size: AUTOMATION_RUNS_PAGE_SIZE,
+			...(cursor ? { cursor } : {}),
+		},
 	});
-	return data.data.items;
+	return data.data;
 }
 
 export async function listAutomationRunSteps(
@@ -652,9 +648,12 @@ export const automationsQueryOptions = (
 	projectId: string,
 	status?: AutomationStatus,
 ) =>
-	queryOptions({
+	infiniteQueryOptions({
 		queryKey: ["projects", projectId, "automations", { status }],
-		queryFn: () => listAutomations(projectId, status),
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listAutomations(projectId, { status, cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 	});
 
 export const automationQueryOptions = (
@@ -670,9 +669,12 @@ export const automationRunsQueryOptions = (
 	projectId: string,
 	automationId: string,
 ) =>
-	queryOptions({
+	infiniteQueryOptions({
 		queryKey: ["projects", projectId, "automations", automationId, "runs"],
-		queryFn: () => listAutomationRuns(projectId, automationId),
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listAutomationRuns(projectId, automationId, pageParam),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 	});
 
 export const automationRunStepsQueryOptions = (

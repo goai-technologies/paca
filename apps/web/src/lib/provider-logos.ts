@@ -11,8 +11,8 @@ import type { ProjectMember } from "./project-api";
 //
 // Deliberately covers only the mainstream providers users are realistically
 // likely to pick — not the full ~115-entry raw LLM catalog (most of which
-// are non-chat or extremely niche). Anything unmapped here falls back to
-// initials exactly as before.
+// are non-chat or extremely niche). Anything unmapped here falls back to the
+// Paca avatar (see resolveAvatarSrc below).
 const LLM_PROVIDER_LOGOS: Record<string, string> = {
 	anthropic: "/provider-logos/anthropic.svg",
 	openai: "/provider-logos/openai.svg",
@@ -33,7 +33,7 @@ const LLM_PROVIDER_LOGOS: Record<string, string> = {
 };
 
 // "custom" has no fixed provider identity, so it's intentionally unmapped —
-// falls back to initials like any other unmapped provider. "goose" is
+// falls back to the Paca avatar like any other unmapped provider. "goose" is
 // likewise unmapped for now, not because it lacks an identity but because no
 // Goose asset has been sourced from @lobehub/icons-static-svg yet (see the
 // module doc comment) — add an entry once one has, rather than guessing at
@@ -58,7 +58,7 @@ function lookupProviderLogo(
 		// acp_provider name the same underlying CLI, just via two different
 		// execution paths (see agentdom.Agent.CLIProvider's doc comment).
 		// cursor-agent has no entry (no asset sourced yet — same reasoning
-		// as "goose" above) and falls back to initials.
+		// as "goose" above) and falls back to the Paca avatar.
 		return cliProvider ? ACP_PROVIDER_LOGOS[cliProvider] : undefined;
 	}
 	return llmProvider
@@ -66,67 +66,85 @@ function lookupProviderLogo(
 		: undefined;
 }
 
+// ── Avatar resolution — the single priority chain ──────────────────────────────
+//
+// Every avatar in the app is rendered by <EntityAvatar>, which asks this module
+// what to show. The chain lives only here:
+//
+//   human            uploaded avatar  -> initials
+//   agent            uploaded avatar  -> provider logo -> Paca avatar
+//   service account  uploaded avatar  -> Paca avatar
+//
+// The adapters below (agentAvatar / memberAvatar / notificationActorAvatar /
+// ...) map each API shape onto <EntityAvatar>'s props, so a call site is
+// `<EntityAvatar {...memberAvatar(m)} />` and never re-derives the chain.
+
+/** What kind of account an avatar belongs to; decides the fallback chain. */
+export type AvatarSubject = "human" | "agent" | "service_account";
+
+/** The provider fields that pick an agent's default (provider-logo) avatar. */
+export interface AgentProviderInfo {
+	agentType?: string | null;
+	llmProvider?: string | null;
+	acpProvider?: string | null;
+	cliProvider?: string | null;
+}
+
+/** The Paca mark, the last-resort avatar for agents and service accounts. */
+export const PACA_AVATAR_LIGHT = "/paca-logo.svg";
+export const PACA_AVATAR_DARK = "/paca-logo-dark.svg";
+
 /**
- * Returns the default avatar for an agent's configured provider, or
- * undefined if the provider isn't mapped (caller should fall back to
- * initials in that case, same as when the agent has no avatar at all).
+ * Resolves the image to show for an avatar, or undefined when the chain ends
+ * in initials (humans only) or in the Paca mark (see EntityAvatar, which
+ * draws the mark itself so it can follow the light/dark theme).
  */
-function getDefaultAgentAvatar(
+export function resolveAvatarSrc(
+	type: AvatarSubject,
+	avatarUrl: string | null | undefined,
+	agent?: AgentProviderInfo,
+): string | undefined {
+	if (avatarUrl) return avatarUrl;
+	if (type !== "agent" || !agent) return undefined;
+	return lookupProviderLogo(
+		agent.agentType ?? undefined,
+		agent.llmProvider ?? undefined,
+		agent.acpProvider,
+		agent.cliProvider,
+	);
+}
+
+/** Props <EntityAvatar> takes from an API record (see the adapters below). */
+export interface AvatarIdentity {
+	name: string;
+	type: AvatarSubject;
+	/** The account's own uploaded avatar; never a provider-logo default. */
+	avatarUrl?: string | null;
+	agent?: AgentProviderInfo;
+}
+
+function agentProviderInfo(
 	agent: Pick<
 		Agent,
 		"agent_type" | "llm_provider" | "acp_provider" | "cli_provider"
 	>,
-): string | undefined {
-	return lookupProviderLogo(
-		agent.agent_type,
-		agent.llm_provider,
-		agent.acp_provider,
-		agent.cli_provider,
-	);
+): AgentProviderInfo {
+	return {
+		agentType: agent.agent_type,
+		llmProvider: agent.llm_provider,
+		acpProvider: agent.acp_provider,
+		cliProvider: agent.cli_provider,
+	};
 }
 
 /**
- * getDefaultAgentAvatar's sibling for the lighter-weight ProjectMember
- * projection (team page, assignee/reporter pickers, task chips) — same
- * lookup, different field names since those come from a JOIN rather than
- * the full Agent record. Returns undefined for human members.
+ * An Agent record. `size` picks which uploaded variant to prefer: "full" for
+ * large headers, "thumb" (default) for every small chip/list use.
  */
-function getDefaultMemberAvatar(
-	member: Pick<
-		ProjectMember,
-		"member_type" | "agent_type" | "agent_llm_provider" | "agent_acp_provider"
-	>,
-): string | undefined {
-	if (member.member_type !== "agent") return undefined;
-	return lookupProviderLogo(
-		member.agent_type,
-		member.agent_llm_provider,
-		member.agent_acp_provider,
-	);
-}
-
-// ── Resolved avatar URL — the single "avatar -> default avatar" step ───────────
-//
-// Every display site ultimately wants one thing: the URL to render, with a
-// real upload always winning over the provider-logo default. Previously each
-// call site re-derived that itself via `x.avatar_thumb_url ?? getDefaultXAvatar(x)`
-// — easy to typo the field, forget the `??`, or omit the default entirely (all
-// three happened across different components over time). These two functions
-// are the only place that priority is expressed; every caller goes through
-// one of them instead of inlining the merge. The remaining, final tier —
-// falling back to initials/an icon when this returns undefined — stays with
-// the rendering components (EntityAvatarContent / AvatarUpload), since that
-// part is display markup, not a resolution rule.
-
-/**
- * Resolves an agent's own record to the avatar URL to render: its real
- * upload if present, else its provider-logo default, else undefined. `size`
- * picks which uploaded variant to prefer — "full" for large headers, "thumb"
- * (default) for every small chip/list use.
- */
-export function resolveAgentAvatarUrl(
+export function agentAvatar(
 	agent: Pick<
 		Agent,
+		| "name"
 		| "avatar_url"
 		| "avatar_thumb_url"
 		| "agent_type"
@@ -135,66 +153,111 @@ export function resolveAgentAvatarUrl(
 		| "cli_provider"
 	>,
 	size: "full" | "thumb" = "thumb",
-): string | undefined {
-	const uploaded = size === "full" ? agent.avatar_url : agent.avatar_thumb_url;
-	return uploaded ?? getDefaultAgentAvatar(agent);
+): AvatarIdentity {
+	return {
+		name: agent.name,
+		type: "agent",
+		avatarUrl: size === "full" ? agent.avatar_url : agent.avatar_thumb_url,
+		agent: agentProviderInfo(agent),
+	};
 }
 
-/**
- * resolveAgentAvatarUrl's sibling for the lighter-weight ProjectMember
- * projection (team page, assignee/reporter pickers, task chips). Always
- * thumb-sized — ProjectMember-based surfaces never need the full variant.
- */
-export function resolveMemberAvatarUrl(
+/** A service account record. */
+export function serviceAccountAvatar(account: {
+	name: string;
+	avatar_url?: string | null;
+	avatar_thumb_url?: string | null;
+}): AvatarIdentity {
+	return {
+		name: account.name,
+		type: "service_account",
+		avatarUrl: account.avatar_thumb_url,
+	};
+}
+
+/** A user record (profile, admin user list, user menu). */
+export function userAvatar(user: {
+	full_name?: string;
+	username?: string;
+	avatar_url?: string | null;
+	avatar_thumb_url?: string | null;
+}): AvatarIdentity {
+	return {
+		name: user.full_name || user.username || "",
+		type: "human",
+		avatarUrl: user.avatar_thumb_url,
+	};
+}
+
+/** A project (sidebar switcher, project cards, settings): initials fallback. */
+export function projectAvatar(project: {
+	name: string;
+	avatar_thumb_url?: string | null;
+}): AvatarIdentity {
+	return {
+		name: project.name,
+		type: "human",
+		avatarUrl: project.avatar_thumb_url,
+	};
+}
+
+/** Maps an API `member_type` string onto an AvatarSubject. */
+export function avatarSubjectOf(memberType: string | undefined): AvatarSubject {
+	if (memberType === "agent") return "agent";
+	if (memberType === "service_account") return "service_account";
+	return "human";
+}
+
+/** The lighter-weight ProjectMember projection (team page, pickers, chips). */
+export function memberAvatar(
 	member: Pick<
 		ProjectMember,
+		| "full_name"
+		| "username"
 		| "avatar_thumb_url"
 		| "member_type"
 		| "agent_type"
 		| "agent_llm_provider"
 		| "agent_acp_provider"
+		| "agent_cli_provider"
 	>,
-): string | undefined {
-	return member.avatar_thumb_url ?? getDefaultMemberAvatar(member);
+): AvatarIdentity {
+	return {
+		name: member.full_name || member.username,
+		type: avatarSubjectOf(member.member_type),
+		avatarUrl: member.avatar_thumb_url,
+		agent: {
+			agentType: member.agent_type,
+			llmProvider: member.agent_llm_provider,
+			acpProvider: member.agent_acp_provider,
+			cliProvider: member.agent_cli_provider,
+		},
+	};
 }
 
-/**
- * getDefaultMemberAvatar's sibling for the notification list's actor
- * projection (notification-bell.tsx) — same lookup, different field names
- * (an `actor_` prefix) since these come from the notification JOIN rather
- * than the project_members JOIN. Returns undefined for human actors.
- */
-function getDefaultNotificationActorAvatar(
+/** The notification list's actor projection (notification-bell.tsx). */
+export function notificationActorAvatar(
 	n: Pick<
 		Notification,
-		| "actor_member_type"
-		| "actor_agent_type"
-		| "actor_agent_llm_provider"
-		| "actor_agent_acp_provider"
-	>,
-): string | undefined {
-	if (n.actor_member_type !== "agent") return undefined;
-	return lookupProviderLogo(
-		n.actor_agent_type,
-		n.actor_agent_llm_provider,
-		n.actor_agent_acp_provider,
-	);
-}
-
-/**
- * resolveMemberAvatarUrl's sibling for the notification list's actor
- * projection (notification-bell.tsx). Always thumb-sized, same as
- * resolveMemberAvatarUrl.
- */
-export function resolveNotificationActorAvatarUrl(
-	n: Pick<
-		Notification,
+		| "actor_full_name"
+		| "actor_username"
 		| "actor_avatar_thumb_url"
 		| "actor_member_type"
 		| "actor_agent_type"
 		| "actor_agent_llm_provider"
 		| "actor_agent_acp_provider"
+		| "actor_agent_cli_provider"
 	>,
-): string | undefined {
-	return n.actor_avatar_thumb_url ?? getDefaultNotificationActorAvatar(n);
+): AvatarIdentity {
+	return {
+		name: n.actor_full_name || n.actor_username,
+		type: avatarSubjectOf(n.actor_member_type),
+		avatarUrl: n.actor_avatar_thumb_url,
+		agent: {
+			agentType: n.actor_agent_type,
+			llmProvider: n.actor_agent_llm_provider,
+			acpProvider: n.actor_agent_acp_provider,
+			cliProvider: n.actor_agent_cli_provider,
+		},
+	};
 }

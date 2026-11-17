@@ -25,8 +25,7 @@
 			"description": "上のボタンから新しいユーザーを作成することはできます。"
 		},
 		"table": {
-			"columnUsername": "ユーザー名",
-			"columnFullName": "氏名",
+			"columnUser": "ユーザー",
 			"columnRole": "ロール",
 			"columnCreated": "作成日",
 			"pwdResetBadge": "パスワード再設定",
@@ -35,7 +34,9 @@
 			"resetPasswordAction": "パスワードをリセット",
 			"editAction": "ユーザーを編集",
 			"changeRoleAction": "ロールを変更",
-			"deleteAction": "ユーザーを削除"
+			"deleteAction": "ユーザーを削除",
+			"pwdResetHint": "このユーザーは次回サインイン時に新しいパスワードを設定する必要があります",
+			"columnActions": "操作"
 		},
 		"formDialog": {
 			"createdTitle": "ユーザーを作成しました",
@@ -127,6 +128,20 @@
 				"internalError": "問題が発生しました。もう一度お試しください。",
 				"generic": "問題が発生しました。"
 			}
+		},
+		"filters": {
+			"searchPlaceholder": "名前、ユーザー名、メールで検索…",
+			"searchLabel": "ユーザーを検索",
+			"roleLabel": "ロールで絞り込み",
+			"allRoles": "すべてのロール",
+			"clearSearch": "検索をクリア",
+			"resultsCount": "結果: {{count}}",
+			"clearAll": "フィルターをクリア"
+		},
+		"noMatch": {
+			"title": "一致するユーザーがいません",
+			"description": "別の検索語やロールフィルターをお試しください。",
+			"clear": "フィルターをクリア"
 		}
 	},
 	"globalRoles": {
@@ -156,14 +171,16 @@
 		},
 		"table": {
 			"columnName": "名前",
-			"columnPermissions": "権限",
+			"columnDescription": "説明",
 			"columnDefault": "既定",
 			"noPermissionsAssigned": "権限が割り当てられていません",
 			"default": "既定",
 			"setDefaultAction": "既定のロールに設定",
 			"editAction": "ロールを編集",
 			"deleteAction": "ロールを削除",
-			"deleteDefaultDisabled": "既定のロールは削除できません。先に別のロールを既定に設定してください。"
+			"deleteDefaultDisabled": "既定のロールは削除できません。先に別のロールを既定に設定してください。",
+			"builtIn": "組み込みロール",
+			"noDescription": "説明なし"
 		},
 		"formDialog": {
 			"editTitle": "ロールを編集",
@@ -178,16 +195,7 @@
 			"cancel": "キャンセル",
 			"saving": "保存中…",
 			"saveChanges": "変更を保存",
-			"createRole": "ロールを作成",
-			"errors": {
-				"roleNameRequired": "ロール名を入力してください。",
-				"nameTaken": "この名前のロールは既に存在します。",
-				"nameInvalid": "ロール名は大文字、数字、アンダースコアのみ使用できます。",
-				"roleNotFound": "このロールは既に存在しません。既に削除された可能性があります。",
-				"forbidden": "この操作を実行する権限がありません。",
-				"internalError": "サーバーで問題が発生しました。もう一度お試しください。",
-				"generic": "問題が発生しました。"
-			}
+			"createRole": "ロールを作成"
 		},
 		"deleteDialog": {
 			"title": "ロールを削除",
@@ -199,7 +207,6 @@
 			"confirmButton": "ロールを削除",
 			"errors": {
 				"roleNotFound": "このロールは既に存在しません。",
-				"hasUsersWarning": "このロールは1人以上のユーザーに割り当てられているため削除できません。",
 				"isDefault": "既定のロールは削除できません。先に別のロールを既定に設定してください。",
 				"forbidden": "このロールを削除する権限がありません。",
 				"internalError": "問題が発生しました。もう一度お試しください。",
@@ -270,14 +277,40 @@
 			"settingsSsoWrite": {
 				"label": "SSO プロバイダーの管理",
 				"description": "ユーザーがサインインに使う ID プロバイダーを設定します。他のユーザーとしてサインインできるため、完全な管理者権限と同等に扱ってください。"
+			},
+			"agentsRead": {
+				"label": "エージェントの閲覧",
+				"description": "ワークスペースレベルの AI エージェントを表示"
+			},
+			"agentsWrite": {
+				"label": "エージェントの管理",
+				"description": "ワークスペースレベルの AI エージェントを作成・編集・削除"
+			},
+			"pluginsRead": {
+				"label": "プラグインの閲覧",
+				"description": "インストール済みのプラグインを表示"
+			},
+			"pluginsWrite": {
+				"label": "プラグインの管理",
+				"description": "プラグインのインストール・更新・有効化・削除"
+			},
+			"serviceAccountsRead": {
+				"label": "サービスアカウントの閲覧",
+				"description": "サービスアカウントとその API キーを表示"
+			},
+			"serviceAccountsWrite": {
+				"label": "サービスアカウントの管理",
+				"description": "サービスアカウントの作成・編集・削除と、API キーの発行・失効"
 			}
 		},
 		"permissionGroups": {
 			"globalRoles": "グローバルロール",
 			"users": "ユーザー",
+			"agents": "AI エージェント",
 			"projects": "プロジェクト",
 			"plugins": "プラグイン",
-			"settings": "設定"
+			"settings": "設定",
+			"serviceAccounts": "サービスアカウント"
 		},
 		"defaultDialog": {
 			"title": "既定のロールを設定",
@@ -325,6 +358,7 @@
 		"empty": "まだリリースノートはありません。"
 	},
 	"agents": {
+		"searchPlaceholder": "名前またはハンドルでエージェントを検索…",
 		"header": {
 			"title": "グローバルエージェント",
 			"description": "ホームページや管理ページでチャットし、任意のプロジェクトに招待できるAIエージェントを管理します。",
@@ -439,6 +473,159 @@
 				"saveFailed": "プロバイダーを保存できませんでした。もう一度お試しください。",
 				"loadFailed": "SSO プロバイダーを読み込めませんでした。",
 				"deleteFailed": "プロバイダーを削除できませんでした。もう一度お試しください。"
+			}
+		}
+	},
+	"serviceAccounts": {
+		"searchPlaceholder": "名前または説明で検索…",
+		"header": {
+			"title": "サービスアカウント",
+			"description": "連携・CI・自動化のための、独自の API キーとロールを持つ人以外のアカウントです。",
+			"newAccount": "新しいサービスアカウント"
+		},
+		"empty": {
+			"title": "サービスアカウントはまだありません",
+			"description": "連携に専用の ID と API キーを持たせるには、作成してください。",
+			"create": "サービスアカウントを作成"
+		},
+		"errors": {
+			"loadFailed": "サービスアカウントを読み込めませんでした",
+			"tryAgain": "ページを更新して、もう一度お試しください。"
+		},
+		"noPermission": {
+			"title": "サービスアカウントを表示する権限がありません",
+			"description": "ワークスペース管理者にアクセスを依頼してください。"
+		},
+		"table": {
+			"columnAccount": "アカウント",
+			"columnActions": "操作",
+			"noDescription": "説明なし",
+			"changeRoleAction": "ロールを変更",
+			"editAction": "サービスアカウントを編集",
+			"deleteAction": "サービスアカウントを削除",
+			"columnRole": "ロール"
+		},
+		"formDialog": {
+			"createTitle": "新しいサービスアカウント",
+			"editTitle": "サービスアカウントを編集",
+			"createDescription": "権限なしで作成されます。API キーを作成してから、ロールを付与してください。",
+			"editDescription": "名前・説明・アバターを変更します。API キーとロールは別に管理します。",
+			"nameLabel": "名前",
+			"namePlaceholder": "例: CI デプロイボット",
+			"descriptionLabel": "説明",
+			"descriptionPlaceholder": "このアカウントの用途は？",
+			"cancel": "キャンセル",
+			"create": "作成",
+			"creating": "作成中…",
+			"save": "保存",
+			"saving": "保存中…",
+			"avatar": {
+				"change": "アバターを変更",
+				"remove": "アバターを削除",
+				"uploading": "アップロード中…",
+				"errors": {
+					"invalidType": "PNG・JPEG・WebP・GIF の画像を使用してください。",
+					"tooLarge": "画像は 5 MB 以下にしてください。",
+					"uploadFailed": "アバターをアップロードできませんでした。もう一度お試しください。",
+					"removeFailed": "アバターを削除できませんでした。もう一度お試しください。"
+				}
+			},
+			"errors": {
+				"nameInvalid": "名前は 1〜100 文字で入力してください。",
+				"descriptionTooLong": "説明が長すぎます（最大 1000 文字）。",
+				"notFound": "このサービスアカウントは存在しません。",
+				"generic": "問題が発生しました。もう一度お試しください。"
+			}
+		},
+		"deleteDialog": {
+			"title": "サービスアカウントを削除",
+			"description": "「{{name}}」を削除しますか？ API キーは直ちに使えなくなり、ロールとプロジェクトのメンバーシップも削除されます。この操作は元に戻せません。",
+			"cancel": "キャンセル",
+			"confirm": "削除",
+			"deleting": "削除中…",
+			"error": "サービスアカウントを削除できませんでした。もう一度お試しください。"
+		},
+		"keys": {
+			"nameLabel": "キー名",
+			"namePlaceholder": "例: GitHub Actions",
+			"expiryLabel": "有効期限",
+			"expiryOptional": "（任意）",
+			"create": "キーを作成",
+			"creating": "作成中…",
+			"empty": "API キーはまだありません。",
+			"revokeAria": "キー {{name}} を失効",
+			"reveal": {
+				"title": "新しい API キーをコピーしてください",
+				"description": "完全なキーが表示されるのはこの一度だけです。安全な場所に保管してください。紛失した場合は新しく作成してください。",
+				"copyAria": "キーをコピー",
+				"copied": "クリップボードにコピーしました",
+				"done": "完了"
+			},
+			"errors": {
+				"nameRequired": "キーに名前を付けてください。",
+				"nameTooLong": "キー名が長すぎます（最大 100 文字）。",
+				"createFailed": "キーを作成できませんでした。API キーではなく、ご自身のアカウントでサインインして、もう一度お試しください。",
+				"revokeFailed": "キーを失効できませんでした。もう一度お試しください。",
+				"copyFailed": "クリップボードにコピーできませんでした。キーを選択して手動でコピーしてください。"
+			},
+			"revoke": {
+				"title": "API キーを失効",
+				"description": "「{{name}}」を失効しますか？ このキーを使っているものは直ちに動作しなくなります。この操作は元に戻せません。",
+				"cancel": "キャンセル",
+				"confirm": "キーを失効",
+				"revoking": "失効中…"
+			},
+			"count": "API キー: {{count}}",
+			"newKey": "新しいキー",
+			"createFirst": "最初のキーを作成",
+			"createDialog": {
+				"title": "API キーを作成",
+				"description": "このキーはこのアカウントとして認証します。作成直後に一度だけ表示されます。",
+				"cancel": "キャンセル"
+			},
+			"row": {
+				"created": "{{date}} に作成",
+				"expires": "{{date}} に期限切れ",
+				"noExpiry": "無期限",
+				"lastUsed": "最終使用 {{date}}",
+				"neverUsed": "未使用"
+			}
+		},
+		"roleDialog": {
+			"title": "ロールを変更",
+			"description": "{{name}} に付与するワークスペースのロールを選択してください。これらのロールが許可する操作のみ実行できます。",
+			"assign": "ロールを保存",
+			"assigning": "保存中…",
+			"fullAccessWarning": "このロールはすべての権限を付与します。このアカウントの API キーを持つ者は全権限を持つことになります。"
+		},
+		"detail": {
+			"notFound": {
+				"title": "サービスアカウントが見つかりません",
+				"description": "削除された可能性があります。"
+			},
+			"roles": {
+				"description": "このアカウントがワークスペースで実行できる操作です。新しいアカウントにはロールがありません。",
+				"none": "ロールなし: このアカウントはまだ何も実行できません。",
+				"change": "ロールを変更",
+				"noneHint": "ロールを付与すると操作できるようになります。",
+				"readOnly": "このアカウントのロールを表示できますが、変更はできません。"
+			},
+			"badge": "サービスアカウント",
+			"tabs": {
+				"overview": "概要",
+				"apiKeys": "API キー",
+				"roles": "ロール"
+			},
+			"overview": {
+				"descriptionHint": "アカウント一覧とプロジェクトへの招待時に表示されます。",
+				"saveChanges": "変更を保存",
+				"saved": "保存しました",
+				"saveFailed": "変更を保存できませんでした。もう一度お試しください。",
+				"idLabel": "ID",
+				"createdLabel": "作成日",
+				"updatedLabel": "更新日",
+				"deleteTitle": "このサービスアカウントを削除",
+				"deleteHint": "API キーは使えなくなり、ロールとプロジェクトのメンバーシップが削除されます。"
 			}
 		}
 	}

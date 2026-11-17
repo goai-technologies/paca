@@ -92,7 +92,6 @@
 			"loadingMore": "Carregando mais…"
 		},
 		"projectCard": {
-			"public": "Público",
 			"noDescription": "Sem descrição"
 		},
 		"gettingStarted": {
@@ -152,11 +151,6 @@
 			"descriptionLabel": "Descrição",
 			"optionalHint": "(opcional)",
 			"descriptionPlaceholder": "Sobre o que é este projeto?",
-			"publicProject": {
-				"label": "Projeto público",
-				"publicHint": "Qualquer pessoa com o link pode visualizar este projeto. Usuários anônimos têm acesso somente leitura.",
-				"privateHint": "Apenas membros da equipe podem acessar este projeto."
-			},
 			"cancel": "Cancelar",
 			"submit": "Criar projeto",
 			"errors": {
@@ -166,6 +160,39 @@
 				"prefixInvalid": "O prefixo deve ter de 1 a 10 letras maiúsculas/dígitos (ex.: PACA).",
 				"generic": "Algo deu errado. Tente novamente."
 			}
+		},
+		"legacyPluginsBanner": {
+			"title_one": "Um plugin precisa de atualização",
+			"title_other": "Plugins precisam de atualização",
+			"description_one": "{{names}} ainda usa o modelo de permissões antigo requirePermissions. Ele continua funcionando, mas não pode ser reinstalado nem atualizado até que o autor publique uma versão que use requireActions.",
+			"description_other": "{{names}} ainda usam o modelo de permissões antigo requirePermissions. Eles continuam funcionando, mas não podem ser reinstalados nem atualizados até que os autores publiquem versões que usem requireActions.",
+			"manage": "Gerenciar plugins",
+			"dismiss": "Dispensar"
 		}
+	},
+	"roleChange": {
+		"adding": "Adicionando",
+		"removing": "Removendo",
+		"noChanges": "Nenhuma alteração ainda. Marque ou desmarque papéis acima."
+	},
+	"roleBadge": {
+		"fullAccess": "Acesso total",
+		"builtIn": "Integrado",
+		"default": "Padrão",
+		"current": "Atual",
+		"noDescription": "Sem descrição",
+		"noRoles": "Sem funções",
+		"showMore": "Mostrar mais funções (+{{count}})",
+		"allRoles": "Todas as funções ({{count}})"
+	},
+	"roleSelect": {
+		"searchLabel": "Buscar funções",
+		"searchPlaceholder": "Buscar funções…",
+		"clearSearch": "Limpar busca",
+		"noMatch": "Nenhuma função corresponde a “{{query}}”",
+		"selectedCount": "Selecionadas: {{count}}",
+		"minOne": "É necessária pelo menos uma função.",
+		"clear": "Limpar",
+		"placeholder": "Selecionar funções"
 	}
 }

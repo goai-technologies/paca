@@ -15,6 +15,7 @@ import {
 	IMPORTANCE_BUCKET_VALUES,
 	PRIORITY_LEVELS,
 } from "@/components/projects/interactions/priority";
+import { MemberSelect } from "@/components/shared/member-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,7 +79,6 @@ import {
 } from "@/lib/interaction-api";
 import type {
 	CustomFieldDefinition,
-	ProjectMember,
 	TaskStatus,
 	TaskType,
 } from "@/lib/project-api";
@@ -89,7 +89,6 @@ interface AutomationNodeConfigPanelProps {
 	projectId: string;
 	automationId: string;
 	statuses: TaskStatus[];
-	members: ProjectMember[];
 	customFields: CustomFieldDefinition[];
 	taskTypes: TaskType[];
 	canEdit: boolean;
@@ -276,7 +275,6 @@ export function AutomationNodeConfigPanel({
 	projectId,
 	automationId,
 	statuses,
-	members,
 	customFields,
 	taskTypes,
 	canEdit,
@@ -332,7 +330,6 @@ export function AutomationNodeConfigPanel({
 						schema={pluginConfigSchema}
 						config={node.config}
 						projectId={projectId}
-						members={members}
 						nodeKind="trigger"
 						canEdit={canEdit}
 						onSave={onSave}
@@ -370,7 +367,6 @@ export function AutomationNodeConfigPanel({
 						config={node.config as unknown as ConditionConfig}
 						projectId={projectId}
 						statuses={statuses}
-						members={members}
 						customFields={customFields}
 						taskTypes={taskTypes}
 						canEdit={canEdit}
@@ -390,7 +386,6 @@ export function AutomationNodeConfigPanel({
 						schema={pluginConfigSchema}
 						config={node.config}
 						projectId={projectId}
-						members={members}
 						nodeKind="condition"
 						canEdit={canEdit}
 						onSave={onSave}
@@ -433,7 +428,6 @@ export function AutomationNodeConfigPanel({
 					config={node.config as ActionConfig}
 					projectId={projectId}
 					statuses={statuses}
-					members={members}
 					customFields={customFields}
 					taskTypes={taskTypes}
 					canEdit={canEdit}
@@ -446,7 +440,6 @@ export function AutomationNodeConfigPanel({
 					schema={pluginConfigSchema}
 					config={node.config}
 					projectId={projectId}
-					members={members}
 					nodeKind="action"
 					canEdit={canEdit}
 					onSave={onSave}
@@ -492,7 +485,6 @@ function SchemaConfigForm({
 	schema,
 	config,
 	projectId,
-	members,
 	nodeKind,
 	canEdit,
 	onSave,
@@ -501,7 +493,6 @@ function SchemaConfigForm({
 	schema: PluginNodeConfigSchema;
 	config: Record<string, unknown>;
 	projectId: string;
-	members: ProjectMember[];
 	nodeKind: "trigger" | "condition" | "action";
 	canEdit: boolean;
 	onSave: (config: Record<string, unknown>) => void;
@@ -592,11 +583,11 @@ function SchemaConfigForm({
 	return (
 		<div className="space-y-3">
 			<SchemaFields
+				projectId={projectId}
 				properties={properties}
 				required={required}
 				values={values}
 				setField={setField}
-				members={members}
 				canEdit={canEdit}
 			/>
 			{showTarget && (
@@ -638,18 +629,18 @@ function SchemaConfigForm({
 // sync with configSchema's supported shapes (boolean/enum/textarea/date/
 // member/number/text) automatically.
 function SchemaFields({
+	projectId,
 	properties,
 	required,
 	values,
 	setField,
-	members,
 	canEdit,
 }: {
+	projectId: string;
 	properties: Record<string, PluginNodeConfigSchemaProperty>;
 	required: Set<string>;
 	values: Record<string, string | boolean>;
 	setField: (name: string, value: string | boolean) => void;
-	members: ProjectMember[];
 	canEdit: boolean;
 }) {
 	const fieldNames = Object.keys(properties);
@@ -675,31 +666,18 @@ function SchemaFields({
 				}
 
 				if (prop.format === "member") {
-					const selected = members.find((m) => m.id === value);
 					return (
 						<div key={name} className="space-y-1.5">
 							<Label>
 								{label}
 								{isRequired && <span className="text-destructive"> *</span>}
 							</Label>
-							<Select
-								value={String(value ?? "")}
-								onValueChange={(v) => v && setField(name, v)}
+							<MemberSelect
+								projectId={projectId}
+								value={typeof value === "string" ? value : ""}
+								onChange={(v) => setField(name, v)}
 								disabled={!canEdit}
-							>
-								<SelectTrigger className="w-full">
-									<SelectValue>
-										{selected?.full_name || selected?.username}
-									</SelectValue>
-								</SelectTrigger>
-								<SelectContent>
-									{members.map((m) => (
-										<SelectItem key={m.id} value={m.id}>
-											{m.full_name || m.username}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
+							/>
 						</div>
 					);
 				}
@@ -1655,7 +1633,6 @@ function ConditionConfigForm({
 	config,
 	projectId,
 	statuses,
-	members,
 	customFields,
 	taskTypes,
 	canEdit,
@@ -1665,7 +1642,6 @@ function ConditionConfigForm({
 	config: ConditionConfig;
 	projectId: string;
 	statuses: TaskStatus[];
-	members: ProjectMember[];
 	customFields: CustomFieldDefinition[];
 	taskTypes: TaskType[];
 	canEdit: boolean;
@@ -1870,31 +1846,14 @@ function ConditionConfigForm({
 									</SelectContent>
 								</Select>
 							) : field === "assignee_ids" || field === "reporter_id" ? (
-								<Select
+								<MemberSelect
+									projectId={projectId}
 									value={(leaf?.value as string) ?? ""}
-									onValueChange={(v) => updateLeaf(i, { value: v ?? "" })}
+									onChange={(v) => updateLeaf(i, { value: v })}
 									disabled={!canEdit}
-								>
-									<SelectTrigger className="h-7 w-full text-xs">
-										<SelectValue
-											placeholder={t("automation.nodeConfig.condition.value")}
-										>
-											{(() => {
-												const assignee = members.find(
-													(m) => m.id === leaf?.value,
-												);
-												return assignee?.full_name || assignee?.username;
-											})()}
-										</SelectValue>
-									</SelectTrigger>
-									<SelectContent>
-										{members.map((m) => (
-											<SelectItem key={m.id} value={m.id}>
-												{m.full_name || m.username}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
+									size="sm"
+									placeholder={t("automation.nodeConfig.condition.value")}
+								/>
 							) : field === "sprint_id" ? (
 								<Select
 									value={(leaf?.value as string) ?? ""}
@@ -2362,7 +2321,6 @@ function ActionConfigForm({
 	config,
 	projectId,
 	statuses,
-	members,
 	customFields,
 	taskTypes,
 	canEdit,
@@ -2373,7 +2331,6 @@ function ActionConfigForm({
 	config: ActionConfig;
 	projectId: string;
 	statuses: TaskStatus[];
-	members: ProjectMember[];
 	customFields: CustomFieldDefinition[];
 	taskTypes: TaskType[];
 	canEdit: boolean;
@@ -2448,34 +2405,17 @@ function ActionConfigForm({
 	}
 
 	if (type === "trigger_ai_agent") {
-		const assignableMembers = members.filter((m) => m.member_type === "agent");
 		return (
 			<div className="space-y-3">
 				<div className="space-y-1.5">
 					<Label>{t("automation.nodeConfig.action.agentLabel")}</Label>
-					<Select
+					<MemberSelect
+						projectId={projectId}
 						value={memberId}
-						onValueChange={(v) => setMemberId(v ?? "")}
+						onChange={setMemberId}
 						disabled={!canEdit}
-					>
-						<SelectTrigger className="w-full">
-							<SelectValue>
-								{(() => {
-									const selected = assignableMembers.find(
-										(m) => m.id === memberId,
-									);
-									return selected?.full_name || selected?.username;
-								})()}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							{assignableMembers.map((m) => (
-								<SelectItem key={m.id} value={m.id}>
-									{m.full_name || m.username}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+						memberType="agent"
+					/>
 				</div>
 				<div className="space-y-1.5">
 					<Label>{t("automation.nodeConfig.action.messageLabel")}</Label>
@@ -2917,31 +2857,13 @@ function ActionConfigForm({
 				);
 			case "assignee_ids":
 				return (
-					<Select
+					<MemberSelect
+						projectId={projectId}
 						value={fields.assignee_ids?.[0] ?? ""}
-						onValueChange={(v) =>
-							setFieldValue("assignee_ids", v ? [v] : undefined)
-						}
+						onChange={(v) => setFieldValue("assignee_ids", v ? [v] : undefined)}
 						disabled={!canEdit}
-					>
-						<SelectTrigger className="h-7 w-full text-xs">
-							<SelectValue>
-								{(() => {
-									const m = members.find(
-										(mem) => mem.id === fields.assignee_ids?.[0],
-									);
-									return m?.full_name || m?.username;
-								})()}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							{members.map((m) => (
-								<SelectItem key={m.id} value={m.id}>
-									{m.full_name || m.username}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+						size="sm"
+					/>
 				);
 			case "importance":
 				return (
@@ -3012,29 +2934,13 @@ function ActionConfigForm({
 				);
 			case "reporter_id":
 				return (
-					<Select
+					<MemberSelect
+						projectId={projectId}
 						value={fields.reporter_id ?? ""}
-						onValueChange={(v) => setFieldValue("reporter_id", v ?? undefined)}
+						onChange={(v) => setFieldValue("reporter_id", v || undefined)}
 						disabled={!canEdit}
-					>
-						<SelectTrigger className="h-7 w-full text-xs">
-							<SelectValue>
-								{(() => {
-									const m = members.find(
-										(mem) => mem.id === fields.reporter_id,
-									);
-									return m?.full_name || m?.username;
-								})()}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							{members.map((m) => (
-								<SelectItem key={m.id} value={m.id}>
-									{m.full_name || m.username}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+						size="sm"
+					/>
 				);
 			case "sprint_id":
 				return (

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
-import type { Environment, EnvironmentFolder } from "@/lib/environment-api";
+import type { Environment } from "@/lib/environment-api";
 import {
 	AgentPickerContext,
 	AgentPickerInline,
@@ -38,12 +38,6 @@ function renderWithQueryClient(ui: ReactNode) {
 // than through useEnvironmentPicker's own queries, since both components
 // only ever read that state via context.
 
-const folder: EnvironmentFolder = {
-	id: "folder-1",
-	path: "/repo",
-	created_at: "2024-01-01T00:00:00.000Z",
-};
-
 const environment: Environment = {
 	id: "env-1",
 	project_id: "project-1",
@@ -60,20 +54,17 @@ const environment: Environment = {
 	idle_timeout_minutes: 30,
 	last_active_at: "2024-01-01T00:00:00.000Z",
 	ports_pending_restart: false,
-	access_mode: "open",
-	access_granted: true,
 	created_at: "2024-01-01T00:00:00.000Z",
 	updated_at: "2024-01-01T00:00:00.000Z",
-	folders: [folder],
 };
 
 const baseState: EnvironmentPickerState = {
 	projectId: "project-1",
-	environments: [environment],
+	hasEnvironments: true,
+	environment,
 	environmentsLoading: false,
 	environmentId: "",
 	onEnvironmentChange: () => {},
-	folders: [folder],
 	folderId: "",
 	onFolderChange: () => {},
 };

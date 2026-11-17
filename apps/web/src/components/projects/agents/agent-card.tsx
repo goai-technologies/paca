@@ -1,17 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import {
-	Loader2,
-	Lock,
-	MoreHorizontal,
-	Settings,
-	Trash2,
-	Zap,
-} from "lucide-react";
+import { Loader2, MoreHorizontal, Settings, Trash2, Zap } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,9 +28,10 @@ import {
 	deleteAgent,
 	deleteGlobalAgent,
 	globalAcpBridgeStatusQueryOptions,
-	globalAgentsQueryOptions,
+	globalAgentsKey,
 } from "@/lib/agent-api";
-import { resolveAgentAvatarUrl } from "@/lib/provider-logos";
+import { invalidateAgentDirectory } from "@/lib/agent-directory";
+import { agentAvatar } from "@/lib/provider-logos";
 import { cn } from "@/lib/utils";
 
 // Shared between the project Agents page
@@ -69,10 +63,11 @@ export function AgentCard({
 				? deleteAgent(projectId, agent.id)
 				: deleteGlobalAgent(agent.id),
 		onSuccess: () => {
+			invalidateAgentDirectory(projectId ?? null);
 			if (projectId) {
 				qc.invalidateQueries({ queryKey: ["projects", projectId, "agents"] });
 			} else {
-				qc.invalidateQueries({ queryKey: globalAgentsQueryOptions.queryKey });
+				qc.invalidateQueries({ queryKey: globalAgentsKey });
 				qc.invalidateQueries({ queryKey: ["global-agents", "chattable"] });
 			}
 			setConfirmDelete(false);
@@ -94,14 +89,6 @@ export function AgentCard({
 				}),
 	);
 
-	const initials = agent.name
-		.split(" ")
-		.map((w) => w[0])
-		.join("")
-		.toUpperCase()
-		.slice(0, 2);
-	const avatarUrl = resolveAgentAvatarUrl(agent);
-
 	const detailHref = projectId
 		? `/projects/${projectId}/agents/${agent.id}`
 		: `/admin/agents/${agent.id}`;
@@ -121,12 +108,7 @@ export function AgentCard({
 				{/* Header */}
 				<div className="flex items-start justify-between gap-3">
 					<div className="flex items-center gap-3">
-						<Avatar className="size-10 rounded-lg bg-primary/10">
-							{avatarUrl ? <AvatarImage src={avatarUrl} /> : null}
-							<AvatarFallback className="rounded-lg bg-primary/10 text-primary font-semibold text-sm">
-								{initials}
-							</AvatarFallback>
-						</Avatar>
+						<EntityAvatar {...agentAvatar(agent)} size="lg" shape="rounded" />
 						<div className="min-w-0">
 							<p className="font-semibold text-sm leading-tight">
 								{agent.name}
@@ -138,16 +120,6 @@ export function AgentCard({
 					</div>
 
 					<div className="flex items-center gap-1.5 shrink-0">
-						{agent.access_mode === "restricted" && !agent.access_granted && (
-							<Badge
-								variant="outline"
-								className="text-xs font-medium gap-1"
-								title={t("agents.card.restrictedTooltip")}
-							>
-								<Lock className="size-3" />
-								{t("agents.card.restricted")}
-							</Badge>
-						)}
 						<Badge variant="secondary" className="text-xs font-medium">
 							{isAcp
 								? (agent.acp_provider ?? "acp")

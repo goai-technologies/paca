@@ -15,13 +15,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-
-import {
-	Avatar,
-	AvatarBadge,
-	AvatarFallback,
-	AvatarImage,
-} from "@/components/ui/avatar";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
+import { AvatarBadge } from "@/components/ui/avatar";
 import {
 	Popover,
 	PopoverContent,
@@ -39,10 +34,9 @@ import {
 	isNotificationSoundMuted,
 	setNotificationSoundMuted,
 } from "@/lib/notification-sound";
-import { resolveNotificationActorAvatarUrl } from "@/lib/provider-logos";
+import { notificationActorAvatar } from "@/lib/provider-logos";
 import { createLoadMoreScrollHandler } from "@/lib/scroll-pagination";
 import { timeAgo } from "@/lib/time-ago";
-import { getInitials } from "@/lib/utils";
 
 function notificationText(n: Notification, t: TFunction<"appShell">): string {
 	if (n.type === "assigned") {
@@ -184,7 +178,6 @@ export function NotificationBell() {
 					<div className="max-h-96 overflow-y-auto" onScroll={handleListScroll}>
 						<ul className="divide-y">
 							{notifications.map((n) => {
-								const avatarUrl = resolveNotificationActorAvatarUrl(n);
 								return (
 									<li key={n.id}>
 										<button
@@ -192,22 +185,22 @@ export function NotificationBell() {
 											onClick={() => handleNotificationClick(n)}
 											className={`w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-start gap-3 ${!n.read_at ? "bg-primary/5" : ""}`}
 										>
-											<Avatar className="mt-0.5 shrink-0">
-												{avatarUrl ? <AvatarImage src={avatarUrl} /> : null}
-												<AvatarFallback className="font-medium">
-													{getInitials(n.actor_full_name)}
-												</AvatarFallback>
-												<AvatarBadge
-													aria-hidden="true"
-													className={
-														n.type === "assigned"
-															? undefined
-															: "bg-secondary text-secondary-foreground"
-													}
-												>
-													{n.type === "assigned" ? <UserPlus /> : <AtSign />}
-												</AvatarBadge>
-											</Avatar>
+											<EntityAvatar
+												{...notificationActorAvatar(n)}
+												className="mt-0.5 shrink-0"
+												badge={
+													<AvatarBadge
+														aria-hidden="true"
+														className={
+															n.type === "assigned"
+																? undefined
+																: "bg-secondary text-secondary-foreground"
+														}
+													>
+														{n.type === "assigned" ? <UserPlus /> : <AtSign />}
+													</AvatarBadge>
+												}
+											/>
 											<div className="min-w-0 flex-1">
 												<p
 													className={`text-sm leading-snug ${!n.read_at ? "font-medium" : ""}`}

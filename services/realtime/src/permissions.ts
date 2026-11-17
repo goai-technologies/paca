@@ -25,11 +25,11 @@ export type EventNamespace =
 // NAMESPACE_PERMISSIONS maps each namespace to the project permission required
 // to receive events in that namespace.
 export const NAMESPACE_PERMISSIONS: Record<EventNamespace, string> = {
-	tasks: "tasks.read",
-	docs: "docs.read",
-	workflows: "workflows.read",
-	sprints: "sprints.read",
-	environments: "environments.read",
+	tasks: "tasks:read",
+	docs: "docs:read",
+	workflows: "workflows:read",
+	sprints: "sprints:read",
+	environments: "environments:read",
 };
 
 // projectRoomName returns the Socket.IO room name for a project + namespace pair.
@@ -59,33 +59,33 @@ export function eventNamespace(type: string): EventNamespace | undefined {
 	if (type.startsWith("task.")) return "tasks";
 	if (type.startsWith("doc.")) return "docs";
 	// github.branch.* and github.pr.* events are delivered to the tasks room
-	// because they are task-scoped and require the same tasks.read permission.
+	// because they are task-scoped and require the same tasks:read permission.
 	if (type.startsWith("github.")) return "tasks";
 	// agent.* events are task-scoped (conversation started/finished/events) and
-	// require the same tasks.read permission.
+	// require the same tasks:read permission.
 	if (type.startsWith("agent.")) return "tasks";
 	// workflow.assigned is task-scoped (the automation engine reassigning a
 	// task) — special-cased ahead of the generic workflow.* rule below so it
-	// routes on tasks.read rather than workflows.read.
+	// routes on tasks:read rather than workflows:read.
 	if (type === "workflow.assigned") return "tasks";
 	// All other workflow.* events describe changes to the workflow graph
 	// itself (nodes, edges, rules, transitions, lifecycle) and require
-	// workflows.read — a permission distinct from tasks.read.
+	// workflows:read — a permission distinct from tasks:read.
 	if (type.startsWith("workflow.")) return "workflows";
 	// automation.applied is the task activity ActivitySvc fans out when the
 	// automation engine changes a task — task-scoped, so it routes on
-	// tasks.read ahead of the generic automation.* rule below.
+	// tasks:read ahead of the generic automation.* rule below.
 	if (type === "automation.applied") return "tasks";
 	// Other automation.* events are automation graph/lifecycle changes,
-	// gated on workflows.read (the same permission the automation routes use).
+	// gated on workflows:read (the same permission the automation routes use).
 	if (type.startsWith("automation.")) return "workflows";
 	if (type.startsWith("sprint.")) return "sprints";
 	// view.* events cover sprint/backlog/timeline interaction views. They
-	// require the same sprints.read permission as sprint.* (see
+	// require the same sprints:read permission as sprint.* (see
 	// view_handler.go's route registration), so they share the room.
 	if (type.startsWith("view.")) return "sprints";
 	// environment.* events (currently just environment.status_changed)
-	// require environments.read, the same permission GET
+	// require environments:read, the same permission GET
 	// .../environments/:id is gated on.
 	if (type.startsWith("environment.")) return "environments";
 	return undefined;
@@ -95,7 +95,7 @@ export function eventNamespace(type: string): EventNamespace | undefined {
 // permission.  Wildcard permissions are honoured:
 //
 //   "*"        → grants everything
-//   "tasks.*"  → grants "tasks.read", "tasks.write", etc.
+//   "tasks:*"  → grants "tasks:read", "tasks:write", etc.
 export function hasProjectPermission(
 	permissions: Record<string, boolean>,
 	required: string,
@@ -103,10 +103,10 @@ export function hasProjectPermission(
 	if (permissions["*"] === true) return true;
 	if (permissions[required] === true) return true;
 
-	// Check the namespace wildcard (e.g. "tasks.*" covers "tasks.read").
-	const dotIdx = required.lastIndexOf(".");
-	if (dotIdx !== -1) {
-		const wildcard = `${required.slice(0, dotIdx)}.*`;
+	// Check the domain wildcard (e.g. "tasks:*" covers "tasks:read").
+	const sepIdx = required.lastIndexOf(":");
+	if (sepIdx !== -1) {
+		const wildcard = `${required.slice(0, sepIdx)}:*`;
 		if (permissions[wildcard] === true) return true;
 	}
 

@@ -505,9 +505,8 @@ func (m *Manager) recreateEnvironmentIfMissingEnv(ctx context.Context, backendRe
 // pacaInfraEnvKeys are env vars the built-in "paca" MCP server subprocess
 // needs (see internal/executor/executor.go's buildMCPServers) that can
 // legitimately differ between one StartEnvironment call and the next.
-// PACA_API_KEY/PACA_API_URL/PACA_GATEWAY_URL are deployment-level — the
-// same for every agent on this deployment, changing only on a key
-// rotation or redeploy. PACA_WORKDIR/PACA_ACTOR_USER_ID/
+// PACA_API_URL/PACA_GATEWAY_URL are deployment-level; PACA_API_KEY is the
+// agent's own key, stable for that agent until it is revoked. PACA_WORKDIR/PACA_ACTOR_USER_ID/
 // PACA_REPO_PLUGIN_IDS are conversation-scoped instead — trigger.Workdir,
 // trigger.ActorUserID, and trigger.RepoPluginIDs, none of which describe
 // this environment's own identity, unlike PACA_AGENT_ID/PACA_PROJECT_ID
@@ -542,7 +541,7 @@ func (m *Manager) recreateEnvironmentIfMissingEnv(ctx context.Context, backendRe
 // instead of surfacing as the caller bug it actually is.
 var pacaInfraEnvKeys = []string{
 	"PACA_API_KEY", "PACA_API_URL", "PACA_GATEWAY_URL",
-	"PACA_WORKDIR", "PACA_ACTOR_USER_ID", "PACA_REPO_PLUGIN_IDS",
+	"PACA_WORKDIR", "PACA_REPO_PLUGIN_IDS",
 	// GOOSE_PATH_ROOT is deployment-level fixed, like the PACA_API_* trio
 	// above, not conversation-scoped — included here (rather than getting
 	// its own GOOSE_PROVIDER-style one-time backfill) purely so a container
@@ -551,6 +550,22 @@ var pacaInfraEnvKeys = []string{
 	// goose's default, unpersisted session store forever. See that
 	// constant's own doc comment for the full story.
 	"GOOSE_PATH_ROOT",
+}
+
+// infraEnvKeysFor is pacaInfraEnvKeys plus GOOSE_MODEL when cfg targets the
+// same GOOSE_PROVIDER the container already has baked in. GOOSE_PROVIDER
+// stays frozen to whichever agent attached first (see
+// recreateEnvironmentIfMissingEnv), but the model is per-agent config the
+// user edits after the fact (e.g. a provider_cli agent's cli_model) — left
+// frozen too, an edit never reaches a static environment, so a bad model
+// can't be fixed and a wrong one silently keeps working. Gated on a
+// matching provider because a model id from a different provider's agent
+// is meaningless to the provider the container is frozen to.
+func infraEnvKeysFor(cfg sandbox.EnvironmentConfig, existing map[string]string) []string {
+	if cfg.Env["GOOSE_PROVIDER"] == "" || cfg.Env["GOOSE_PROVIDER"] != existing["GOOSE_PROVIDER"] {
+		return pacaInfraEnvKeys
+	}
+	return append(append([]string(nil), pacaInfraEnvKeys...), "GOOSE_MODEL")
 }
 
 // ensureEnvironmentInfraEnv keeps pacaInfraEnvKeys in sync with this
@@ -613,8 +628,9 @@ func (m *Manager) ensureEnvironmentInfraEnv(ctx context.Context, backendRef stri
 		}
 	}
 
+	keys := infraEnvKeysFor(cfg, existing)
 	stale := false
-	for _, key := range pacaInfraEnvKeys {
+	for _, key := range keys {
 		if cfg.Env[key] != existing[key] {
 			stale = true
 			break
@@ -635,7 +651,7 @@ func (m *Manager) ensureEnvironmentInfraEnv(ctx context.Context, backendRef stri
 		return nil, fmt.Errorf("sandbox/docker: environment container %s has no %s volume mount to reattach while refreshing infra env", backendRef, environmentVolumeMountPath)
 	}
 
-	mergedEnv := make(map[string]string, len(existing)+len(pacaInfraEnvKeys))
+	mergedEnv := make(map[string]string, len(existing)+len(keys))
 	for k, v := range existing {
 		mergedEnv[k] = v
 	}
@@ -646,7 +662,7 @@ func (m *Manager) ensureEnvironmentInfraEnv(ctx context.Context, backendRef stri
 	// never linger duplicated alongside the fresh ones it appends.
 	delete(mergedEnv, "GOOSE_SERVER__SECRET_KEY")
 	delete(mergedEnv, "DOCKER_HOST")
-	for _, key := range pacaInfraEnvKeys {
+	for _, key := range keys {
 		if v := cfg.Env[key]; v != "" {
 			mergedEnv[key] = v
 		} else {
@@ -702,6 +718,27 @@ func (m *Manager) recreateGoneEnvironmentContainer(ctx context.Context, cfg sand
 	}
 	if err := m.ensureImage(ctx, image); err != nil {
 		return nil, err
+	}
+
+	// The caller's backendRef was not found, but that only proves the *ID*
+	// is stale — not that the deterministic name is free. A previous
+	// recreate can have succeeded in creating a container under this name
+	// and then failed a later step (e.g. the dind sidecar not ready right
+	// after a host reboot/upgrade), discarding the handle before the new ID
+	// was persisted; the next Start then holds the old ID, hits not-found
+	// here, and ContainerCreate fails with a name Conflict. The named volume
+	// (the environment's real data) is intact, so clear whatever squats on
+	// the name and create fresh.
+	name := environmentContainerName(cfg.EnvironmentID)
+	if inspect, err := m.docker.ContainerInspect(ctx, name, client.ContainerInspectOptions{}); err == nil {
+		if state := m.popState(inspect.Container.ID); state.hostPort != 0 {
+			m.releasePort(state.hostPort)
+		}
+		if _, err := m.docker.ContainerRemove(ctx, inspect.Container.ID, client.ContainerRemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
+			return nil, fmt.Errorf("sandbox/docker: remove conflicting environment container %s (%s): %w", name, inspect.Container.ID, err)
+		}
+	} else if !cerrdefs.IsNotFound(err) {
+		return nil, fmt.Errorf("sandbox/docker: inspect environment container %s: %w", name, err)
 	}
 
 	containerID, baseURL, err := m.createAndStartEnvironmentContainer(ctx, image, volumeName, cfg)

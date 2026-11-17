@@ -37,7 +37,7 @@ interface GlobalPermissionsData {
 }
 
 interface ProjectPermissionsData {
-	permissions: Record<string, boolean>;
+	actions: string[];
 }
 
 // verifyTokenWithAPI calls GET /api/v1/users/me/global-permissions using the
@@ -79,7 +79,10 @@ export async function verifyTokenWithAPI(
 }
 
 // fetchProjectPermissions calls GET /api/v1/projects/:projectId/members/me/permissions
-// to retrieve the authenticated user's effective permission map for a project.
+// to retrieve the authenticated user's effective IAM actions in a project
+// ("tasks:read", ...), returned as a map of action -> true. scope=project
+// leaves out actions held only on a single task/doc/etc.: a room delivers
+// every event of its namespace, so it needs project-wide access.
 // Returns null when the user is not a member of that project (API returns 404).
 export async function fetchProjectPermissions(
 	apiUrl: string,
@@ -87,7 +90,7 @@ export async function fetchProjectPermissions(
 	projectId: string,
 ): Promise<Record<string, boolean> | null> {
 	const res = await fetch(
-		`${apiUrl}/api/v1/projects/${encodeURIComponent(projectId)}/members/me/permissions`,
+		`${apiUrl}/api/v1/projects/${encodeURIComponent(projectId)}/members/me/permissions?scope=project`,
 		{
 			headers: { Authorization: `Bearer ${token}` },
 			signal: AbortSignal.timeout(8_000),
@@ -100,7 +103,9 @@ export async function fetchProjectPermissions(
 	}
 
 	const envelope = (await res.json()) as ApiEnvelope<ProjectPermissionsData>;
-	return envelope.data?.permissions ?? {};
+	return Object.fromEntries(
+		(envelope.data?.actions ?? []).map((action) => [action, true]),
+	);
 }
 
 // ---------------------------------------------------------------------------

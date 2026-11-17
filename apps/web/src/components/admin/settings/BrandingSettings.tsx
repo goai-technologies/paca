@@ -103,10 +103,12 @@ export function BrandingSettings() {
 					<div className="flex flex-col items-center gap-2">
 						<AvatarUpload
 							basePath="/admin/settings/logo"
-							avatarUrl={branding?.logo_url}
-							fallback={<ImageIcon className="size-5" />}
+							avatar={{
+								name: "",
+								avatarUrl: branding?.logo_url,
+								fallback: <ImageIcon className="size-5" />,
+							}}
 							className="size-16 rounded-xl"
-							fallbackClassName="bg-muted text-muted-foreground"
 							labels={{
 								change: t("settings.images.logo.change"),
 								remove: t("settings.images.logo.remove"),
@@ -126,10 +128,12 @@ export function BrandingSettings() {
 					<div className="flex flex-col items-center gap-2">
 						<AvatarUpload
 							basePath="/admin/settings/favicon"
-							avatarUrl={branding?.favicon_url}
-							fallback={<ImageIcon className="size-4" />}
+							avatar={{
+								name: "",
+								avatarUrl: branding?.favicon_url,
+								fallback: <ImageIcon className="size-4" />,
+							}}
 							className="size-16 rounded-xl"
-							fallbackClassName="bg-muted text-muted-foreground"
 							labels={{
 								change: t("settings.images.favicon.change"),
 								remove: t("settings.images.favicon.remove"),

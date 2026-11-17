@@ -12,11 +12,14 @@ type Repository interface {
 	// FindByID returns the API key with the given ID.
 	FindByID(ctx context.Context, id uuid.UUID) (*APIKey, error)
 	// FindByHash looks up an API key by its SHA-256 hash.
-	// Returns ErrNotFound when no matching key exists.
+	// Returns ErrNotFound when no matching key exists or its account is
+	// deleted. The result carries AccountKind.
 	FindByHash(ctx context.Context, keyHash string) (*APIKey, error)
-	// ListByUserID returns all non-revoked API keys for the given user,
-	// ordered by creation date descending.
-	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*APIKey, error)
+	// ListByAccountID returns one page of the account's non-revoked API keys,
+	// newest first. cursorAfter is the opaque cursor from EncodeCursor (nil
+	// for the first page); hasMore reports whether more keys follow and total
+	// is the account's overall active key count.
+	ListByAccountID(ctx context.Context, accountID uuid.UUID, cursorAfter *string, limit int) (keys []*APIKey, hasMore bool, total int, err error)
 	// Create persists a new API key.
 	Create(ctx context.Context, key *APIKey, keyHash string) error
 	// Revoke soft-deletes an API key by setting revoked_at.

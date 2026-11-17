@@ -102,7 +102,7 @@ func run(log *slog.Logger) error {
 
 	exec := executor.New(sandboxBackend, envRepo, convRepo, portForwardRepo, encryptor, executor.Options{
 		Image:           settings.AgentServerImage,
-		PacaAPIKey:      settings.PacaAPIKey,
+		AgentKeys:       postgres.NewAgentKeyRepository(db, keyBytes),
 		PacaAPIURL:      settings.PacaAPIURL,
 		PacaGatewayURL:  settings.PacaGatewayURL,
 		MCPDevSourceDir: settings.MCPDevSourceDir,

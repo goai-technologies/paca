@@ -47,42 +47,19 @@ describe("PacaAPIConversationClient", () => {
 		expect(fetchMock.mock.calls[0][1].headers["X-API-Key"]).toBe("key123");
 	});
 
-	it("sends X-Agent-ID header when agentId is configured", async () => {
+	it("never sends X-Agent-ID, even when agentId is set", async () => {
 		const client = new PacaAPIConversationClient({
 			...CONFIG,
 			agentId: "agent-1",
 		});
 		await client.getConversation("c1");
-		expect(fetchMock.mock.calls[0][1].headers["X-Agent-ID"]).toBe("agent-1");
+		expect(fetchMock.mock.calls[0][1].headers["X-Agent-ID"]).toBeUndefined();
 	});
 
 	it("omits X-Agent-ID when agentId is not configured", async () => {
 		const client = new PacaAPIConversationClient(CONFIG);
 		await client.getConversation("c1");
 		expect(fetchMock.mock.calls[0][1].headers["X-Agent-ID"]).toBeUndefined();
-	});
-
-	it("sends X-Actor-User-ID header only alongside agentId", async () => {
-		const client = new PacaAPIConversationClient({
-			...CONFIG,
-			agentId: "agent-1",
-			actorUserId: "user-7",
-		});
-		await client.getConversation("c1");
-		expect(fetchMock.mock.calls[0][1].headers["X-Actor-User-ID"]).toBe(
-			"user-7",
-		);
-	});
-
-	it("omits X-Actor-User-ID when actorUserId is configured without agentId", async () => {
-		const client = new PacaAPIConversationClient({
-			...CONFIG,
-			actorUserId: "user-7",
-		});
-		await client.getConversation("c1");
-		expect(
-			fetchMock.mock.calls[0][1].headers["X-Actor-User-ID"],
-		).toBeUndefined();
 	});
 
 	it("sends X-Conversation-ID header only alongside agentId", async () => {

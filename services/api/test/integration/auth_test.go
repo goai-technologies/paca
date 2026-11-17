@@ -14,9 +14,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
-	globalroledom "github.com/Paca-AI/api/internal/domain/globalrole"
 	userdom "github.com/Paca-AI/api/internal/domain/user"
-	"github.com/Paca-AI/api/internal/platform/authz"
 	jwttoken "github.com/Paca-AI/api/internal/platform/token"
 	authsvc "github.com/Paca-AI/api/internal/service/auth"
 	"github.com/Paca-AI/api/internal/transport/http/handler"
@@ -29,11 +27,6 @@ type fakeUserRepo struct {
 	byUsername map[string]*userdom.User
 	byID       map[uuid.UUID]*userdom.User
 }
-
-var (
-	fakeRoleIDUser  = uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	fakeRoleIDAdmin = uuid.MustParse("22222222-2222-2222-2222-222222222222")
-)
 
 func newFakeUserRepo() *fakeUserRepo {
 	return &fakeUserRepo{
@@ -71,23 +64,12 @@ func (r *fakeUserRepo) FindByEmail(_ context.Context, email string) (*userdom.Us
 	return nil, userdom.ErrNotFound
 }
 
-// FindDefault is the role a new user starts with: USER, as on a fresh install.
-func (r *fakeUserRepo) FindDefault(context.Context) (*globalroledom.GlobalRole, error) {
-	return &globalroledom.GlobalRole{ID: fakeRoleIDUser, Name: userdom.RoleUser, IsDefault: true}, nil
-}
-
-func (r *fakeUserRepo) FindByName(_ context.Context, name string) (*globalroledom.GlobalRole, error) {
-	switch name {
-	case userdom.RoleUser:
-		return &globalroledom.GlobalRole{ID: fakeRoleIDUser, Name: userdom.RoleUser}, nil
-	case userdom.RoleAdmin:
-		return &globalroledom.GlobalRole{ID: fakeRoleIDAdmin, Name: userdom.RoleAdmin}, nil
-	default:
-		return nil, globalroledom.ErrNotFound
-	}
-}
-
+// Create mimics the real repository: a user created with no roles starts with
+// the default role (USER, as on a fresh install).
 func (r *fakeUserRepo) Create(_ context.Context, u *userdom.User) error {
+	if len(u.Roles) == 0 {
+		u.Roles = testRoles("USER")
+	}
 	r.byUsername[u.Username] = u
 	r.byID[u.ID] = u
 	return nil
@@ -98,7 +80,7 @@ func (r *fakeUserRepo) Update(_ context.Context, u *userdom.User) error {
 	r.byID[u.ID] = u
 	return nil
 }
-func (r *fakeUserRepo) List(_ context.Context, offset, limit int) ([]*userdom.User, int64, error) {
+func (r *fakeUserRepo) List(_ context.Context, offset, limit int, _ userdom.ListFilter) ([]*userdom.User, int64, error) {
 	all := make([]*userdom.User, 0, len(r.byID))
 	for _, u := range r.byID {
 		all = append(all, u)
@@ -112,6 +94,10 @@ func (r *fakeUserRepo) List(_ context.Context, offset, limit int) ([]*userdom.Us
 		end = len(all)
 	}
 	return all[offset:end], total, nil
+}
+
+func (r *fakeUserRepo) ListAfter(_ context.Context, _ int, _ *string, _ userdom.ListFilter) ([]*userdom.User, bool, error) {
+	return nil, false, nil
 }
 
 func (r *fakeUserRepo) CountUsers(_ context.Context) (int64, error) {
@@ -173,7 +159,7 @@ func buildTestRouter(repo *fakeUserRepo) http.Handler {
 
 	return router.New(router.Deps{
 		TokenManager: tm,
-		Authorizer:   authz.NewAuthorizer(nil),
+		IAM:          newIAM(nil),
 		Health:       handler.NewHealthHandler(),
 		Auth:         handler.NewAuthHandler(authService, testCookieCfg),
 		User:         handler.NewUserHandler(nil),
@@ -191,7 +177,7 @@ func TestLoginSuccess(t *testing.T) {
 		ID:           uuid.New(),
 		Username:     "testuser",
 		PasswordHash: string(hash),
-		Role:         userdom.RoleUser,
+		Roles:        testRoles("USER"),
 	}
 	_ = repo.Create(context.Background(), u)
 
@@ -229,7 +215,7 @@ func TestLoginWrongPassword(t *testing.T) {
 		ID:           uuid.New(),
 		Username:     "testuser",
 		PasswordHash: string(hash),
-		Role:         userdom.RoleUser,
+		Roles:        testRoles("USER"),
 	}
 	_ = repo.Create(context.Background(), u)
 
@@ -277,7 +263,7 @@ func seedLoginUser(t *testing.T, repo *fakeUserRepo) *userdom.User {
 		ID:           uuid.New(),
 		Username:     "loginuser",
 		PasswordHash: string(hash),
-		Role:         userdom.RoleUser,
+		Roles:        testRoles("USER"),
 	}
 	if err := repo.Create(context.Background(), u); err != nil {
 		t.Fatalf("failed to seed login user in repo: %v", err)

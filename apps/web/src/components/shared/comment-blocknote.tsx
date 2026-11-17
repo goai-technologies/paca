@@ -7,7 +7,6 @@ import { BlockNoteView } from "@blocknote/shadcn";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { useThemeMode } from "@/hooks/use-theme-mode";
 import { matchAnnotationLinkOnly } from "@/lib/annotation-link";
-import { useMentionData } from "@/lib/mention-api";
 import { createAnnotationPasteHandler } from "./blocknote-annotation-paste-handler";
 import { CustomSideMenu } from "./blocknote-custom-side-menu";
 import { customSchema } from "./blocknote-schema";
@@ -31,7 +30,6 @@ export const CommentEditor = forwardRef<
 >(function CommentEditor({ initialBlocks, onSubmit, projectId }, ref) {
 	const { resolvedMode } = useThemeMode();
 	const initializedRef = useRef(false);
-	const { teamMembers, documents } = useMentionData(projectId);
 
 	const editor = useCreateBlockNote({
 		schema: customSchema,
@@ -83,12 +81,7 @@ export const CommentEditor = forwardRef<
 			slashMenu={false}
 		>
 			<SideMenuController sideMenu={CustomSideMenu} />
-			<MentionSuggestionMenus
-				editor={editor}
-				teamMembers={teamMembers}
-				projectId={projectId}
-				documents={documents}
-			/>
+			<MentionSuggestionMenus editor={editor} projectId={projectId} />
 		</BlockNoteView>
 	);
 });

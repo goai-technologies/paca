@@ -12,12 +12,12 @@ Feature: View settings — field visibility on Board and List views
   date, select, multi_select, boolean, url) can be toggled on or off
   alongside built-in fields.
 
-  Field settings are per view AND per user: a member without "views.write"
-  saves them only for themselves ("Save"), while a "views.write" holder
-  chooses between "Save for everyone" (the team default) and "Save only for
-  me" (a personal override marked "Only visible to you").  Every scenario
-  below says "the user saves the view settings", which is "Save for
-  everyone" for a views.write holder (the Background user) — see
+  Field settings are per view AND per user: a member without "views:write"
+  saves them only for themselves ("Save"), while a "views:write" holder
+  chooses between "Save only for me" (the default personal override, marked
+  "Only visible to you") and "Save for everyone" (the team default).  Every
+  scenario below says "the user saves the view settings", which is "Save
+  only for me" for a views:write holder (the Background user) — see
   view-settings.feature for the personal-vs-shared behaviour itself.
 
   ═══════════════════════════════════════════════════════════════════════════
@@ -29,7 +29,7 @@ Feature: View settings — field visibility on Board and List views
     Given the user already has a stored authenticated session
     And a project named "E2E_FIELDS_PROJECT" exists
     And the project has a "Product Backlog" interaction with at least one Board view and one Table view
-    And the user has the "views.write" project permission in "E2E_FIELDS_PROJECT"
+    And the user has the "views:write" project permission in "E2E_FIELDS_PROJECT"
     And the user has navigated to the "Product Backlog" interaction inside "E2E_FIELDS_PROJECT"
 
   ═══════════════════════════════════════════════════════════════════════════

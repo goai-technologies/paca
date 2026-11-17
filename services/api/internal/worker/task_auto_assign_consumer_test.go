@@ -49,7 +49,15 @@ type fakeMemberLister struct {
 	members []*projectdom.ProjectMember
 }
 
-func (f *fakeMemberLister) ListMembers(_ context.Context, _ uuid.UUID) ([]*projectdom.ProjectMember, error) {
+func (f *fakeMemberLister) CountMembers(context.Context, uuid.UUID, projectdom.MemberFilter) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeMemberLister) ListMembers(context.Context, uuid.UUID, int, *string, projectdom.MemberFilter) ([]*projectdom.ProjectMember, bool, error) {
+	return nil, false, nil
+}
+
+func (f *fakeMemberLister) ListAllMembers(_ context.Context, _ uuid.UUID) ([]*projectdom.ProjectMember, error) {
 	return f.members, nil
 }
 

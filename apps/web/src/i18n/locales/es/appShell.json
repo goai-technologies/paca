@@ -30,7 +30,8 @@
 		"team": "Equipo",
 		"settings": "Configuración",
 		"changelog": "Novedades",
-		"activity": "Actividad"
+		"activity": "Actividad",
+		"serviceAccounts": "Cuentas de servicio"
 	},
 	"projectSwitcher": {
 		"projects": "Proyectos",

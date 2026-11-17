@@ -38,7 +38,7 @@ inside the agent's own sandbox)                    (repository plugin adapter)
         │  result (apps/mcp/src/tools/repo-tools.ts)    │
 ```
 
-The Paca MCP server authenticates as the specific agent running the conversation — `PACA_API_KEY` is injected into its environment by `services/agent-runner` at sandbox start (see [agent-runner-service.md](agent-runner-service.md#skills--mcp-server-injection)), scoping every repository-adapter call to that one agent rather than to a shared internal service credential.
+The Paca MCP server authenticates as the specific agent running the conversation — `PACA_API_KEY` (the agent's own API key) is injected into its environment by `services/agent-runner` at sandbox start (see [agent-runner-service.md](agent-runner-service.md#skills--mcp-server-injection)), scoping every repository-adapter call to that one agent rather than to a shared internal service credential.
 
 ### Endpoint
 

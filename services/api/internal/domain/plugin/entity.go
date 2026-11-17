@@ -6,6 +6,7 @@ package plugindom
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -59,30 +60,31 @@ type PluginManifest struct {
 	Automation *AutomationManifest `json:"automation,omitempty"`
 	// Permissions lists the host function scopes the plugin requires.
 	Permissions []string `json:"permissions,omitempty"`
-	// CustomPermissions lists project/global-scoped permission keys the
-	// plugin declares. Declared keys become checkable via requirePermissions
-	// and appear in the project/global role editor UI so admins can grant
-	// them to specific roles (e.g. "time_logging.manage_all").
+	// CustomPermissions lists the IAM actions the plugin declares (e.g.
+	// "time_logging:manage_all"). Declared actions become checkable via
+	// requireActions, are accepted in role policies, and appear in the role
+	// editor so admins can grant them.
 	CustomPermissions []CustomPermission `json:"customPermissions,omitempty"`
 }
 
 // CustomPermission describes a permission key a plugin declares beyond the
-// host's built-in permission set. The host stores grants for these keys in
-// the same JSONB permission map as built-in permissions (e.g.
-// project_roles.permissions), so no schema change is needed to persist them
-// — only to know they exist so the role editor can expose them and plugin
-// route/backend checks can reference them by name.
+// host's built-in permission set. Grants for these keys live in role
+// policies (roles.policy) like any other action, so no schema change is
+// needed to persist them — only to know they exist so the role editor can
+// expose them and plugin route/backend checks can reference them by name.
 type CustomPermission struct {
-	// Key is the permission's stable identifier, e.g. "time_logging.manage_all".
-	// Must be namespaced under the plugin's domain to avoid collisions with
-	// built-in permissions and other plugins.
+	// Key is the IAM action the permission is, e.g. "time_logging:manage_all":
+	// "<domain>:<verb>" with the domain the plugin's own namespace (see
+	// pluginKeyNamespace), so it cannot collide with a built-in action or
+	// another plugin's.
 	Key string `json:"key"`
 	// Label is the human-readable name shown in the role editor.
 	Label string `json:"label"`
 	// Description explains what the permission grants.
 	Description string `json:"description,omitempty"`
 	// Scope determines which role editor the permission appears in:
-	// "project" (per-project roles) or "global" (global roles). Defaults to
+	// "project" (per-project roles), "global" (global roles) or "both" (an
+	// action checked inside a project and across projects). Defaults to
 	// "project" when omitted.
 	Scope string `json:"scope,omitempty"`
 }
@@ -90,6 +92,30 @@ type CustomPermission struct {
 // skillNamePattern mirrors the AgentSkills name convention enforced by the
 // OpenHands SDK (openhands/sdk/skills/utils.py's SKILL_NAME_PATTERN):
 // lowercase alphanumeric segments joined by single hyphens.
+// pluginNamePattern restricts plugin names to dot-separated segments of
+// letters, digits, '_' and '-' (e.g. "com.paca.time-logging"). Names are used
+// as directory names on disk and as Postgres schema names, so path separators
+// and ".." must never be accepted.
+var pluginNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*(\.[A-Za-z0-9][A-Za-z0-9_-]*)*$`)
+
+// maxPluginNameLen bounds plugin names (also the Postgres identifier limit
+// leaves headroom for the schema prefix).
+const maxPluginNameLen = 128
+
+// ValidatePluginName reports whether name is a safe reverse-DNS plugin id.
+func ValidatePluginName(name string) error {
+	if name == "" {
+		return fmt.Errorf("plugin name is required")
+	}
+	if len(name) > maxPluginNameLen {
+		return fmt.Errorf("plugin name must be at most %d characters", maxPluginNameLen)
+	}
+	if !pluginNamePattern.MatchString(name) {
+		return fmt.Errorf("plugin name %q is invalid: use dot-separated segments of letters, digits, '_' and '-'", name)
+	}
+	return nil
+}
+
 var skillNamePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // pluginKeyNamespace derives the required custom-permission key prefix from a
@@ -113,17 +139,28 @@ func (m PluginManifest) Validate() error {
 		}
 	}
 	namespace := pluginKeyNamespace(m.ID)
-	prefix := namespace + "."
+	prefix := namespace + ":"
+	seen := map[string]bool{}
 	for _, perm := range m.CustomPermissions {
 		if perm.Key == "" {
 			return fmt.Errorf("customPermissions: key is required")
 		}
-		if !strings.HasPrefix(perm.Key, prefix) {
-			return fmt.Errorf("customPermissions: key %q must be namespaced under %q (expected prefix %q)", perm.Key, m.ID, prefix)
+		if !strings.HasPrefix(perm.Key, prefix) || !actionPattern.MatchString(perm.Key) {
+			return fmt.Errorf("customPermissions: key %q must be an action of the form %s<verb> (the plugin's own namespace %q)", perm.Key, prefix, namespace)
 		}
-		if perm.Scope != "" && perm.Scope != "project" && perm.Scope != "global" {
+		if seen[perm.Key] {
+			return fmt.Errorf("customPermissions: key %q is declared twice", perm.Key)
+		}
+		seen[perm.Key] = true
+		if perm.Scope != "" && perm.Scope != "project" && perm.Scope != "global" && perm.Scope != "both" {
 			return fmt.Errorf("customPermissions: key %q has invalid scope %q", perm.Key, perm.Scope)
 		}
+	}
+	if err := m.validateRouteMiddlewares(); err != nil {
+		return err
+	}
+	if err := m.validateRequiredPermissions(); err != nil {
+		return err
 	}
 	if m.Skills != nil {
 		if err := m.Skills.validate(); err != nil {
@@ -137,6 +174,71 @@ func (m PluginManifest) Validate() error {
 	}
 	return nil
 }
+
+// Actions returns the IAM actions the manifest declares (customPermissions).
+func (m PluginManifest) Actions() []string {
+	out := make([]string, 0, len(m.CustomPermissions))
+	for _, p := range m.CustomPermissions {
+		out = append(out, p.Key)
+	}
+	return out
+}
+
+// validateRequiredPermissions rejects a nav item or extension point whose
+// requiredPermission is not an action of the form "<domain>:<verb>" (a
+// malformed one, such as "settings.write", is never granted to anyone, so the
+// page would be locked for every user, "*" holders included).
+func (m PluginManifest) validateRequiredPermissions() error {
+	if m.Frontend == nil {
+		return nil
+	}
+	check := func(what, perm string) error {
+		if perm != "" && !actionPattern.MatchString(perm) {
+			return fmt.Errorf("%s: requiredPermission %q must have the form <domain>:<verb>", what, perm)
+		}
+		return nil
+	}
+	for _, n := range m.Frontend.NavItems {
+		if err := check("navItems "+n.Slug, n.RequiredPermission); err != nil {
+			return err
+		}
+	}
+	for _, e := range m.Frontend.ExtensionPoints {
+		if err := check("extensionPoints "+e.Component, e.RequiredPermission); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateRouteMiddlewares rejects the legacy requirePermissions middleware
+// and malformed requireActions actions ("<domain>:<verb>", no wildcard).
+func (m PluginManifest) validateRouteMiddlewares() error {
+	if m.Backend == nil {
+		return nil
+	}
+	for _, route := range m.Backend.Routes {
+		for _, mw := range route.Middlewares {
+			switch strings.ToLower(strings.TrimSpace(mw.Name)) {
+			case "requirepermissions":
+				return fmt.Errorf("route %s %s: %w", route.Method, route.Path, ErrRequirePermissionsUnsupported)
+			case "requireactions":
+				if len(mw.Actions) == 0 {
+					return fmt.Errorf("route %s %s: requireActions needs at least one action", route.Method, route.Path)
+				}
+				for _, a := range mw.Actions {
+					if !actionPattern.MatchString(a) {
+						return fmt.Errorf("route %s %s: requireActions action %q must have the form <domain>:<verb>", route.Method, route.Path, a)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// actionPattern matches an IAM action: a dotted domain, ":", a verb.
+var actionPattern = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)*:[a-z0-9_]+$`)
 
 // AutomationManifest declares the automation-graph node types a plugin
 // contributes: Trigger, Condition, and Action nodes that appear in the
@@ -350,11 +452,10 @@ type NavItem struct {
 	Component string `json:"component"`
 	// Order is the default display order within the sidebar section.
 	Order int `json:"order,omitempty"`
-	// RequiredPermission is the permission key (built-in or a key from this
+	// RequiredPermission is the IAM action (built-in or one from this
 	// plugin's own CustomPermissions) the caller must hold to see and access
-	// this nav item's page. Checked with the same dot-wildcard semantics as
-	// requirePermissions, against the caller's global permission map for
-	// Scope "admin" or their project permission map for Scope "project". If
+	// this nav item's page, checked against the caller's effective actions
+	// for Scope "admin" (platform) or "project" (the project). If
 	// omitted, the page is reachable by anyone who can already reach the
 	// enclosing sidebar section (all project members, or all admins).
 	RequiredPermission string `json:"requiredPermission,omitempty"`
@@ -384,16 +485,26 @@ type PluginRoute struct {
 type PluginRouteMiddleware struct {
 	// Name is the middleware identifier. Supported values:
 	// authn, optionalAuthn, requireFreshPassword, requireJWTAuth,
-	// requirePermissions.
+	// requireActions. The legacy requirePermissions is rejected (see
+	// ErrRequirePermissionsUnsupported).
 	Name string `json:"name"`
-	// Scope is used by requirePermissions: global | project.
+	// Scope is used by requireActions: global | project.
 	Scope string `json:"scope,omitempty"`
 	// ProjectParam is the route param name for project scope resolution.
 	// Defaults to "projectId".
 	ProjectParam string `json:"projectParam,omitempty"`
-	// Permissions is used by requirePermissions, e.g. ["projects.read"].
+	// Actions is used by requireActions: IAM actions ("<domain>:<verb>",
+	// built-in or plugin-declared, e.g. ["tasks:read"]) the caller must ALL
+	// be allowed.
+	Actions []string `json:"actions,omitempty"`
+	// Permissions is the legacy requirePermissions key list. It is only
+	// decoded so Validate can reject a manifest that still uses it.
 	Permissions []string `json:"permissions,omitempty"`
 }
+
+// ErrRequirePermissionsUnsupported is returned for a manifest route that
+// still declares the legacy requirePermissions middleware.
+var ErrRequirePermissionsUnsupported = errors.New("requirePermissions is no longer supported; use requireActions with IAM actions")
 
 // ExtensionPointRegistration describes a frontend component registered into an
 // extension point in the host application.
@@ -408,10 +519,10 @@ type ExtensionPointRegistration struct {
 	Label string `json:"label,omitempty"`
 	// Order is the default display order within the extension point.
 	Order int `json:"order,omitempty"`
-	// RequiredPermission is the permission key (built-in or a key from this
+	// RequiredPermission is the IAM action (built-in or one from this
 	// plugin's own CustomPermissions) the caller must hold for this
 	// registration to render, mirroring NavItem.RequiredPermission. Checked
-	// against the caller's project permission map when the enclosing
+	// against the caller's project effective actions when the enclosing
 	// extension point is project-scoped (e.g. "project.settings.tab"). If
 	// omitted, the registration is reachable by anyone who can already reach
 	// the enclosing host page — this is the default for every extension
@@ -454,4 +565,33 @@ type ExtensionSettingData struct {
 	// Order is the admin-chosen display order for this registration.
 	// Lower values appear first.  A value of 0 means "use plugin default".
 	Order int `json:"order,omitempty"`
+}
+
+// ManifestJSONUsesRequirePermissions reports whether a plugin.json document
+// declares the retired requirePermissions route middleware. An installed
+// plugin whose package still does is built for the old permission model: its
+// stored manifest was converted to requireActions by migration 000065, but a
+// reinstall or upgrade of that build is rejected until its author publishes a
+// version that uses requireActions. Unreadable JSON reports false.
+func ManifestJSONUsesRequirePermissions(raw []byte) bool {
+	var doc struct {
+		Backend struct {
+			Routes []struct {
+				Middlewares []struct {
+					Name string `json:"name"`
+				} `json:"middlewares"`
+			} `json:"routes"`
+		} `json:"backend"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return false
+	}
+	for _, route := range doc.Backend.Routes {
+		for _, mw := range route.Middlewares {
+			if strings.EqualFold(mw.Name, "requirePermissions") {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -114,11 +114,6 @@ spec:
             - name: PLUGINS_SKILLS_DIR
               value: /plugins-skills
             {{- if .Values.agentRunner.enabled }}
-            - name: AGENT_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "paca.secretName" . }}
-                  key: AGENT_API_KEY
             - name: AI_AGENT_URL
               value: "http://{{ include "paca.fullname" . }}-agent-runner:8080"
             - name: AI_AGENT_INTERNAL_KEY

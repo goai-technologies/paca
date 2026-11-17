@@ -5,16 +5,13 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
-	agentdom "github.com/Paca-AI/api/internal/domain/agent"
 	apikeydom "github.com/Paca-AI/api/internal/domain/apikey"
 )
 
@@ -25,29 +22,9 @@ const (
 	maxNameLen     = 100
 )
 
-// AgentIdentityStore is the minimal agent-lookup surface
-// WithAgentIdentityStore needs to verify an agent-API-key request's claimed
-// X-Agent-ID / X-Actor-User-ID against the database, and to resolve a
-// per-agent MCP API key directly to its owning agent. Satisfied directly by
-// *postgres.AgentRepository.
-type AgentIdentityStore interface {
-	FindAgentByID(ctx context.Context, agentID uuid.UUID) (*agentdom.Agent, error)
-	HasActiveGlobalChatSession(ctx context.Context, agentID, actorUserID uuid.UUID) (bool, error)
-	// FindAgentByMCPAPIKeyHash resolves the agent whose current MCP API key
-	// hashes to hash — see agentdom.AgentRepository.FindAgentByMCPAPIKeyHash.
-	FindAgentByMCPAPIKeyHash(ctx context.Context, hash string) (*agentdom.Agent, error)
-}
-
 // Service is the concrete implementation of apikeydom.Service.
 type Service struct {
-	repo           apikeydom.Repository
-	agentKeyHash   [32]byte  // SHA-256 of the configured static agent API key
-	agentKeySet    bool      // true when an agent API key has been configured
-	agentBotUserID uuid.UUID // user identity returned for the static agent key
-	// agentIdentity backs FindAgentByID/HasActiveGlobalChatSession below,
-	// which together satisfy middleware.AgentIdentityVerifier — see
-	// WithAgentIdentityStore.
-	agentIdentity AgentIdentityStore
+	repo apikeydom.Repository
 }
 
 // New returns a configured API key Service.
@@ -55,52 +32,9 @@ func New(repo apikeydom.Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// WithAgentKey configures a static pre-shared key for the AI agent service.
-// When rawKey is presented to Authenticate it is validated in constant time
-// without a database lookup, and the request is authenticated as agentUserID.
-func (s *Service) WithAgentKey(rawKey string, agentUserID uuid.UUID) *Service {
-	s.agentKeyHash = sha256.Sum256([]byte(rawKey))
-	s.agentBotUserID = agentUserID
-	s.agentKeySet = true
-	return s
-}
-
-// WithAgentIdentityStore wires the agent/chat-session lookups the
-// authentication middleware needs to verify a claimed X-Agent-ID /
-// X-Actor-User-ID pair (see middleware.AgentIdentityVerifier's doc comment
-// for the threat this closes) — the agent API key alone is a single shared
-// secret and proves nothing about which specific agent, or which specific
-// human, a given request is acting for.
-func (s *Service) WithAgentIdentityStore(store AgentIdentityStore) *Service {
-	s.agentIdentity = store
-	return s
-}
-
-// FindAgentByID implements middleware.AgentIdentityVerifier by delegating to
-// the wired AgentIdentityStore. Returns agentdom.ErrAgentNotFound if no
-// store was configured, so an unwired Service fails closed rather than
-// silently trusting every claimed agent ID.
-func (s *Service) FindAgentByID(ctx context.Context, agentID uuid.UUID) (*agentdom.Agent, error) {
-	if s.agentIdentity == nil {
-		return nil, agentdom.ErrAgentNotFound
-	}
-	return s.agentIdentity.FindAgentByID(ctx, agentID)
-}
-
-// HasActiveGlobalChatSession implements middleware.AgentIdentityVerifier by
-// delegating to the wired AgentIdentityStore. Returns false (not an error)
-// if no store was configured — verifyAgentIdentity in the middleware treats
-// a false return as "reject," so this still fails closed.
-func (s *Service) HasActiveGlobalChatSession(ctx context.Context, agentID, actorUserID uuid.UUID) (bool, error) {
-	if s.agentIdentity == nil {
-		return false, nil
-	}
-	return s.agentIdentity.HasActiveGlobalChatSession(ctx, agentID, actorUserID)
-}
-
-// List returns all non-revoked API keys for the given user.
-func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]*apikeydom.APIKey, error) {
-	return s.repo.ListByUserID(ctx, userID)
+// List returns one page of the account's non-revoked API keys.
+func (s *Service) List(ctx context.Context, accountID uuid.UUID, cursorAfter *string, limit int) ([]*apikeydom.APIKey, bool, int, error) {
+	return s.repo.ListByAccountID(ctx, accountID, cursorAfter, limit)
 }
 
 // Create generates a cryptographically random API key, stores its SHA-256
@@ -127,7 +61,8 @@ func (s *Service) Create(ctx context.Context, in apikeydom.CreateInput) (*apikey
 
 	key := &apikeydom.APIKey{
 		ID:        uuid.New(),
-		UserID:    in.UserID,
+		AccountID: in.AccountID,
+		CreatedBy: in.CreatedBy,
 		Name:      name,
 		KeyPrefix: rawHex[:displayPrefLen],
 		ExpiresAt: in.ExpiresAt,
@@ -140,83 +75,37 @@ func (s *Service) Create(ctx context.Context, in apikeydom.CreateInput) (*apikey
 	return key, rawKey, nil
 }
 
-// Revoke revokes an API key. Only the owning user may revoke their own key.
-func (s *Service) Revoke(ctx context.Context, userID, keyID uuid.UUID) error {
+// Revoke revokes an API key. The key must belong to accountID.
+func (s *Service) Revoke(ctx context.Context, accountID, keyID uuid.UUID) error {
 	key, err := s.repo.FindByID(ctx, keyID)
 	if err != nil {
 		return err
 	}
-	if key.UserID != userID {
+	if key.AccountID != accountID {
 		return apikeydom.ErrForbidden
 	}
 	return s.repo.Revoke(ctx, keyID)
 }
 
-// Authenticate validates a raw API key and returns the matching record.
-// If a static agent API key has been configured via WithAgentKey, it is
-// checked first in constant time without a database lookup. Otherwise a
-// SHA-256 hash lookup is performed against personal API keys first; if
-// nothing matches, it falls back to checking whether the hash is a specific
-// agent's own MCP API key (see WithAgentIdentityStore) — returning a record
-// with AgentID set lets the caller (the authn middleware) attribute the
-// request to that agent directly, without a separate identity claim.
-// A best-effort update of last_used_at is performed for personal keys; any
-// update error is ignored so authentication does not fail due to
-// last_used_at persistence.
+// Authenticate validates a raw API key and returns the matching record: the
+// SHA-256 hash is looked up in api_keys, whichever kind of account owns the
+// key (user, agent or service account). A key of a deleted account does not
+// resolve. A best-effort update of last_used_at is performed; any update
+// error is ignored so authentication does not fail due to its persistence.
 func (s *Service) Authenticate(ctx context.Context, rawKey string) (*apikeydom.APIKey, error) {
-	// Check static agent key first — constant-time comparison to prevent
-	// timing attacks.
-	if s.agentKeySet {
-		h := sha256.Sum256([]byte(rawKey))
-		if subtle.ConstantTimeCompare(h[:], s.agentKeyHash[:]) == 1 {
-			return &apikeydom.APIKey{UserID: s.agentBotUserID}, nil
-		}
-	}
-
 	hash := sha256.Sum256([]byte(rawKey))
 	keyHash := hex.EncodeToString(hash[:])
 
 	key, err := s.repo.FindByHash(ctx, keyHash)
-	if err == nil {
-		if key.RevokedAt != nil {
-			return nil, apikeydom.ErrRevoked
-		}
-		if key.ExpiresAt != nil && time.Now().After(*key.ExpiresAt) {
-			return nil, apikeydom.ErrExpired
-		}
-		// Best-effort last_used_at update — ignore errors.
-		_ = s.repo.UpdateLastUsed(ctx, key.ID, time.Now().UTC())
-		return key, nil
-	}
-	if !errors.Is(err, apikeydom.ErrNotFound) {
+	if err != nil {
 		return nil, err
 	}
-
-	// Not a personal key — check whether it's a specific agent's own MCP
-	// API key before giving up.
-	if s.agentIdentity != nil {
-		agent, aerr := s.agentIdentity.FindAgentByMCPAPIKeyHash(ctx, keyHash)
-		if aerr == nil {
-			return &apikeydom.APIKey{UserID: s.agentBotUserID, AgentID: &agent.ID}, nil
-		}
-		// Only "no agent has this key" falls through to ErrNotFound below —
-		// anything else (e.g. a transient DB failure) must propagate as-is,
-		// or an outage would silently present as an invalid API key instead
-		// of a 500.
-		if !errors.Is(aerr, agentdom.ErrAgentNotFound) {
-			return nil, aerr
-		}
+	if key.RevokedAt != nil {
+		return nil, apikeydom.ErrRevoked
 	}
-
-	return nil, apikeydom.ErrNotFound
-}
-
-// IsAgentKey checks if the provided raw key is the static agent API key.
-// This is used to validate that X-Agent-ID header can only be used with the agent API key.
-func (s *Service) IsAgentKey(_ context.Context, rawKey string) bool {
-	if !s.agentKeySet {
-		return false
+	if key.ExpiresAt != nil && time.Now().After(*key.ExpiresAt) {
+		return nil, apikeydom.ErrExpired
 	}
-	h := sha256.Sum256([]byte(rawKey))
-	return subtle.ConstantTimeCompare(h[:], s.agentKeyHash[:]) == 1
+	_ = s.repo.UpdateLastUsed(ctx, key.ID, time.Now().UTC())
+	return key, nil
 }

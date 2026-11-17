@@ -418,13 +418,41 @@ func (r *AutomationRepository) FindAutomationByID(ctx context.Context, id uuid.U
 	return rec.toDomain()
 }
 
-// ListAutomations implements automationdom.Repository.ListAutomations. See
-// its doc comment for the limit/cursor/hasMore pagination contract.
-func (r *AutomationRepository) ListAutomations(ctx context.Context, projectID uuid.UUID, status *automationdom.Status, search *string, cursor *string, limit *int) ([]*automationdom.Automation, bool, error) {
+// defaultAutomationPageSize is the page size ListAutomations uses when none is given.
+const defaultAutomationPageSize = 50
+
+// ListAutomations implements automationdom.Repository.ListAutomations: one
+// keyset page (created_at DESC, id DESC) of a project's automations.
+func (r *AutomationRepository) ListAutomations(ctx context.Context, projectID uuid.UUID, status *automationdom.Status, search *string, cursor *string, limit int) ([]*automationdom.Automation, bool, error) {
+	if limit <= 0 {
+		limit = defaultAutomationPageSize
+	}
+	return r.listAutomations(ctx, projectID, status, search, cursor, &limit)
+}
+
+// ListAllAutomations implements automationdom.Repository.ListAllAutomations.
+func (r *AutomationRepository) ListAllAutomations(ctx context.Context, projectID uuid.UUID, status *automationdom.Status) ([]*automationdom.Automation, error) {
+	automations, _, err := r.listAutomations(ctx, projectID, status, nil, nil, nil)
+	return automations, err
+}
+
+// listAutomations is the shared query: a nil limit returns every match.
+func (r *AutomationRepository) listAutomations(ctx context.Context, projectID uuid.UUID, status *automationdom.Status, search *string, cursor *string, limit *int) ([]*automationdom.Automation, bool, error) {
 	q := `
 		SELECT id, project_id, name, description, status, created_by, created_at, updated_at, deleted_at
 		FROM automations WHERE project_id = $1 AND deleted_at IS NULL`
-	args := []interface{}{projectID.String()}
+	sink := &argList{args: []any{projectID.String()}}
+	clause, none, err := scopeSQL(ctx, "workflow", workflowScopeColumns, sink)
+	if err != nil {
+		return nil, false, err
+	}
+	if none {
+		return []*automationdom.Automation{}, false, nil
+	}
+	if clause != "" {
+		q += " AND " + clause
+	}
+	args := sink.args
 	if status != nil {
 		args = append(args, string(*status))
 		q += fmt.Sprintf(` AND status = $%d`, len(args))
@@ -748,27 +776,43 @@ func (r *AutomationRepository) FindRunByID(ctx context.Context, id uuid.UUID) (*
 	return rec.toDomain()
 }
 
-// ListRunsByAutomation implements automationdom.Repository.ListRunsByAutomation.
-func (r *AutomationRepository) ListRunsByAutomation(ctx context.Context, automationID uuid.UUID, limit int) ([]*automationdom.Run, error) {
+// ListRunsByAutomation implements automationdom.Repository.ListRunsByAutomation:
+// one keyset page (started_at DESC, id DESC) of an automation's runs.
+func (r *AutomationRepository) ListRunsByAutomation(ctx context.Context, automationID uuid.UUID, cursorAfter *string, limit int) ([]*automationdom.Run, bool, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	const q = `
+	q := `
 		SELECT id, automation_id, trigger_node_id, task_id, status, started_at, finished_at
-		FROM automation_runs WHERE automation_id = $1 ORDER BY started_at DESC LIMIT $2`
+		FROM automation_runs WHERE automation_id = $1`
+	args := []any{automationID.String()}
+	if cursorAfter != nil {
+		cur, err := automationdom.DecodeRunCursor(*cursorAfter)
+		if err != nil {
+			return nil, false, err
+		}
+		args = append(args, cur.StartedAt, cur.ID)
+		q += fmt.Sprintf(` AND (started_at, id) < ($%d, $%d)`, len(args)-1, len(args))
+	}
+	args = append(args, limit+1)
+	q += fmt.Sprintf(` ORDER BY started_at DESC, id DESC LIMIT $%d`, len(args))
 	var recs []runRecord
-	if err := r.db.SelectContext(ctx, &recs, q, automationID.String(), limit); err != nil {
-		return nil, err
+	if err := r.db.SelectContext(ctx, &recs, q, args...); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(recs) > limit
+	if hasMore {
+		recs = recs[:limit]
 	}
 	out := make([]*automationdom.Run, 0, len(recs))
 	for i := range recs {
 		run, err := recs[i].toDomain()
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		out = append(out, run)
 	}
-	return out, nil
+	return out, hasMore, nil
 }
 
 // CreateRunStep implements automationdom.Repository.CreateRunStep.

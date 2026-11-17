@@ -3,11 +3,13 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/Paca-AI/api/internal/apierr"
+	attachmentdom "github.com/Paca-AI/api/internal/domain/attachment"
 	projectdom "github.com/Paca-AI/api/internal/domain/project"
 	"github.com/Paca-AI/api/internal/transport/http/dto"
 	"github.com/Paca-AI/api/internal/transport/http/middleware"
@@ -18,32 +20,95 @@ import (
 // AvatarService is configured, resolves the backing user/agent's avatar
 // keys into presigned display URLs.
 func (h *ProjectHandler) toProjectMemberResponse(ctx context.Context, m *projectdom.ProjectMember) dto.ProjectMemberResponse {
+	return memberResponse(ctx, h.avatarSvc, m)
+}
+
+// memberResponse maps m to its API shape and, when avatarSvc is non-nil,
+// resolves the backing user/agent's avatar keys into presigned display URLs.
+func memberResponse(ctx context.Context, avatarSvc attachmentdom.AvatarService, m *projectdom.ProjectMember) dto.ProjectMemberResponse {
 	resp := dto.ProjectMemberFromEntity(m)
-	if h.avatarSvc != nil {
+	if avatarSvc != nil {
 		key, thumbKey := dto.MemberAvatarKeys(m)
-		resp.AvatarURL, _ = h.avatarSvc.ResolveAvatarURL(ctx, key)
-		resp.AvatarThumbURL, _ = h.avatarSvc.ResolveAvatarURL(ctx, thumbKey)
+		resp.AvatarURL, _ = avatarSvc.ResolveAvatarURL(ctx, key)
+		resp.AvatarThumbURL, _ = avatarSvc.ResolveAvatarURL(ctx, thumbKey)
 	}
 	return resp
 }
 
-// ListMembers handles GET /projects/:projectId/members.
+// ListMembers handles GET /projects/:projectId/members — keyset-paginated and
+// filterable, for infinite-scroll lists and pickers. The response is
+// {items, page_size, next_cursor, total_count}.
+//
+// Supported query params (all optional):
+//   - page_size=<1-100>      defaults to 20
+//   - cursor=<opaque>        from the previous page's next_cursor
+//   - search=<text>          every word must match username, name or handle
+//   - role_id=<uuid>         only members holding that project role
+//   - member_type=<type>     human | agent | service_account
+//   - ids=<uuid,uuid,...>    only members whose account id or membership id is
+//     listed (batch lookup, at most 100)
 func (h *ProjectHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	id, err := parseProjectID(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	members, err := h.svc.ListMembers(r.Context(), id)
+	pageSize, err := parsePageSize(r, 20, 100)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	resp := make([]dto.ProjectMemberResponse, 0, len(members))
-	for _, m := range members {
-		resp = append(resp, h.toProjectMemberResponse(r.Context(), m))
+	q := r.URL.Query()
+	filter := projectdom.MemberFilter{Search: strings.TrimSpace(q.Get("search"))}
+	if raw := q.Get("role_id"); raw != "" {
+		roleID, err := uuid.Parse(raw)
+		if err != nil {
+			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid role_id"))
+			return
+		}
+		filter.RoleID = &roleID
 	}
-	presenter.OK(w, r, resp)
+	switch mt := q.Get("member_type"); mt {
+	case "":
+	case "human", "agent", "service_account":
+		filter.MemberType = mt
+	default:
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid member_type"))
+		return
+	}
+	ids, err := parseIDsParam(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	filter.AccountIDs = ids
+	cursor := parseCursorParam(r)
+
+	members, hasMore, err := h.svc.ListMembers(r.Context(), id, pageSize, cursor, filter)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	// total_count is a first-page field: later pages skip the COUNT.
+	var total *int64
+	if cursor == nil {
+		n, err := h.svc.CountMembers(r.Context(), id, filter)
+		if err != nil {
+			presenter.Error(w, r, err)
+			return
+		}
+		total = &n
+	}
+	items := make([]dto.ProjectMemberResponse, 0, len(members))
+	for _, m := range members {
+		items = append(items, h.toProjectMemberResponse(r.Context(), m))
+	}
+	var nextCursor *string
+	if hasMore && len(members) > 0 {
+		s := projectdom.EncodeMemberCursor(members[len(members)-1])
+		nextCursor = &s
+	}
+	presenter.OK(w, r, dto.CursorProjectMembersResponse{Items: items, PageSize: pageSize, NextCursor: nextCursor, TotalCount: total})
 }
 
 // AddMember handles POST /projects/:projectId/members.
@@ -58,22 +123,32 @@ func (h *ProjectHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	if !middleware.BindJSON(w, r, &req) {
 		return
 	}
-	hasUser := req.UserID != uuid.Nil
-	hasAgent := req.AgentID != nil && *req.AgentID != uuid.Nil
-	if hasUser == hasAgent {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "exactly one of user_id or agent_id is required"))
+	set := 0
+	for _, has := range []bool{
+		req.UserID != uuid.Nil,
+		req.AgentID != nil && *req.AgentID != uuid.Nil,
+		req.ServiceAccountID != nil && *req.ServiceAccountID != uuid.Nil,
+	} {
+		if has {
+			set++
+		}
+	}
+	if set != 1 {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "exactly one of user_id, agent_id or service_account_id is required"))
 		return
 	}
-	if req.ProjectRoleID == uuid.Nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "project_role_id is required"))
+	if len(req.RoleIDs) == 0 {
+		presenter.Error(w, r, apierr.New(apierr.CodeRoleRequired, "role_ids is required"))
 		return
 	}
 
 	m, err := h.svc.AddMember(r.Context(), id, projectdom.AddMemberInput{
-		UserID:        req.UserID,
-		AgentID:       req.AgentID,
-		ProjectRoleID: req.ProjectRoleID,
-		Description:   req.Description,
+		UserID:           req.UserID,
+		AgentID:          req.AgentID,
+		RoleIDs:          req.RoleIDs,
+		ServiceAccountID: req.ServiceAccountID,
+		Description:      req.Description,
+		CreatedBy:        attachmentCreator(r),
 	})
 	if err != nil {
 		presenter.Error(w, r, err)
@@ -82,10 +157,10 @@ func (h *ProjectHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	presenter.Created(w, r, h.toProjectMemberResponse(r.Context(), m))
 }
 
-// UpdateMemberRole handles PATCH /projects/:projectId/members/:memberId.
-// Accepts project_role_id and/or description; either may be omitted to
-// leave it unchanged, but at least one must be present.
-func (h *ProjectHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
+// UpdateMember handles PATCH /projects/:projectId/members/:memberId. It edits
+// the member's description; roles are replaced through
+// PUT /projects/:projectId/members/:memberId/roles.
+func (h *ProjectHandler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
 		presenter.Error(w, r, err)
@@ -97,31 +172,19 @@ func (h *ProjectHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var req dto.UpdateProjectMemberRoleRequest
+	var req dto.UpdateProjectMemberRequest
 	if !middleware.BindJSON(w, r, &req) {
 		return
 	}
-	if req.ProjectRoleID == nil && req.Description == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "at least one of project_role_id or description is required"))
+	if req.Description == nil {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "description is required"))
 		return
 	}
 
-	var m *projectdom.ProjectMember
-	if req.ProjectRoleID != nil {
-		m, err = h.svc.UpdateMemberRoleByMemberID(r.Context(), projectID, memberID, projectdom.UpdateMemberRoleInput{
-			ProjectRoleID: *req.ProjectRoleID,
-		})
-		if err != nil {
-			presenter.Error(w, r, err)
-			return
-		}
-	}
-	if req.Description != nil {
-		m, err = h.svc.UpdateMemberDescription(r.Context(), projectID, memberID, *req.Description)
-		if err != nil {
-			presenter.Error(w, r, err)
-			return
-		}
+	m, err := h.svc.UpdateMemberDescription(r.Context(), projectID, memberID, *req.Description)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
 	}
 	presenter.OK(w, r, h.toProjectMemberResponse(r.Context(), m))
 }
@@ -146,7 +209,10 @@ func (h *ProjectHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetMyProjectPermissions handles GET /projects/:projectId/members/me/permissions.
-// It returns the permission map of the authenticated user's project role.
+// It returns {"actions": [...]}: the caller's effective IAM actions in the
+// project (see iam.Authorizer.EffectiveActions).
+// With ?scope=project, only actions allowed on the whole project are listed,
+// not those allowed on some resource inside it.
 // Any authenticated project member can call this endpoint regardless of which
 // permissions their role grants — the lookup is always scoped to themselves.
 func (h *ProjectHandler) GetMyProjectPermissions(w http.ResponseWriter, r *http.Request) {
@@ -156,31 +222,33 @@ func (h *ProjectHandler) GetMyProjectPermissions(w http.ResponseWriter, r *http.
 		return
 	}
 
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-
-	userID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
-		return
-	}
-
-	// Check if request is from an agent and use agent ID if available
-	var agentID *uuid.UUID
-	if claims.AgentID != nil {
-		if parsedAgentID, parseErr := uuid.Parse(*claims.AgentID); parseErr == nil {
-			agentID = &parsedAgentID
-		}
-	}
-
-	perms, err := h.svc.GetMyProjectPermissions(r.Context(), projectID, userID, agentID)
+	// The caller's effective IAM actions in the project — every registered
+	// action allowed on the project or possibly on something inside it —
+	// from the engine that enforces them, judged as the account the request
+	// authenticated as.
+	principal, err := middleware.IAMPrincipalFrom(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
+	if h.authorizer == nil {
+		presenter.Error(w, r, apierr.New(apierr.CodeInternalError, "authorization not configured"))
+		return
+	}
+	// ?scope=project narrows to actions allowed on the whole project, for
+	// callers that authorize delivery (realtime rooms) rather than show UI.
+	effective := h.authorizer.EffectiveActions
+	if r.URL.Query().Get("scope") == "project" {
+		effective = h.authorizer.ProjectWideActions
+	}
+	actions, err := effective(r.Context(), principal, projectID.String())
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	if actions == nil {
+		actions = []string{}
+	}
 
-	presenter.OK(w, r, map[string]any{"permissions": perms})
+	presenter.OK(w, r, map[string]any{"actions": actions})
 }

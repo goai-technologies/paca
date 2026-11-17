@@ -24,7 +24,7 @@ import (
 
 	plugindom "github.com/Paca-AI/api/internal/domain/plugin"
 	"github.com/Paca-AI/api/internal/events"
-	"github.com/Paca-AI/api/internal/platform/authz"
+	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	"github.com/Paca-AI/api/internal/platform/cache"
 	"github.com/Paca-AI/api/internal/platform/netguard"
 )
@@ -80,11 +80,11 @@ type HostServices struct {
 	// AllowedOutboundDomains is the allowlist for paca.http_request outbound
 	// calls.  When empty, all outbound HTTP is blocked.
 	AllowedOutboundDomains []string
-	// Authorizer resolves effective permissions (built-in and plugin-declared
-	// custom permissions alike, since both are stored in the same permission
-	// map) for the paca.permission_check host function. May be nil, in which
-	// case permission_check always returns false.
-	Authorizer *authz.Authorizer
+	// Authorizer is the IAM authorizer behind the paca.permission_check host
+	// function, which takes an IAM action (built-in or plugin-declared,
+	// "<domain>:<verb>"). May be nil, in which case permission_check always
+	// returns false. Satisfied by *iam.Authorizer.
+	Authorizer iam.Checker
 	// Cache backs the paca.cache_get/cache_set/cache_delete host functions
 	// with the host's shared Valkey/Redis instance. May be nil, in which case
 	// cache_get always misses and cache_set/cache_delete are no-ops — a
@@ -264,9 +264,26 @@ func (r *Runtime) LoadAll(ctx context.Context, plugins []*plugindom.Plugin) erro
 	return nil
 }
 
-// Load compiles and instantiates a single plugin module.
-// If a module with the same name is already loaded it is unloaded first.
+// UsesLegacyPermissions reports whether the installed package declares the retired permission middleware.
+func (r *Runtime) UsesLegacyPermissions(ctx context.Context, name string) bool {
+	if r == nil || r.store == nil {
+		return false
+	}
+	raw, err := r.store.LoadPluginJSON(ctx, name)
+	if err != nil {
+		return false
+	}
+	return plugindom.ManifestJSONUsesRequirePermissions(raw)
+}
+
+// Load compiles and instantiates a single plugin module. If a module with the same
+// name is already loaded it is unloaded first.
 func (r *Runtime) Load(ctx context.Context, p plugindom.Plugin) error {
+	if p.Manifest.Backend == nil {
+		r.Unload(ctx, p.Name)
+		r.log.Info("plugin has no backend; nothing to load", "name", p.Name, "version", p.Version)
+		return nil
+	}
 	wasmBytes, err := r.store.LoadWASM(ctx, p.Name)
 	if err != nil {
 		return fmt.Errorf("runtime load %q: %w", p.Name, err)
@@ -514,6 +531,10 @@ func (r *Runtime) EmitEvent(ctx context.Context, topic string, payload any) {
 	r.mu.RLock()
 	instances := make([]*pluginInstance, 0, len(r.plugins))
 	for _, inst := range r.plugins {
+		// Frontend-only plugins have no backend section and no subscriptions.
+		if inst.plugin.Manifest.Backend == nil {
+			continue
+		}
 		for _, sub := range inst.plugin.Manifest.Backend.EventSubscriptions {
 			if sub == topic {
 				instances = append(instances, inst)
@@ -1034,14 +1055,25 @@ func (r *Runtime) registerCacheFunctions(b wazero.HostModuleBuilder, p plugindom
 // sensitiveColumnsForQuery and checkWriteAllowed).
 func (r *Runtime) execQuery(ctx context.Context, caller plugindom.Plugin, schema, sqlStr, paramsJSON string) (*dbQueryResult, error) {
 	// Allow SELECT and DML statements that use RETURNING.
-	trimmed := strings.TrimSpace(strings.ToUpper(sqlStr))
-	isDML := strings.HasPrefix(trimmed, "INSERT") || strings.HasPrefix(trimmed, "UPDATE") || strings.HasPrefix(trimmed, "DELETE")
-	if !strings.HasPrefix(trimmed, "SELECT") && (!isDML || !strings.Contains(trimmed, "RETURNING")) {
-		return nil, fmt.Errorf("paca.db_query: only SELECT and DML with RETURNING statements are allowed")
+	verb, err := validatePluginSQL(sqlStr, sqlModeQuery)
+	if err != nil {
+		return nil, fmt.Errorf("paca.db_query: %w", err)
 	}
+	isDML := verb != "select"
 	if isDML {
 		if err := r.checkWriteAllowed(caller, sqlStr, "paca.db_query"); err != nil {
 			return nil, err
+		}
+	}
+
+	// Redaction below masks result columns by output name only, so a SELECT
+	// that reaches a sensitive table must keep every sensitive value under a
+	// recognisable name (see checkSensitiveReadShape).
+	var aliases []string
+	if tables, cols := r.sensitiveReadTables(caller, sqlStr); len(tables) > 0 {
+		aliases, err = checkSensitiveReadShape(sqlStr, cols, tables)
+		if err != nil {
+			return nil, fmt.Errorf("paca.db_query: %w", err)
 		}
 	}
 
@@ -1110,6 +1142,9 @@ func (r *Runtime) execQuery(ctx context.Context, caller plugindom.Plugin, schema
 	}
 
 	if sensitive := r.sensitiveColumnsForQuery(caller, sqlStr); len(sensitive) > 0 {
+		for _, a := range aliases {
+			sensitive[strings.ToLower(a)] = struct{}{}
+		}
 		redactColumns(result.Columns, result.Rows, sensitive)
 	}
 
@@ -1147,7 +1182,7 @@ var coreSensitiveFields = map[string][]string{
 // what it declares in RequestedSensitiveFields. coreSensitiveFields above
 // governs secret *values* and can be unlocked column by column; these
 // tables are different in kind, because the write itself is the attack:
-// "UPDATE users SET role_id = <super-admin role>" or
+// "INSERT INTO role_attachments ..." or
 // "INSERT INTO project_members ..." hands the writer a different
 // principal's privileges rather than exposing a value, and for a
 // single-sensitive-column table (users, api_keys) requesting that one
@@ -1159,10 +1194,11 @@ var coreSensitiveFields = map[string][]string{
 // by coreSensitiveFields as before — these tables have no sensitive value
 // column to redact, so an ordinary SELECT already returns everything.
 var alwaysBlockedWriteTables = map[string]struct{}{
-	"global_roles":        {},
-	"project_roles":       {},
+	"roles":               {},
+	"role_attachments":    {},
 	"project_members":     {},
 	"users":               {},
+	"accounts":            {},
 	"api_keys":            {},
 	"password_set_tokens": {},
 }
@@ -1454,13 +1490,10 @@ func redactColumns(cols []string, rows [][]any, sensitive map[string]struct{}) {
 	}
 }
 
-// execStatement runs a non-SELECT DML statement scoped to the plugin schema.
+// execStatement runs a single INSERT/UPDATE/DELETE statement scoped to the plugin schema.
 func (r *Runtime) execStatement(ctx context.Context, caller plugindom.Plugin, schema, sqlStr, paramsJSON string) (int64, error) {
-	trimmed := strings.TrimSpace(strings.ToUpper(sqlStr))
-	for _, banned := range []string{"DROP", "TRUNCATE", "ALTER", "CREATE", "GRANT", "REVOKE"} {
-		if strings.HasPrefix(trimmed, banned) {
-			return 0, fmt.Errorf("paca.db_exec: DDL/DCL statements are not allowed")
-		}
+	if _, err := validatePluginSQL(sqlStr, sqlModeExec); err != nil {
+		return 0, fmt.Errorf("paca.db_exec: %w", err)
 	}
 	if err := r.checkWriteAllowed(caller, sqlStr, "paca.db_exec"); err != nil {
 		return 0, err
@@ -1671,11 +1704,15 @@ func (r *Runtime) registerCoreFunctions(b wazero.HostModuleBuilder, _ plugindom.
 			}
 
 			rows, err := r.services.DB.QueryContext(ctx,
-				`SELECT pm.id, u.username, u.full_name, pr.role_name
+				`SELECT pm.id, u.username, ac.name AS full_name,
+				        COALESCE((SELECT string_agg(r.name, ', ' ORDER BY r.name)
+				                    FROM role_attachments ra JOIN roles r ON r.id = ra.role_id
+				                   WHERE ra.project_id = pm.project_id
+				                     AND ra.account_id = pm.account_id), '') AS role_name
 				 FROM project_members pm
-				 JOIN users u ON u.id = pm.user_id
-				 JOIN project_roles pr ON pr.id = pm.project_role_id
-		WHERE pm.project_id = $1`, projectID)
+				 JOIN users u ON u.id = pm.account_id
+				 JOIN accounts ac ON ac.id = u.id
+				 WHERE pm.project_id = $1 AND pm.deleted_at IS NULL`, projectID)
 			if err != nil {
 				copy(stack, writeErrorResult(m, err))
 				return
@@ -1764,60 +1801,61 @@ type HTTPRequest struct {
 	Headers    map[string]string `json:"headers"`
 	Body       []byte            `json:"body"`
 
-	// AgentID is set when the request was made by an agent (an agent API key
-	// naming one). It stays on the host — never serialised to the plugin — and
-	// exists so permission_check can judge the agent by its own role, the way
-	// the router's gates do, instead of by UserID: for an agent-key request
-	// that is the shared bot user behind the key, seeded SUPER_ADMIN.
-	AgentID string `json:"-"`
+	// AccountKind is the accountdom.Kind of the caller (UserID is its account
+	// id): "user", "agent" or "service_account". It stays on the host — never
+	// serialised to the plugin — and exists so permission_check judges the
+	// caller as the same principal the router's gates do. Empty means a user.
+	AccountKind string `json:"-"`
 }
 
-// callerHolds reports whether the caller behind req holds permission, judged
-// the way the router's gates judge it: an agent by its own role — its role in
-// the request's project, or its own global role when the request carries no
-// project — and a human by the roles they are assigned. Never the shared bot
-// user an agent's key resolves to, whose SUPER_ADMIN role would let every agent
-// pass any check a plugin makes and so act beyond its own role. It fails
-// closed: anything it cannot resolve is a "no".
-func (r *Runtime) callerHolds(ctx context.Context, req *HTTPRequest, permission authz.Permission) bool {
-	if req == nil || permission == "" || r.services.Authorizer == nil {
+// callerHolds reports whether the caller behind req may perform action, judged
+// by the IAM engine the way the router's gates judge it: as the account the
+// request authenticated as (a user, an agent or a service account), by that
+// account's own role attachments and no one else's. The action is checked on project/<id> when the request carries a
+// project (a built-in action on project/<id>, a plugin's own on
+// project/<id>/plugin/<pluginID>), otherwise on the action's platform root,
+// or — for a plugin's own (or any non-platform) action — on the plugin's
+// platform resource plugin/<pluginID>. It fails closed: anything it cannot resolve is a "no".
+func (r *Runtime) callerHolds(ctx context.Context, req *HTTPRequest, pluginID string, action iam.Action) bool {
+	if req == nil || action == "" || r.services.Authorizer == nil {
 		return false
 	}
 
-	var projectID *uuid.UUID
-	if req.ProjectID != "" {
+	var resource string
+	switch {
+	case req.ProjectID != "":
 		pid, err := uuid.Parse(req.ProjectID)
 		if err != nil {
 			return false
 		}
-		projectID = &pid
+		resource = iam.ProjectResource(pid.String())
+		if !iam.IsBuiltinAction(string(action)) && pluginID != "" {
+			// A plugin's own action is checked on the plugin inside the project.
+			resource = iam.PluginProjectResource(pid.String(), pluginID)
+		}
+	case iam.PlatformRootFor(string(action)) != "":
+		resource = iam.PlatformRootFor(string(action))
+	case pluginID != "":
+		resource = "plugin/" + pluginID
+	default:
+		return false
 	}
 
-	var (
-		granted bool
-		err     error
-	)
-	if req.AgentID != "" {
-		agentID, parseErr := uuid.Parse(req.AgentID)
-		if parseErr != nil {
-			return false
-		}
-		if projectID != nil {
-			granted, err = r.services.Authorizer.HasPermissionsForAgent(ctx, agentID, *projectID, permission)
-		} else {
-			granted, err = r.services.Authorizer.HasGlobalPermissionsForAgent(ctx, agentID, permission)
-		}
-	} else {
-		userID, parseErr := uuid.Parse(req.UserID)
-		if parseErr != nil {
-			return false
-		}
-		granted, err = r.services.Authorizer.HasPermissions(ctx, userID, projectID, permission)
+	accountID, err := uuid.Parse(req.UserID)
+	if err != nil {
+		return false
 	}
+	kind := req.AccountKind
+	if kind == "" {
+		kind = iam.PrincipalUser
+	}
+	principal := iam.Principal{Type: kind, ID: accountID.String()}
+	granted, err := iam.AllowedAll(ctx, r.services.Authorizer, principal, resource, action)
 	return err == nil && granted
 }
 
-func (r *Runtime) registerHTTPFunctions(b wazero.HostModuleBuilder, _ plugindom.Plugin) {
+func (r *Runtime) registerHTTPFunctions(b wazero.HostModuleBuilder, p plugindom.Plugin) {
+	pluginID := p.ID.String()
 	// paca.http_request_body() -> (bodyPtr, bodyLen)
 	b.NewFunctionBuilder().
 		WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, m api.Module, stack []uint64) {
@@ -1867,28 +1905,25 @@ func (r *Runtime) registerHTTPFunctions(b wazero.HostModuleBuilder, _ plugindom.
 		}), []api.ValueType{api.ValueTypeI32, api.ValueTypeI64, api.ValueTypeI64}, nil).
 		Export("http_respond")
 
-	// paca.permission_check(permissionPtr, permissionLen) -> (ok i32)
+	// paca.permission_check(actionPtr, actionLen) -> (ok i32)
 	//
 	// Checks whether the current caller (from the request context set by
-	// WithPluginRequest) holds the given permission key, evaluated against the
-	// same effective permission set as requirePermissions route middleware:
-	// built-in permissions and any plugin-declared custom permission stored
-	// on the caller's project/global role (never granted by role name). Scope
-	// (project vs global) is inferred from whether the request carries a
-	// project_id: project-scoped requests check project-role permissions,
-	// others check global-role permissions only. An agent-API-key request is
-	// judged by the agent's own role, exactly as the route gate judges it —
-	// see callerHolds.
+	// WithPluginRequest) may perform the given IAM action ("<domain>:<verb>",
+	// built-in or plugin-declared), decided by the IAM engine exactly like
+	// requireActions route middleware: on project/<id> when the request
+	// carries a project_id, otherwise on the action's platform root or the
+	// plugin's own resource plugin/<id>. An agent-API-key request is judged
+	// as the agent itself — see callerHolds.
 	//
 	// This lets plugin backend code enforce finer-grained authorization
-	// than the single all-or-nothing requirePermissions route gate allows —
-	// e.g. "is caller the record's author OR does caller hold
-	// time_logging.manage_all" — without a second host round-trip per check.
+	// than the single all-or-nothing requireActions route gate allows —
+	// e.g. "is caller the record's author OR may the caller
+	// time_logging:manage_all" — without a second host round-trip per check.
 	b.NewFunctionBuilder().
 		WithGoModuleFunction(api.GoModuleFunc(func(ctx context.Context, m api.Module, stack []uint64) {
-			permission, _ := readString(m, stack[0], stack[1])
+			action, _ := readString(m, stack[0], stack[1])
 			req, _ := ctx.Value(pluginRequestKey{}).(*HTTPRequest)
-			if r.callerHolds(ctx, req, authz.Permission(permission)) {
+			if r.callerHolds(ctx, req, pluginID, iam.Action(action)) {
 				stack[0] = 1
 				return
 			}

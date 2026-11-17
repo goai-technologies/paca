@@ -222,12 +222,13 @@ func seedACPAgentAndConversation(t *testing.T, env *e2eEnv) (agentID, convID uui
 	sum := sha256.Sum256([]byte(acpDispatchBridgeToken))
 	tokenHash := hex.EncodeToString(sum[:])
 
+	seedAgentAccount(t, env.db, agentID, "E2E ACP Agent")
 	_, err := env.db.ExecContext(ctx, `
-		INSERT INTO agents (id, project_id, name, handle, agent_type, acp_provider, acp_command,
+		INSERT INTO agents (id, project_id, handle, agent_type, acp_provider, acp_command,
 		                     acp_bridge_token_hash, llm_provider, llm_model, llm_api_key_secret,
 		                     system_prompt, max_iterations, timeout_minutes,
 		                     git_committer_name, git_committer_email)
-		VALUES ($1, $2, 'E2E ACP Agent', $3, 'acp', 'claude-code', '[]'::jsonb, $4,
+		VALUES ($1, $2, $3, 'acp', 'claude-code', '[]'::jsonb, $4,
 		        'openai', 'unused', '', '', 5, 1, 'paca-agent', 'agent@example.com')
 	`, agentID, env.projectID, "e2e-acp-agent-"+agentID.String()[:8], tokenHash)
 	if err != nil {

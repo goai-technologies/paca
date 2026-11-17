@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -139,7 +140,7 @@ func TestDeleteComment_ThenEditIsNotFound(t *testing.T) {
 	if err := svc.DeleteComment(context.Background(), testKind, a.ID, projectID, author, nil); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if items, _ := repo.ListForEntity(context.Background(), "task", a.EntityIDOrNil()); len(items) != 0 {
+	if items, _, _ := repo.ListForEntity(context.Background(), "task", a.EntityIDOrNil(), nil, 10); len(items) != 0 {
 		t.Errorf("deleted comment still on the timeline")
 	}
 	if _, err := svc.UpdateComment(context.Background(), testKind, a.ID, projectID, author, nil, content); !errors.Is(err, errNotFound) {
@@ -184,4 +185,62 @@ func TestDiscardAndNilRecorderAreSafe(t *testing.T) {
 	activitysvc.Discard.Record(context.Background(), activitysvc.Entry{Topic: "x"})
 	activitysvc.NewRecorder(nil).Record(context.Background(), activitysvc.Entry{Topic: "x"})
 	activitysvc.New(activitysvc.NewMemoryRepository(), nil, nil).Record(context.Background(), activitysvc.Entry{Topic: "x"})
+}
+
+func TestListForEntity_NewestFirstAcrossPagesAndRejectsBadCursor(t *testing.T) {
+	svc, repo, _ := newService()
+	ctx := context.Background()
+	project, entity := uuid.New(), uuid.New()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var ids []uuid.UUID
+	for i := 0; i < 5; i++ {
+		a := &activitydom.Activity{
+			ID: uuid.New(), ProjectID: project, EntityType: string(events.EntityTask), EntityID: &entity,
+			ActivityType: "task.updated", Content: json.RawMessage(`{}`),
+			CreatedAt: base.Add(time.Duration(i) * time.Minute),
+		}
+		a.UpdatedAt = a.CreatedAt
+		if err := repo.Create(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, a.ID)
+	}
+	// An entry for another entity must never leak in.
+	other := uuid.New()
+	if err := repo.Create(ctx, &activitydom.Activity{ID: uuid.New(), ProjectID: project, EntityType: string(events.EntityTask), EntityID: &other, ActivityType: "task.updated", Content: json.RawMessage(`{}`), CreatedAt: base}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []uuid.UUID
+	var cursor *string
+	for pages := 0; ; pages++ {
+		if pages > 5 {
+			t.Fatal("pagination did not terminate")
+		}
+		items, next, err := svc.ListForEntity(ctx, events.EntityTask, entity, cursor, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range items {
+			got = append(got, a.ID)
+		}
+		if next == nil {
+			break
+		}
+		cursor = next
+	}
+	want := []uuid.UUID{ids[4], ids[3], ids[2], ids[1], ids[0]}
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order mismatch at %d: got %v want %v", i, got, want)
+		}
+	}
+
+	bad := "not-a-cursor"
+	if _, _, err := svc.ListForEntity(ctx, events.EntityTask, entity, &bad, 2); !errors.Is(err, activitydom.ErrInvalidCursor) {
+		t.Fatalf("bad cursor err = %v", err)
+	}
 }

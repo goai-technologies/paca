@@ -1,7 +1,6 @@
 import type { Activity, Task } from "@/lib/interaction-api";
 import type {
 	CustomFieldOption,
-	ProjectMember,
 	TaskStatus,
 	TaskType,
 } from "@/lib/project-api";
@@ -43,7 +42,6 @@ export interface TaskDetailModalProps {
 	onOpenChange: (open: boolean) => void;
 	statuses: TaskStatus[];
 	taskTypes: TaskType[];
-	members?: ProjectMember[];
 	customFields?: CustomFieldDef[];
 	projectName?: string;
 	interactionName?: string;

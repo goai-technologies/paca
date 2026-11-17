@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	attachmentdom "github.com/Paca-AI/api/internal/domain/attachment"
+	roledom "github.com/Paca-AI/api/internal/domain/role"
 	domainuser "github.com/Paca-AI/api/internal/domain/user"
 	"github.com/Paca-AI/api/internal/transport/http/handler"
 )
@@ -25,7 +26,7 @@ import (
 
 type mockUserSvc struct {
 	getByID                      func(ctx context.Context, id uuid.UUID) (*domainuser.User, error)
-	list                         func(ctx context.Context, page, pageSize int) ([]*domainuser.User, int64, error)
+	list                         func(ctx context.Context, page, pageSize int, filter domainuser.ListFilter) ([]*domainuser.User, int64, error)
 	countUsersMustChangePassword func(ctx context.Context) (int64, error)
 	listGlobalPermissions        func(ctx context.Context, id uuid.UUID) ([]string, error)
 	create                       func(ctx context.Context, in domainuser.CreateInput) (*domainuser.User, error)
@@ -37,6 +38,7 @@ type mockUserSvc struct {
 	setPasswordWithToken         func(ctx context.Context, rawToken, newPassword string) error
 	delete                       func(ctx context.Context, id uuid.UUID) error
 	initiateAvatarUpload         func(ctx context.Context, userID uuid.UUID, fileName, contentType string, fileSize int64) (*attachmentdom.UploadSession, error)
+	listAfter                    func(ctx context.Context, limit int, cursor *string, filter domainuser.ListFilter) ([]*domainuser.User, bool, error)
 	completeAvatarUpload         func(ctx context.Context, userID, fileID uuid.UUID) (*domainuser.User, error)
 	removeAvatar                 func(ctx context.Context, userID uuid.UUID) (*domainuser.User, error)
 }
@@ -47,11 +49,17 @@ func (m *mockUserSvc) GetByID(ctx context.Context, id uuid.UUID) (*domainuser.Us
 	}
 	return nil, domainuser.ErrNotFound
 }
-func (m *mockUserSvc) List(ctx context.Context, page, pageSize int) ([]*domainuser.User, int64, error) {
+func (m *mockUserSvc) List(ctx context.Context, page, pageSize int, filter domainuser.ListFilter) ([]*domainuser.User, int64, error) {
 	if m.list != nil {
-		return m.list(ctx, page, pageSize)
+		return m.list(ctx, page, pageSize, filter)
 	}
 	return nil, 0, nil
+}
+func (m *mockUserSvc) ListAfter(ctx context.Context, limit int, cursor *string, filter domainuser.ListFilter) ([]*domainuser.User, bool, error) {
+	if m.listAfter != nil {
+		return m.listAfter(ctx, limit, cursor, filter)
+	}
+	return nil, false, nil
 }
 func (m *mockUserSvc) CountUsers(context.Context) (int64, error) {
 	return 0, nil
@@ -153,6 +161,7 @@ func newUserRouter(svc domainuser.Service) chi.Router {
 	r.Get("/users/me/global-permissions", h.GetMyGlobalPermissions)
 	// admin routes
 	r.Get("/admin/users", h.ListUsers)
+	r.Get("/admin/users/cursor", h.ListUsersByCursor)
 	r.Post("/admin/users", h.CreateUser)
 	r.Get("/admin/users/{userId}", h.GetUserByID)
 	r.Patch("/admin/users/{userId}", h.AdminUpdateUser)
@@ -169,7 +178,7 @@ func TestCreateUser_Success(t *testing.T) {
 	id := uuid.New()
 	svc := &mockUserSvc{
 		create: func(_ context.Context, in domainuser.CreateInput) (*domainuser.User, error) {
-			return &domainuser.User{ID: id, Username: in.Username, FullName: in.FullName, Role: domainuser.RoleUser}, nil
+			return &domainuser.User{ID: id, Username: in.Username, FullName: in.FullName}, nil
 		},
 	}
 	r := newUserRouter(svc)
@@ -181,25 +190,36 @@ func TestCreateUser_Success(t *testing.T) {
 	}
 }
 
-// Assigning a role is a privilege of its own (global_roles.assign) with its own
-// route, so a create body that still names one is refused outright rather than
-// having the role silently ignored.
-func TestCreateUser_RejectsRole(t *testing.T) {
+// Roles are not a field of the create body: a stray "role" is ignored, the new
+// account gets the default role (attached by the repository), and the response
+// shows the account's roles as a list.
+func TestCreateUser_RolesAreNotInTheBody(t *testing.T) {
+	roleID := uuid.New()
 	svc := &mockUserSvc{
-		create: func(context.Context, domainuser.CreateInput) (*domainuser.User, error) {
-			t.Fatal("Create must not be called when the body names a role")
-			return nil, nil
+		create: func(_ context.Context, in domainuser.CreateInput) (*domainuser.User, error) {
+			return &domainuser.User{ID: uuid.New(), Username: in.Username, FullName: in.FullName,
+				Roles: []roledom.Summary{{ID: roleID, Name: "USER"}}}, nil
 		},
 	}
 	r := newUserRouter(svc)
 
 	w := do(t, r, http.MethodPost, "/admin/users",
 		jsonBody(t, map[string]string{"username": "bob", "password": "pass1234", "full_name": "Bob", "role": "ADMIN"}))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "global-roles") {
-		t.Errorf("expected the error to point at the global-roles route, got %s", w.Body.String())
+	var resp struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if _, legacy := resp.Data["role"]; legacy {
+		t.Errorf("the legacy role field must not be in the response: %v", resp.Data)
+	}
+	roles, _ := resp.Data["roles"].([]any)
+	if len(roles) != 1 || roles[0].(map[string]any)["name"] != "USER" || roles[0].(map[string]any)["id"] != roleID.String() {
+		t.Errorf("roles = %v", resp.Data["roles"])
 	}
 }
 
@@ -240,9 +260,9 @@ func TestCreateUser_UsernameTaken(t *testing.T) {
 func TestListUsers_Success(t *testing.T) {
 	id := uuid.New()
 	svc := &mockUserSvc{
-		list: func(_ context.Context, _, _ int) ([]*domainuser.User, int64, error) {
+		list: func(_ context.Context, _, _ int, _ domainuser.ListFilter) ([]*domainuser.User, int64, error) {
 			return []*domainuser.User{
-				{ID: id, Username: "alice", FullName: "Alice", Role: domainuser.RoleUser},
+				{ID: id, Username: "alice", FullName: "Alice"},
 			}, 1, nil
 		},
 	}
@@ -254,9 +274,90 @@ func TestListUsers_Success(t *testing.T) {
 	}
 }
 
+func TestListUsers_PassesSearchAndRoleFilter(t *testing.T) {
+	var got domainuser.ListFilter
+	svc := &mockUserSvc{
+		list: func(_ context.Context, _, _ int, f domainuser.ListFilter) ([]*domainuser.User, int64, error) {
+			got = f
+			return nil, 0, nil
+		},
+	}
+	r := newUserRouter(svc)
+
+	w := do(t, r, http.MethodGet, "/admin/users?search=%20alice%20smith%20&role=ADMIN", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if got.Search != "alice smith" || got.Role != "ADMIN" {
+		t.Fatalf("filter = %+v, want search=%q role=%q", got, "alice smith", "ADMIN")
+	}
+}
+
+func TestListUsersByCursor_NextCursorAndFilter(t *testing.T) {
+	last := &domainuser.User{ID: uuid.New(), Username: "bob", FullName: "Bob"}
+	var gotLimit int
+	var gotCursor *string
+	var gotFilter domainuser.ListFilter
+	svc := &mockUserSvc{
+		listAfter: func(_ context.Context, limit int, cursor *string, f domainuser.ListFilter) ([]*domainuser.User, bool, error) {
+			gotLimit, gotCursor, gotFilter = limit, cursor, f
+			return []*domainuser.User{last}, true, nil
+		},
+	}
+	r := newUserRouter(svc)
+
+	w := do(t, r, http.MethodGet, "/admin/users/cursor?page_size=1&cursor=abc&search=%20bo%20", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if gotLimit != 1 || gotCursor == nil || *gotCursor != "abc" || gotFilter.Search != "bo" {
+		t.Fatalf("limit=%d cursor=%v filter=%+v", gotLimit, gotCursor, gotFilter)
+	}
+	var env struct {
+		Data struct {
+			Items      []map[string]any `json:"items"`
+			NextCursor *string          `json:"next_cursor"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.Data.Items) != 1 || env.Data.NextCursor == nil {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+	dec, err := domainuser.DecodeCursor(*env.Data.NextCursor)
+	if err != nil || dec.ID != last.ID.String() {
+		t.Fatalf("next_cursor = %v (%v), want id %s", *env.Data.NextCursor, err, last.ID)
+	}
+}
+
+func TestListUsersByCursor_LastPageHasNoCursor(t *testing.T) {
+	svc := &mockUserSvc{
+		listAfter: func(context.Context, int, *string, domainuser.ListFilter) ([]*domainuser.User, bool, error) {
+			return []*domainuser.User{{ID: uuid.New(), Username: "a"}}, false, nil
+		},
+	}
+	w := do(t, newUserRouter(svc), http.MethodGet, "/admin/users/cursor", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"next_cursor":null`) {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestListUsersByCursor_InvalidCursor(t *testing.T) {
+	svc := &mockUserSvc{
+		listAfter: func(context.Context, int, *string, domainuser.ListFilter) ([]*domainuser.User, bool, error) {
+			return nil, false, domainuser.ErrInvalidCursor
+		},
+	}
+	w := do(t, newUserRouter(svc), http.MethodGet, "/admin/users/cursor?cursor=%21", nil)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "USER_INVALID_CURSOR") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestListUsers_ServiceError(t *testing.T) {
 	svc := &mockUserSvc{
-		list: func(_ context.Context, _, _ int) ([]*domainuser.User, int64, error) {
+		list: func(_ context.Context, _, _ int, _ domainuser.ListFilter) ([]*domainuser.User, int64, error) {
 			return nil, 0, errors.New("db error")
 		},
 	}
@@ -281,7 +382,7 @@ func TestListUsers_PageValid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotPage int
 			svc := &mockUserSvc{
-				list: func(_ context.Context, page, _ int) ([]*domainuser.User, int64, error) {
+				list: func(_ context.Context, page, _ int, _ domainuser.ListFilter) ([]*domainuser.User, int64, error) {
 					gotPage = page
 					return []*domainuser.User{}, 0, nil
 				},
@@ -307,7 +408,7 @@ func TestListUsers_PageInvalidRejected(t *testing.T) {
 	for _, query := range cases {
 		t.Run(query, func(t *testing.T) {
 			svc := &mockUserSvc{
-				list: func(_ context.Context, page, _ int) ([]*domainuser.User, int64, error) {
+				list: func(_ context.Context, page, _ int, _ domainuser.ListFilter) ([]*domainuser.User, int64, error) {
 					t.Fatalf("service should not be called for invalid page, got page=%d", page)
 					return nil, 0, nil
 				},
@@ -333,7 +434,7 @@ func TestGetUserByID_Success(t *testing.T) {
 			if got != id {
 				t.Fatalf("unexpected id: %v", got)
 			}
-			return &domainuser.User{ID: id, Username: "alice", Role: domainuser.RoleUser}, nil
+			return &domainuser.User{ID: id, Username: "alice"}, nil
 		},
 	}
 	r := newUserRouter(svc)
@@ -381,7 +482,7 @@ func TestGetMe_Success(t *testing.T) {
 	id := uuid.New()
 	svc := &mockUserSvc{
 		getByID: func(_ context.Context, _ uuid.UUID) (*domainuser.User, error) {
-			return &domainuser.User{ID: id, Username: "me", Role: domainuser.RoleUser}, nil
+			return &domainuser.User{ID: id, Username: "me"}, nil
 		},
 	}
 	r := chi.NewRouter()
@@ -438,7 +539,7 @@ func TestUpdateMe_Success(t *testing.T) {
 			if got != id {
 				t.Fatalf("unexpected id: %v", got)
 			}
-			return &domainuser.User{ID: id, FullName: in.FullName, Role: domainuser.RoleUser}, nil
+			return &domainuser.User{ID: id, FullName: in.FullName}, nil
 		},
 	}
 	r := chi.NewRouter()
@@ -474,7 +575,7 @@ func TestGetMyGlobalPermissions_Success(t *testing.T) {
 			if got != id {
 				t.Fatalf("unexpected id: %v", got)
 			}
-			return []string{"global_roles.read", "users.read"}, nil
+			return []string{"roles:read", "users:read"}, nil
 		},
 	}
 	r := chi.NewRouter()
@@ -483,7 +584,20 @@ func TestGetMyGlobalPermissions_Success(t *testing.T) {
 
 	w := do(t, r, http.MethodGet, "/users/me/global-permissions", nil)
 	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	acts, ok := env.Data["actions"].([]any)
+	if !ok || len(acts) != 2 || acts[0] != "roles:read" || acts[1] != "users:read" {
+		t.Fatalf("data = %v, want {actions: [roles:read users:read]}", env.Data)
+	}
+	if _, legacy := env.Data["permissions"]; legacy {
+		t.Fatalf("legacy permissions field still emitted: %v", env.Data)
 	}
 }
 
@@ -545,7 +659,7 @@ func TestAdminUpdateUser_Success(t *testing.T) {
 			if got != id {
 				t.Fatalf("unexpected id: %v", got)
 			}
-			return &domainuser.User{ID: id, FullName: in.FullName, Role: domainuser.RoleUser}, nil
+			return &domainuser.User{ID: id, FullName: in.FullName}, nil
 		},
 	}
 	r := newUserRouter(svc)
@@ -923,9 +1037,9 @@ func TestCreateUser_PasswordTooShort(t *testing.T) {
 func TestListUsers_ResponseShape(t *testing.T) {
 	id := uuid.New()
 	svc := &mockUserSvc{
-		list: func(_ context.Context, _, _ int) ([]*domainuser.User, int64, error) {
+		list: func(_ context.Context, _, _ int, _ domainuser.ListFilter) ([]*domainuser.User, int64, error) {
 			return []*domainuser.User{
-				{ID: id, Username: "alice", FullName: "Alice", Role: domainuser.RoleUser},
+				{ID: id, Username: "alice", FullName: "Alice"},
 			}, 1, nil
 		},
 	}
@@ -973,10 +1087,10 @@ func TestListUsers_ResponseShape(t *testing.T) {
 // displayed or how small page_size is.
 func TestListUsers_MustChangePasswordCountIsWorkspaceWide(t *testing.T) {
 	svc := &mockUserSvc{
-		list: func(_ context.Context, _, _ int) ([]*domainuser.User, int64, error) {
+		list: func(_ context.Context, _, _ int, _ domainuser.ListFilter) ([]*domainuser.User, int64, error) {
 			// Current page has zero must-change-password users...
 			return []*domainuser.User{
-				{ID: uuid.New(), Username: "alice", Role: domainuser.RoleUser, MustChangePassword: false},
+				{ID: uuid.New(), Username: "alice", MustChangePassword: false},
 			}, 43, nil
 		},
 		countUsersMustChangePassword: func(context.Context) (int64, error) {
@@ -1006,7 +1120,7 @@ func TestListUsers_MustChangePasswordCountIsWorkspaceWide(t *testing.T) {
 
 func TestListUsers_MustChangePasswordCountServiceError(t *testing.T) {
 	svc := &mockUserSvc{
-		list: func(_ context.Context, _, _ int) ([]*domainuser.User, int64, error) {
+		list: func(_ context.Context, _, _ int, _ domainuser.ListFilter) ([]*domainuser.User, int64, error) {
 			return []*domainuser.User{}, 0, nil
 		},
 		countUsersMustChangePassword: func(context.Context) (int64, error) {
@@ -1038,26 +1152,6 @@ func TestAdminUpdateUser_MalformedJSON(t *testing.T) {
 	}
 }
 
-// See TestCreateUser_RejectsRole: a profile update must not carry a role.
-func TestAdminUpdateUser_RejectsRole(t *testing.T) {
-	svc := &mockUserSvc{
-		adminUpdate: func(context.Context, uuid.UUID, domainuser.AdminUpdateInput) (*domainuser.User, error) {
-			t.Fatal("AdminUpdate must not be called when the body names a role")
-			return nil, nil
-		},
-	}
-	r := newUserRouter(svc)
-
-	w := do(t, r, http.MethodPatch, fmt.Sprintf("/admin/users/%s", uuid.New()),
-		jsonBody(t, map[string]string{"full_name": "Renamed", "role": "ADMIN"}))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "global-roles") {
-		t.Errorf("expected the error to point at the global-roles route, got %s", w.Body.String())
-	}
-}
-
 // ---------------------------------------------------------------------------
 // UserResponse — must_change_password field
 // ---------------------------------------------------------------------------
@@ -1066,7 +1160,7 @@ func TestCreateUser_ResponseIncludesMustChangePassword(t *testing.T) {
 	id := uuid.New()
 	svc := &mockUserSvc{
 		create: func(_ context.Context, _ domainuser.CreateInput) (*domainuser.User, error) {
-			return &domainuser.User{ID: id, Username: "alice", Role: domainuser.RoleUser, MustChangePassword: true}, nil
+			return &domainuser.User{ID: id, Username: "alice", MustChangePassword: true}, nil
 		},
 	}
 	r := newUserRouter(svc)

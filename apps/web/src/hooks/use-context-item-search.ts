@@ -1,17 +1,16 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { conversationTriggerLabel } from "@/components/projects/agents/conversations-layout";
 import {
 	type AgentConversation,
-	agentsQueryOptions,
-	chattableAgentsQueryOptions,
 	listConversations,
 	listGlobalConversations,
 } from "@/lib/agent-api";
-import { listAutomationsPage } from "@/lib/automation-api";
+import { useAgentDirectory } from "@/lib/agent-directory";
+import { listAutomations } from "@/lib/automation-api";
 import type { ContextItemType } from "@/lib/context-items";
-import { listDocumentsPage } from "@/lib/doc-api";
+import { listDocuments } from "@/lib/doc-api";
 import { searchTasksForPicker } from "@/lib/interaction-api";
 import type { LoadMorePagination } from "@/lib/scroll-pagination";
 import { useDebouncedCallback } from "./use-debounced-callback";
@@ -70,7 +69,7 @@ interface UseContextItemSearchResult {
  * components/assistant-ui/context-injection.tsx), dispatching per
  * ContextItemType to whichever backend search already exists for that type:
  *   - task: the same searchTasksForPicker use-task-picker-search.ts uses.
- *   - doc / automation: listDocumentsPage/listAutomationsPage — cursor-
+ *   - doc / automation: listDocuments/listAutomations — cursor-
  *     paginated, same as task/conversation.
  *   - conversation: listConversations (project-scoped) or
  *     listGlobalConversations (no projectId — global chat).
@@ -124,17 +123,7 @@ export function useContextItemSearch(
 	// Only fetched for the "conversation" tab — used to resolve each
 	// conversation's agent_id into a display name. Cheap/deduped by
 	// react-query when already fetched elsewhere (e.g. the agent picker).
-	const agentsBaseOptions = projectId
-		? agentsQueryOptions(projectId)
-		: chattableAgentsQueryOptions;
-	const { data: agents = [] } = useQuery({
-		...agentsBaseOptions,
-		enabled: queryEnabled && type === "conversation",
-	});
-	const agentsById = useMemo(
-		() => new Map(agents.map((a) => [a.id, a])),
-		[agents],
-	);
+	const getAgent = useAgentDirectory(projectId);
 
 	const { data, isFetching, isFetchingNextPage, hasNextPage, fetchNextPage } =
 		useInfiniteQuery({
@@ -164,7 +153,7 @@ export function useContextItemSearch(
 					}
 					case "doc": {
 						if (!projectId) return { items: [], nextCursor: undefined };
-						const page = await listDocumentsPage(projectId, {
+						const page = await listDocuments(projectId, {
 							search: debouncedSearch,
 							cursor: pageParam,
 							pageSize: PAGE_SIZE,
@@ -179,7 +168,7 @@ export function useContextItemSearch(
 					}
 					case "automation": {
 						if (!projectId) return { items: [], nextCursor: undefined };
-						const page = await listAutomationsPage(projectId, {
+						const page = await listAutomations(projectId, {
 							search: debouncedSearch,
 							cursor: pageParam,
 							pageSize: PAGE_SIZE,
@@ -229,7 +218,7 @@ export function useContextItemSearch(
 		const rawItems = data?.pages.flatMap((page) => page.items) ?? [];
 		if (type !== "conversation") return rawItems as ContextSearchResult[];
 		return (rawItems as AgentConversation[]).map((conv) => {
-			const agentName = agentsById.get(conv.agent_id)?.name;
+			const agentName = getAgent(conv.agent_id)?.name;
 			return {
 				id: conv.id,
 				title: agentName ?? conv.agent_id.slice(0, 8),
@@ -238,7 +227,7 @@ export function useContextItemSearch(
 				).toLocaleDateString()}`,
 			};
 		});
-	}, [data, queryEnabled, type, agentsById, t]);
+	}, [data, queryEnabled, type, getAgent, t]);
 
 	const isInitialFetch = isFetching && !isFetchingNextPage;
 	const debouncePending = search.trim() !== debouncedSearch;

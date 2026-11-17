@@ -31,7 +31,7 @@
 # ── Environment variable reference ───────────────────────────────────────────
 #   Variables named after an actual `.env` key (DATABASE_URL, STORAGE_*,
 #   BACKUP_*, PUBLIC_URL, GATEWAY_PORT, ADMIN_*, ENCRYPTION_KEY, JWT_SECRET,
-#   POSTGRES_PASSWORD, AGENT_API_KEY, INTERNAL_API_KEY) are written to `.env`
+#   POSTGRES_PASSWORD, INTERNAL_API_KEY) are written to `.env`
 #   verbatim when set. Variables prefixed `PACA_` are installer-only choices
 #   that steer which branch of a prompt is taken, with two exceptions —
 #   PACA_WEB and PACA_AGENT_RUNNER are also written to `.env` verbatim (see
@@ -88,7 +88,6 @@
 #
 #   Agent Runner
 #     PACA_AGENT_RUNNER             yes/no                               (default: yes)
-#     AGENT_API_KEY                 (default: auto-generated)
 #     INTERNAL_API_KEY              (default: auto-generated)
 #
 #   SSH access to environments (optional; requires Agent Runner)
@@ -265,8 +264,12 @@ download() {
 }
 
 # get_env_var FILE VAR
+# Prints VAR's value, or nothing when VAR is absent. A missing variable is a
+# normal case (e.g. an .env that predates it), not an error: under
+# `set -euo pipefail` a bare `grep` miss would fail the pipeline and silently
+# kill any `X="$(get_env_var ...)"` assignment, so the miss is swallowed here.
 get_env_var() {
-    grep "^${2}=" "$1" 2>/dev/null | head -1 | cut -d= -f2-
+    { grep "^${2}=" "$1" 2>/dev/null || true; } | head -1 | cut -d= -f2-
 }
 
 # ── Version / URL resolution ──────────────────────────────────────────────────
@@ -717,7 +720,6 @@ INCLUDE_AGENT_RUNNER="yes"
 yes_no INCLUDE_AGENT_RUNNER "Include the Agent Runner service?" "${PACA_AGENT_RUNNER:-y}"
 
 SCALE_AGENT_RUNNER=""
-AGENT_API_KEY="${AGENT_API_KEY:-$(rand_hex 32)}"
 INTERNAL_API_KEY="${INTERNAL_API_KEY:-$(rand_hex 32)}"
 
 if [[ "$INCLUDE_AGENT_RUNNER" == "no" ]]; then
@@ -870,8 +872,7 @@ STORAGE_USE_SSL=${STORAGE_USE_SSL}
 ENCRYPTION_KEY=${ENCRYPTION_KEY}
 
 # ── Agent Runner ─────────────────────────────────────────────────────────────
-# Both keys below must match across api and agent-runner services.
-AGENT_API_KEY=${AGENT_API_KEY}
+# Must match across api and agent-runner services.
 INTERNAL_API_KEY=${INTERNAL_API_KEY}
 AGENT_SERVER_IMAGE=ghcr.io/paca-ai/paca-agent-server-goose:${IMAGE_TAG}
 PORT_POOL_START=10000

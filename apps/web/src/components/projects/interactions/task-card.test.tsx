@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { Task } from "@/lib/interaction-api";
+import { getMemberDirectory } from "@/lib/member-directory";
 import type { ProjectMember, TaskStatus, TaskType } from "@/lib/project-api";
 import { TaskCard } from "./task-card";
 
@@ -88,6 +89,8 @@ describe("TaskCard", () => {
 			full_name: "Test 2",
 			username: "test2",
 		} as ProjectMember;
+		// Assignees are resolved by id through the member directory.
+		getMemberDirectory("proj-1").seed([member]);
 		const renderCard = (assigneeIds: string[]) =>
 			render(
 				<TaskCard
@@ -97,18 +100,17 @@ describe("TaskCard", () => {
 					})}
 					statuses={NO_STATUSES}
 					taskTypes={NO_TYPES}
-					members={[member]}
 					visibleFields={["assignee"]}
 				/>,
 				{ wrapper },
 			);
 
 		const { unmount } = renderCard([]);
-		expect(screen.queryByText("T")).not.toBeInTheDocument();
+		expect(screen.queryByText("T2")).not.toBeInTheDocument();
 		unmount();
 
 		renderCard(["member-2"]);
-		expect(screen.getByText("T")).toBeInTheDocument();
+		expect(screen.getByText("T2")).toBeInTheDocument();
 	});
 
 	it("does not render a type badge when task has no task_type_id", () => {
@@ -236,8 +238,8 @@ describe("TaskCard", () => {
 			/>,
 			{ wrapper },
 		);
-		// assigned state: filled avatar circle with the primary gradient
-		const assigneeEl = container.querySelector(".from-primary\\/20");
+		// assigned state: an avatar is rendered for the assignee
+		const assigneeEl = container.querySelector("[data-slot='avatar']");
 		expect(assigneeEl).toBeInTheDocument();
 	});
 

@@ -30,9 +30,35 @@ import {
 export interface ViewContext {
 	statuses: TaskStatus[];
 	taskTypes: TaskType[];
+	/** People to offer as "assignee" columns/swimlanes. */
 	members: ProjectMember[];
+	/** People to offer as "reporter" columns/swimlanes; falls back to
+	 *  `members` when not given. */
+	reporters?: ProjectMember[];
 	customFields: CustomFieldDefinition[];
 	sprints?: Sprint[];
+}
+
+/** The distinct assignees and reporters among `tasks`, sorted by name, taken
+ *  from the people the task list embeds (include=assignees,reporter). They are
+ *  the people "group by assignee/reporter" offers columns for — those who
+ *  actually have tasks in the loaded view, rather than the whole team. */
+export function peopleFromTasks(tasks: Task[]): {
+	assignees: ProjectMember[];
+	reporters: ProjectMember[];
+} {
+	const assignees = new Map<string, ProjectMember>();
+	const reporters = new Map<string, ProjectMember>();
+	for (const t of tasks) {
+		for (const a of t.assignees ?? []) assignees.set(a.id, a);
+		if (t.reporter) reporters.set(t.reporter.id, t.reporter);
+	}
+	const byName = (a: ProjectMember, b: ProjectMember) =>
+		(a.full_name || a.username).localeCompare(b.full_name || b.username);
+	return {
+		assignees: [...assignees.values()].sort(byName),
+		reporters: [...reporters.values()].sort(byName),
+	};
 }
 
 // ── Column / Swimlane group definition ───────────────────────────────────────
@@ -113,7 +139,7 @@ export function getColumnGroupDefs(
 
 	if (columnBy === "reporter") {
 		return [
-			...[...ctx.members]
+			...[...(ctx.reporters ?? ctx.members)]
 				.sort((a, b) =>
 					(a.full_name || a.username).localeCompare(b.full_name || b.username),
 				)

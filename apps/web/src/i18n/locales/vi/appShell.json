@@ -30,7 +30,8 @@
 		"team": "Đội nhóm",
 		"settings": "Cài đặt",
 		"changelog": "Có gì mới",
-		"activity": "Hoạt động"
+		"activity": "Hoạt động",
+		"serviceAccounts": "Tài khoản dịch vụ"
 	},
 	"projectSwitcher": {
 		"projects": "Dự án",

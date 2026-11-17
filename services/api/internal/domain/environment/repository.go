@@ -12,27 +12,32 @@ type Repository interface {
 	FolderRepository
 	SSHKeyRepository
 	PortForwardRepository
-	AccessGrantRepository
 }
 
-// AccessGrantRepository defines storage for per-member access grants on a
-// restricted environment — see Environment.AccessMode's doc comment.
-type AccessGrantRepository interface {
-	ListEnvironmentAccessGrants(ctx context.Context, environmentID uuid.UUID) ([]*EnvironmentAccessGrant, error)
-	// AddEnvironmentAccessGrant returns ErrEnvironmentAccessGrantExists if
-	// memberID is already granted.
-	AddEnvironmentAccessGrant(ctx context.Context, g *EnvironmentAccessGrant) error
-	RemoveEnvironmentAccessGrant(ctx context.Context, environmentID, memberID uuid.UUID) error
-	HasEnvironmentAccessGrant(ctx context.Context, environmentID, memberID uuid.UUID) (bool, error)
-	// ListGrantedEnvironmentIDsForMember mirrors
-	// agentdom.AccessGrantRepository.ListGrantedAgentIDsForMember — decorates
-	// ListEnvironments in one query instead of an N+1 check per row.
-	ListGrantedEnvironmentIDsForMember(ctx context.Context, memberID uuid.UUID) ([]uuid.UUID, error)
+// EnvironmentFilter narrows an environment listing. Zero values match everything.
+type EnvironmentFilter struct {
+	// Search is split on whitespace; every word must appear (case-insensitive)
+	// in the environment's name or slug.
+	Search string
+	// IDs, when non-empty, keeps only these environments — a batch lookup.
+	IDs []uuid.UUID
+}
+
+// FolderFilter narrows an environment folder listing.
+type FolderFilter struct {
+	// Search is split on whitespace; every word must appear (case-insensitive)
+	// in the folder path.
+	Search string
+	// IDs, when non-empty, keeps only these folders — a batch lookup.
+	IDs []uuid.UUID
 }
 
 // EnvironmentRepository defines storage operations for environments.
 type EnvironmentRepository interface {
-	ListEnvironments(ctx context.Context, projectID uuid.UUID) ([]*Environment, error)
+	// ListEnvironments returns up to limit of a project's environments matching
+	// filter, newest first, after the environment cursorAfter names (nil = the
+	// newest), plus whether more follow.
+	ListEnvironments(ctx context.Context, projectID uuid.UUID, filter EnvironmentFilter, cursorAfter *string, limit int) ([]*Environment, bool, error)
 	FindEnvironmentByID(ctx context.Context, id uuid.UUID) (*Environment, error)
 	// FindVisibleEnvironmentInProject returns a single environment by ID,
 	// but only if it belongs to projectID — the environment counterpart to
@@ -70,7 +75,10 @@ type EnvironmentRepository interface {
 
 // FolderRepository defines storage for environment folders.
 type FolderRepository interface {
-	ListFolders(ctx context.Context, environmentID uuid.UUID) ([]*EnvironmentFolder, error)
+	// ListFolders returns up to limit of an environment's folders matching
+	// filter, oldest first (the order they were added), after cursorAfter, plus
+	// whether more follow and how many match in total.
+	ListFolders(ctx context.Context, environmentID uuid.UUID, filter FolderFilter, cursorAfter *string, limit int) (folders []*EnvironmentFolder, hasMore bool, total int64, err error)
 	FindFolderByID(ctx context.Context, id uuid.UUID) (*EnvironmentFolder, error)
 	CreateFolder(ctx context.Context, f *EnvironmentFolder) error
 	DeleteFolder(ctx context.Context, id uuid.UUID) error
@@ -78,7 +86,9 @@ type FolderRepository interface {
 
 // SSHKeyRepository defines storage for environment SSH keys.
 type SSHKeyRepository interface {
-	ListSSHKeys(ctx context.Context, environmentID uuid.UUID) ([]*EnvironmentSSHKey, error)
+	// ListSSHKeys returns up to limit of an environment's SSH keys, oldest
+	// first, after cursorAfter, plus whether more follow and the total count.
+	ListSSHKeys(ctx context.Context, environmentID uuid.UUID, cursorAfter *string, limit int) (keys []*EnvironmentSSHKey, hasMore bool, total int64, err error)
 	// FindSSHKeyByID returns a single SSH key by ID — mirrors
 	// FolderRepository.FindFolderByID's own ownership-check-before-delete
 	// use (Service.DeleteSSHKey), so deleting a key doesn't need to list
@@ -96,7 +106,9 @@ type SSHKeyRepository interface {
 
 // PortForwardRepository defines storage for environment port forwards.
 type PortForwardRepository interface {
-	ListPortForwards(ctx context.Context, environmentID uuid.UUID) ([]*EnvironmentPortForward, error)
+	// ListPortForwards returns up to limit of an environment's port forwards,
+	// oldest first, after cursorAfter, plus whether more follow and the total count.
+	ListPortForwards(ctx context.Context, environmentID uuid.UUID, cursorAfter *string, limit int) (forwards []*EnvironmentPortForward, hasMore bool, total int64, err error)
 	CreatePortForward(ctx context.Context, pf *EnvironmentPortForward) error
 	DeletePortForward(ctx context.Context, id uuid.UUID) error
 	// FindPortForwardByID returns a single port forward by ID — used to

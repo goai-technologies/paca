@@ -8,11 +8,16 @@ var (
 	ErrDocNotFound     = errors.New("document: not found")
 	ErrDocTitleInvalid = errors.New("document: title is empty or invalid")
 
+	// ErrInvalidCursor is returned when a client-supplied tree-listing cursor
+	// cannot be decoded.
+	ErrInvalidCursor = errors.New("doc: invalid pagination cursor")
+
 	// Folder errors.
 	ErrFolderNotFound     = errors.New("doc folder: not found")
 	ErrFolderNameInvalid  = errors.New("doc folder: name is empty or invalid")
 	ErrFolderNotInProject = errors.New("doc folder: folder does not belong to this project")
 	ErrFolderSelfParent   = errors.New("doc folder: a folder cannot be its own parent")
+	ErrFolderCycle        = errors.New("doc folder: moving the folder there would create a cycle")
 
 	// Snapshot errors.
 	ErrSnapshotNotFound = errors.New("doc snapshot: not found")
@@ -23,9 +28,8 @@ var (
 	ErrActivityNotAComment   = errors.New("doc activity: this entry is not a comment and cannot be edited")
 	ErrCommentContentInvalid = errors.New("doc activity: comment content must not be empty")
 
-	// ErrCommentActorUnidentified is returned when the request authenticated
-	// with the shared agent API key but did not supply an X-Agent-ID header.
-	// That identity is never itself a project member, so there is no member
-	// to attribute the comment to.
-	ErrCommentActorUnidentified = errors.New("doc activity: request has no identifiable project member; pass X-Agent-ID when using the agent API key")
+	// ErrCommentActorUnidentified is returned when the authenticated caller is
+	// the built-in system actor, which is never itself a project member, so
+	// there is no member to attribute the comment to.
+	ErrCommentActorUnidentified = errors.New("doc activity: request has no identifiable project member")
 )

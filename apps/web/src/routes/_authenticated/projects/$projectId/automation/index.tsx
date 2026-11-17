@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	useInfiniteQuery,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	Workflow as AutomationIcon,
@@ -8,9 +13,10 @@ import {
 	Plus,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AutomationDependencyMap } from "@/components/projects/automation/automation-dependency-map";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,16 +65,27 @@ function AutomationListPage() {
 	const navigate = useNavigate();
 	const { hasProjectPermission, isLoading: isPermissionsLoading } =
 		useProjectPermissions(projectId);
-	const canManage = hasProjectPermission("workflows.write");
-	const canRead = hasProjectPermission("workflows.read");
+	const canManage = hasProjectPermission("workflows:write");
+	const canRead = hasProjectPermission("workflows:read");
 
 	const { data: project } = useQuery(projectQueryOptions(projectId));
 	const {
-		data: automations = [],
+		data: automationPages,
 		isLoading: isDataLoading,
 		isError,
 		error,
-	} = useQuery({ ...automationsQueryOptions(projectId), enabled: canRead });
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+		isFetchNextPageError,
+	} = useInfiniteQuery({
+		...automationsQueryOptions(projectId),
+		enabled: canRead,
+	});
+	const automations = useMemo(
+		() => automationPages?.pages.flatMap((p) => p.items) ?? [],
+		[automationPages],
+	);
 	// While permissions are still loading, canRead defaults to false same as
 	// a confirmed denial — guard on isPermissionsLoading (and fold it into
 	// isLoading) so the page shows the skeleton instead of flashing
@@ -197,66 +214,74 @@ function AutomationListPage() {
 						)}
 					</div>
 				) : (
-					<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-						{automations.map((a) => (
-							// biome-ignore lint/a11y/noStaticElementInteractions: card navigates to the automation builder; the delete button below stays keyboard-reachable on its own
-							// biome-ignore lint/a11y/useKeyWithClickEvents: click-to-navigate card, consistent with the agent list cards
-							<div
-								key={a.id}
-								onClick={() =>
-									navigate({
-										to: "/projects/$projectId/automation/$automationId",
-										params: { projectId, automationId: a.id },
-									})
-								}
-								className="group relative flex flex-col gap-3 rounded-xl border border-border/60 bg-card p-5 transition-all hover:border-border hover:shadow-sm cursor-pointer"
-							>
-								<div className="flex items-start justify-between gap-3">
-									<div className="flex items-center gap-3 min-w-0">
-										<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-											<AutomationIcon className="size-4 text-primary" />
+					<>
+						<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+							{automations.map((a) => (
+								// biome-ignore lint/a11y/noStaticElementInteractions: card navigates to the automation builder; the delete button below stays keyboard-reachable on its own
+								// biome-ignore lint/a11y/useKeyWithClickEvents: click-to-navigate card, consistent with the agent list cards
+								<div
+									key={a.id}
+									onClick={() =>
+										navigate({
+											to: "/projects/$projectId/automation/$automationId",
+											params: { projectId, automationId: a.id },
+										})
+									}
+									className="group relative flex flex-col gap-3 rounded-xl border border-border/60 bg-card p-5 transition-all hover:border-border hover:shadow-sm cursor-pointer"
+								>
+									<div className="flex items-start justify-between gap-3">
+										<div className="flex items-center gap-3 min-w-0">
+											<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+												<AutomationIcon className="size-4 text-primary" />
+											</div>
+											<div className="min-w-0">
+												<p className="font-semibold text-sm leading-tight truncate">
+													{a.name}
+												</p>
+												<p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+													{a.description || t("automation.list.noDescription")}
+												</p>
+											</div>
 										</div>
-										<div className="min-w-0">
-											<p className="font-semibold text-sm leading-tight truncate">
-												{a.name}
-											</p>
-											<p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-												{a.description || t("automation.list.noDescription")}
-											</p>
-										</div>
-									</div>
 
-									<div className="flex items-center gap-1.5 shrink-0">
-										<Badge
-											variant={STATUS_BADGE_VARIANT[a.status] ?? "default"}
-										>
-											{t(`automation.status.${a.status}`)}
-										</Badge>
-										{canManage && (
-											<button
-												type="button"
-												onClick={(e) => {
-													e.stopPropagation();
-													setDeleteTarget(a);
-												}}
-												className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+										<div className="flex items-center gap-1.5 shrink-0">
+											<Badge
+												variant={STATUS_BADGE_VARIANT[a.status] ?? "default"}
 											>
-												<Trash2 className="size-3.5" />
-											</button>
-										)}
+												{t(`automation.status.${a.status}`)}
+											</Badge>
+											{canManage && (
+												<button
+													type="button"
+													onClick={(e) => {
+														e.stopPropagation();
+														setDeleteTarget(a);
+													}}
+													className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+												>
+													<Trash2 className="size-3.5" />
+												</button>
+											)}
+										</div>
+									</div>
+
+									{/* Meta row */}
+									<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+										<Clock className="size-3" />
+										{t("automation.list.updated", {
+											time: timeAgo(a.updated_at, tCommon),
+										})}
 									</div>
 								</div>
-
-								{/* Meta row */}
-								<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-									<Clock className="size-3" />
-									{t("automation.list.updated", {
-										time: timeAgo(a.updated_at, tCommon),
-									})}
-								</div>
-							</div>
-						))}
-					</div>
+							))}
+						</div>
+						<LoadMoreSentinel
+							hasMore={!!hasNextPage}
+							isLoadingMore={isFetchingNextPage}
+							isError={isFetchNextPageError}
+							onLoadMore={() => void fetchNextPage()}
+						/>
+					</>
 				)}
 			</div>
 

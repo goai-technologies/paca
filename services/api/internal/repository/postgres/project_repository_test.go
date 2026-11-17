@@ -26,7 +26,6 @@ func openProjectRepoTestDB(t *testing.T) *sqlx.DB {
 			name         TEXT    NOT NULL,
 			description  TEXT    NOT NULL DEFAULT '',
 			task_id_prefix TEXT  NOT NULL DEFAULT '',
-			is_public    INTEGER NOT NULL DEFAULT 0,
 			settings     BLOB    NOT NULL DEFAULT '{}',
 			avatar_key TEXT,
 			avatar_thumb_key TEXT,
@@ -50,7 +49,6 @@ func testProject(id uuid.UUID, prefix string) *projectdom.Project {
 		Name:         "Test Project " + prefix,
 		Description:  "test description",
 		TaskIDPrefix: prefix,
-		IsPublic:     false,
 		Settings:     map[string]any{},
 		CreatedAt:    now,
 	}
@@ -62,7 +60,7 @@ func TestProjectRepository_Delete_SetsDeletedAt(t *testing.T) {
 	ctx := context.Background()
 
 	p := testProject(uuid.New(), "DEL")
-	if err := repo.Create(ctx, p); err != nil {
+	if err := repo.Create(ctx, p, projectdom.ProjectSetup{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
@@ -87,7 +85,7 @@ func TestProjectRepository_FindByID_ExcludesSoftDeleted(t *testing.T) {
 	ctx := context.Background()
 
 	p := testProject(uuid.New(), "FID")
-	if err := repo.Create(ctx, p); err != nil {
+	if err := repo.Create(ctx, p, projectdom.ProjectSetup{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if err := repo.Delete(ctx, p.ID); err != nil {
@@ -106,7 +104,7 @@ func TestProjectRepository_FindByTaskIDPrefix_ExcludesSoftDeleted(t *testing.T) 
 	ctx := context.Background()
 
 	p := testProject(uuid.New(), "PFXD")
-	if err := repo.Create(ctx, p); err != nil {
+	if err := repo.Create(ctx, p, projectdom.ProjectSetup{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if err := repo.Delete(ctx, p.ID); err != nil {
@@ -125,7 +123,7 @@ func TestProjectRepository_Delete_AlreadyDeleted_ReturnsNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	p := testProject(uuid.New(), "DUP")
-	if err := repo.Create(ctx, p); err != nil {
+	if err := repo.Create(ctx, p, projectdom.ProjectSetup{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if err := repo.Delete(ctx, p.ID); err != nil {
@@ -147,7 +145,7 @@ func TestProjectRepository_List_ExcludesSoftDeleted(t *testing.T) {
 	deleted := testProject(uuid.New(), "GONE")
 
 	for _, p := range []*projectdom.Project{alive, deleted} {
-		if err := repo.Create(ctx, p); err != nil {
+		if err := repo.Create(ctx, p, projectdom.ProjectSetup{}); err != nil {
 			t.Fatalf("Create %s: %v", p.TaskIDPrefix, err)
 		}
 	}

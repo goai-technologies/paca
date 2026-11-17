@@ -18,14 +18,14 @@ import { formatApiRequestError } from "../utils/index.js";
  * GET /projects/:projectId/conversations/:id and GET /agents/conversations/:id
  * endpoints the frontend uses. Both of those require a human member/actor
  * identity (project_members.id or actor_user_id) to authorize against; a
- * bare agent calling via its own X-Agent-ID has neither (agents aren't
+ * bare agent calling with its own API key has neither (agents aren't
  * project members, and a plain project-scoped chat trigger never carries an
  * actor_user_id), so calling them here always failed — with "member not
  * found" (404) on the project-scoped path, or a mis-scoped lookup on the
  * global path, regardless of which one this tool guessed at based on
  * whether the caller happened to pass a projectId. The /agents/me path
  * sidesteps this entirely: it authorizes by the server's own verified
- * X-Agent-ID against the conversation's own agent_id (see
+ * the calling agent against the conversation's own agent_id (see
  * agentdom.Service.GetConversationForAgent's doc comment for the exact
  * rule), so there's no project/global split — and no projectId parameter —
  * for the caller to get wrong.
@@ -49,24 +49,12 @@ export class PacaAPIConversationClient {
 			"Content-Type": "application/json",
 			"X-API-Key": this.config.apiKey,
 		};
-		if (this.config.agentId) {
-			headers["X-Agent-ID"] = this.config.agentId;
-		}
-		// Only ever meaningful alongside X-Agent-ID (see PacaConfig.actorUserId's
-		// doc comment: "unset for a personal API key"). Gating on agentId here
-		// too — not just trusting actorUserId's own truthiness — means a stray
-		// or misconfigured PACA_ACTOR_USER_ID can never reach the server
-		// without an agent identity attached to it. Mirrors client.ts's
-		// PacaAPIClient exactly.
-		if (this.config.agentId && this.config.actorUserId) {
-			headers["X-Actor-User-ID"] = this.config.actorUserId;
-		}
 		// The conversation this MCP server instance is running as part of —
 		// load-bearing for the /agents/me path specifically: GetConversationForAgent
 		// authorizes a cross-conversation read (getConversation/
 		// listConversationEvents for a *different* conversationId than this
 		// one) against this header's conversation's own project/actor/owning
-		// member, not against X-Agent-ID alone. See PacaConfig.conversationId's
+		// member, not against the agent identity alone. See PacaConfig.conversationId's
 		// doc comment.
 		if (this.config.agentId && this.config.conversationId) {
 			headers["X-Conversation-ID"] = this.config.conversationId;

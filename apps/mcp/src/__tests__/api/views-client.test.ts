@@ -59,10 +59,10 @@ describe("PacaAPIViewsClient", () => {
 		expect(fetchMock.mock.calls[0][1].headers["X-API-Key"]).toBe("key123");
 	});
 
-	it("includes X-Agent-ID when agentId set", async () => {
+	it("never sends X-Agent-ID, even when agentId is set", async () => {
 		const client = new PacaAPIViewsClient(CONFIG_WITH_AGENT);
 		await client.listViews("p1");
-		expect(fetchMock.mock.calls[0][1].headers["X-Agent-ID"]).toBe("agent-1");
+		expect(fetchMock.mock.calls[0][1].headers["X-Agent-ID"]).toBeUndefined();
 	});
 
 	it("omits X-Agent-ID when agentId absent", async () => {
@@ -378,7 +378,7 @@ describe("PacaAPIViewsClient", () => {
 				"https://api.example.com/api/v1/projects/p1/tasks/t1/attachments/att1/content",
 			);
 			expect(options.headers["X-API-Key"]).toBe("key123");
-			expect(options.headers["X-Agent-ID"]).toBe("agent-1");
+			expect(options.headers["X-Agent-ID"]).toBeUndefined();
 			expect(new TextDecoder().decode(result.buffer)).toBe("hello");
 			expect(result.contentType).toBe("text/plain; charset=utf-8");
 		});
@@ -404,7 +404,9 @@ describe("PacaAPIViewsClient", () => {
 			return {
 				ok: true,
 				status: 200,
-				headers: { get: (k: string) => (k.toLowerCase() === "etag" ? etag : null) },
+				headers: {
+					get: (k: string) => (k.toLowerCase() === "etag" ? etag : null),
+				},
 				text: async () => "",
 				json: async () => ({}),
 			};

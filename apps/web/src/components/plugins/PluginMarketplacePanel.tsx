@@ -16,7 +16,7 @@ import {
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,16 +76,6 @@ function resolveMutationErrorMessage(
 		getApiErrorMessage(err) ??
 		t("marketplace.card.errors.generic")
 	);
-}
-
-function initials(name: string): string {
-	const words = name
-		.trim()
-		.split(/\s+/)
-		.filter(Boolean)
-		.slice(0, 2)
-		.map((v) => v[0]?.toUpperCase() ?? "");
-	return words.join("") || "PL";
 }
 
 function matchesQuery(plugin: MarketplacePlugin, query: string): boolean {
@@ -161,6 +151,7 @@ function PluginCard({
 	isUninstalling,
 	isUpgrading,
 	installedVersion,
+	legacyPermissions,
 	errorMessage,
 	onInstall,
 	onUninstall,
@@ -172,6 +163,8 @@ function PluginCard({
 	isUninstalling: boolean;
 	isUpgrading: boolean;
 	installedVersion?: string;
+	/** The installed package still declares requirePermissions. */
+	legacyPermissions?: boolean;
 	errorMessage?: string;
 	onInstall: (name: string) => void;
 	onUninstall: (name: string) => void;
@@ -201,10 +194,11 @@ function PluginCard({
 	return (
 		<div className="rounded-lg border border-border/60 bg-card p-4 space-y-3 hover:border-border/80 transition-colors">
 			<div className="flex items-start gap-3">
-				<Avatar size="lg">
-					<AvatarImage src={plugin.avatar_url} alt={plugin.display_name} />
-					<AvatarFallback>{initials(plugin.display_name)}</AvatarFallback>
-				</Avatar>
+				<EntityAvatar
+					name={plugin.display_name}
+					avatarUrl={plugin.avatar_url}
+					size="lg"
+				/>
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2 flex-wrap">
 						<p className="font-medium text-sm truncate">
@@ -224,12 +218,31 @@ function PluginCard({
 								{t("marketplace.card.updateAvailable")}
 							</Badge>
 						) : null}
+						{isInstalled && legacyPermissions ? (
+							<Badge
+								variant="outline"
+								className="text-xs gap-1 border-amber-300/60 text-amber-700 dark:border-amber-700/50 dark:text-amber-400"
+							>
+								<AlertTriangle className="size-3" />
+								{t("marketplace.card.legacyPermissions.badge")}
+							</Badge>
+						) : null}
 					</div>
 					<p className="text-xs text-muted-foreground truncate">
 						{plugin.name}
 					</p>
 				</div>
 			</div>
+
+			{isInstalled && legacyPermissions ? (
+				<div
+					role="alert"
+					className="flex items-start gap-2 rounded-md border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-300"
+				>
+					<AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+					<span>{t("marketplace.card.legacyPermissions.description")}</span>
+				</div>
+			) : null}
 
 			<div className="rounded-md bg-muted/40 px-3 py-2">
 				<p className="text-xs whitespace-pre-wrap leading-5">
@@ -485,6 +498,9 @@ export function PluginMarketplacePanel() {
 								plugin={plugin}
 								isInstalled={installedByName.has(plugin.name)}
 								installedVersion={installedByName.get(plugin.name)?.version}
+								legacyPermissions={
+									installedByName.get(plugin.name)?.legacy_permissions
+								}
 								isInstalling={installingNames.has(plugin.name)}
 								isUninstalling={!!pluginId && uninstallingIds.has(pluginId)}
 								isUpgrading={!!pluginId && upgradingIds.has(pluginId)}

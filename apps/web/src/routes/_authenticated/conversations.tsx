@@ -1,9 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ConversationsLayout } from "@/components/projects/agents/conversations-layout";
-import {
-	chattableAgentsQueryOptions,
-	globalConversationsQueryOptions,
-} from "@/lib/agent-api";
+import { globalConversationsQueryOptions } from "@/lib/agent-api";
 
 // Global sibling of routes/_authenticated/projects/$projectId/conversations —
 // same UI (see components/projects/agents/conversations-layout.tsx), reused
@@ -12,10 +9,9 @@ import {
 // one project's.
 export const Route = createFileRoute("/_authenticated/conversations")({
 	loader: async ({ context: { queryClient } }) => {
-		await Promise.all([
-			queryClient.ensureInfiniteQueryData(globalConversationsQueryOptions()),
-			queryClient.ensureQueryData(chattableAgentsQueryOptions),
-		]);
+		await queryClient.ensureInfiniteQueryData(
+			globalConversationsQueryOptions(),
+		);
 	},
 	component: () => <ConversationsLayout />,
 });

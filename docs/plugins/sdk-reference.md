@@ -58,7 +58,7 @@ class PluginApiClient {
   listTasks(filters?: TaskFilters): Promise<TaskSummary[]>
   getTask(taskId: string): Promise<Task>
   getProject(): Promise<ProjectSummary>
-  listMembers(): Promise<ProjectMember[]>
+  listMembers(opts?: ListMembersOptions): Promise<MemberPage>
 
   // Plugin route helpers (path is relative to /plugins/{pluginId}/)
   // For project-scoped routes, include projects/{projectId}/ in the path.
@@ -81,7 +81,9 @@ interface PluginApiClientOptions {
 const result = await api.pluginGet<{ data: MyItem[] }>(meta.pluginId, `tasks/${taskId}/items`);
 
 // Fetch core platform data
-const members = await api.listMembers();
+// Members are keyset-paginated: a page of { items, page_size, next_cursor, total_count }.
+// Search on the server and pass next_cursor as `cursor` to load more.
+const { items: members, next_cursor } = await api.listMembers({ search: "ann", pageSize: 20 });
 const tasks = await api.listTasks({ status_ids: ["done"] });
 ```
 
@@ -250,7 +252,29 @@ interface ProjectMember {
   id: string;
   username: string;
   full_name: string;
+  /** Names of the roles the member holds in the project, comma-separated (a member can hold several). */
   role_name: string;
+}
+
+interface ListMembersOptions {
+  /** Words that must all appear in the member's username, name or handle. */
+  search?: string;
+  /** Only these members, by membership id or account id (at most 100). */
+  ids?: string[];
+  /** Cursor from a previous page's `next_cursor`. */
+  cursor?: string;
+  /** Page size, 1-100 (default 20). */
+  pageSize?: number;
+}
+
+/** One page of the members list, keyset-paginated by cursor. */
+interface MemberPage {
+  items: ProjectMember[];
+  page_size: number;
+  /** Pass as `cursor` for the next page; null on the last page. */
+  next_cursor: string | null;
+  /** Members matching the filters across all pages. */
+  total_count: number;
 }
 
 interface ProjectPermissions {

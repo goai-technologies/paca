@@ -8,28 +8,40 @@ import (
 	"github.com/google/uuid"
 )
 
-// listProjectMembersViaAPI returns all members of a project as decoded maps.
+// listProjectMembersViaAPI returns all members of a project as decoded maps,
+// following the list's cursor to the last page.
 func listProjectMembersViaAPI(t *testing.T, env *e2eEnv, client *http.Client, token, projectID string) []map[string]any {
 	t.Helper()
-	req := mustRequest(env.ctx, t, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%s/members", env.base, projectID), nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp := mustDo(t, client, req)
-	defer func() { _ = resp.Body.Close() }()
-	assertStatus(t, resp, http.StatusOK)
-	var env2 envelope
-	decodeJSON(t, resp, &env2)
-	raw, ok := env2.Data.([]any)
-	if !ok {
-		t.Fatalf("expected members array, got %T", env2.Data)
-	}
-	members := make([]map[string]any, 0, len(raw))
-	for _, item := range raw {
-		if m, ok := item.(map[string]any); ok {
-			members = append(members, m)
+	var members []map[string]any
+	cursor := ""
+	for {
+		url := fmt.Sprintf("%s/api/v1/projects/%s/members?page_size=100", env.base, projectID)
+		if cursor != "" {
+			url += "&cursor=" + cursor
 		}
+		req := mustRequest(env.ctx, t, http.MethodGet, url, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp := mustDo(t, client, req)
+		assertStatus(t, resp, http.StatusOK)
+		var env2 envelope
+		decodeJSON(t, resp, &env2)
+		_ = resp.Body.Close()
+		page, ok := env2.Data.(map[string]any)
+		if !ok {
+			t.Fatalf("expected members page object, got %T", env2.Data)
+		}
+		raw, _ := page["items"].([]any)
+		for _, item := range raw {
+			if m, ok := item.(map[string]any); ok {
+				members = append(members, m)
+			}
+		}
+		next, _ := page["next_cursor"].(string)
+		if next == "" {
+			return members
+		}
+		cursor = next
 	}
-	return members
 }
 
 // memberIDForUser returns the project_members.id whose user_id is userID, or
@@ -88,8 +100,8 @@ func addProjectMemberWithAutomationPerms(t *testing.T, env *e2eEnv, ownerClient 
 	if err != nil {
 		t.Fatalf("find user %q: %v", username, err)
 	}
-	roleID := createProjectRoleWithPermsViaAPI(t, env, ownerClient, ownerToken, projectID, "editor-"+uuid.NewString(),
-		map[string]any{"projects.read": true, "tasks.read": true, "tasks.write": true, "workflows.read": true, "workflows.write": true})
+	roleID := createProjectRoleViaAPI(t, env, ownerClient, ownerToken, projectID, "editor-"+uuid.NewString(),
+		"projects:read", "tasks:read", "tasks:write", "workflows:read", "workflows:write")
 	addMemberViaAPI(t, env, ownerClient, ownerToken, projectID, user.ID.String(), roleID)
 
 	members := listProjectMembersViaAPI(t, env, ownerClient, ownerToken, projectID)

@@ -178,7 +178,7 @@ func TestExecutorRunWithMCP(t *testing.T) {
 	sandboxMgr := newSandboxManager(t)
 	exec := executor.New(sandboxMgr, nil, nil, nil, encryptor, executor.Options{
 		Image:      image,
-		PacaAPIKey: "e2e-fake-paca-api-key",
+		AgentKeys:  e2eAgentKeys{},
 		PacaAPIURL: pacaAPIURL,
 	}, log)
 
@@ -220,4 +220,11 @@ func TestExecutorRunWithMCP(t *testing.T) {
 	if len(events) == 0 {
 		t.Fatal("Run produced zero ACP events")
 	}
+}
+
+// e2eAgentKeys is an executor.AgentKeyIssuer returning a fixed fake key.
+type e2eAgentKeys struct{}
+
+func (e2eAgentKeys) APIKeyFor(context.Context, uuid.UUID) (string, error) {
+	return "e2e-fake-paca-api-key", nil
 }

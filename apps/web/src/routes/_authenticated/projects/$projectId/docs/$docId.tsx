@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { isForbiddenError } from "@/lib/api-error";
 import {
-	docFoldersQueryOptions,
+	docFolderPathQueryOptions,
 	docQueryKeys,
 	docQueryOptions,
 	updateDocument,
@@ -35,7 +35,7 @@ function DocEditorPage() {
 	const { t } = useTranslation("projects");
 	const { projectId, docId } = Route.useParams();
 	const { hasProjectPermission } = useProjectPermissions(projectId);
-	const canWrite = hasProjectPermission("docs.write");
+	const canWrite = hasProjectPermission("docs:write");
 	const qc = useQueryClient();
 
 	const {
@@ -43,7 +43,6 @@ function DocEditorPage() {
 		isError,
 		error: docError,
 	} = useQuery(docQueryOptions(projectId, docId));
-	const { data: allFolders = [] } = useQuery(docFoldersQueryOptions(projectId));
 
 	// Register this doc as "currently on screen" for the chat composer's
 	// quick-add affordance — see lib/shortcuts/current-context-store.ts.
@@ -105,19 +104,11 @@ function DocEditorPage() {
 		setRightPanel((prev) => (prev === panel ? null : panel));
 	};
 
-	// Compute folder breadcrumb for this document
-	const folderPath = (() => {
-		if (!doc?.folder_id) return [];
-		const path: typeof allFolders = [];
-		let current: string | null = doc.folder_id;
-		while (current) {
-			const folder = allFolders.find((f) => f.id === current);
-			if (!folder) break;
-			path.unshift(folder);
-			current = folder.parent_id ?? null;
-		}
-		return path;
-	})();
+	// Folder breadcrumb for this document (root first), fetched as a path for
+	// just this folder rather than from the whole folder tree.
+	const { data: folderPath = [] } = useQuery(
+		docFolderPathQueryOptions(projectId, doc?.folder_id),
+	);
 
 	if (isError) {
 		if (isForbiddenError(docError)) {

@@ -12,7 +12,8 @@
 				"customFields": "Custom Fields",
 				"jev": "Jev AI",
 				"dangerZone": "Danger Zone",
-				"plugins": "Plugins"
+				"plugins": "Plugins",
+				"export": "Export"
 			},
 			"pluginTab": {
 				"noPermission": {
@@ -101,7 +102,6 @@
 			"configure": "Configure",
 			"delete": "Delete",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This agent is restricted — ask a project admin to grant you access before you can chat with it.",
 			"acpStatusConnected": "Online",
 			"acpStatusDisconnected": "Offline",
 			"deleteDialog": {
@@ -114,6 +114,7 @@
 			}
 		},
 		"page": {
+			"searchPlaceholder": "Search agents by name or handle…",
 			"title": "AI Agents",
 			"subtitle": "Autonomous agents that work on tasks and chat with your team",
 			"newAgent": "New Agent",
@@ -172,7 +173,6 @@
 				"skills": "Skills",
 				"envVars": "Environment",
 				"globalRole": "Global role",
-				"access": "Access",
 				"activity": "Activity"
 			},
 			"globalRole": {
@@ -289,6 +289,11 @@
 					"urlLabel": "URL",
 					"cancel": "Cancel",
 					"addServer": "Add server"
+				},
+				"system": {
+					"title": "System MCP servers",
+					"description": "Provided by Paca to every agent. These can't be edited.",
+					"pacaDetail": "Built-in Paca tools (projects, tasks, docs)"
 				}
 			},
 			"envVars": {
@@ -336,16 +341,11 @@
 					"nameReserved": "That name is reserved for Paca's own scaffolding. Choose another.",
 					"nameInvalid": "Skill name can't be \".\", \"..\", or contain a slash.",
 					"addFailed": "Failed to add skill. Please try again."
+				},
+				"system": {
+					"title": "System skills",
+					"description": "Bundled with Paca and available to every agent. These can't be edited."
 				}
-			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may chat with this agent. Everyone who can manage agents can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
 			},
 			"activity": {
 				"commented": "commented",
@@ -370,6 +370,9 @@
 					"dateTo": "To",
 					"clearAll": "Clear filters"
 				}
+			},
+			"system": {
+				"badge": "System"
 			}
 		},
 		"conversationView": {
@@ -385,9 +388,8 @@
 			"connect": "Connect",
 			"conversationEnded": "This conversation has ended.",
 			"textOnlyMessage": "Only text messages are supported.",
-			"agentAccessRestricted": "This agent is restricted. Ask a project admin to grant you access before you can chat with it.",
-			"environmentAccessRestricted": "This conversation's environment is restricted. Ask a project admin to grant you access before you can chat with this agent.",
 			"chatNoPermission": "You don't have permission to send messages in this conversation.",
+			"cliProviderNeedsEnvironment": "This agent uses a CLI provider and needs a default environment, but it doesn't have a usable one. Ask a project admin to set a default environment on the agent.",
 			"failed": "Conversation failed",
 			"noOutput": "The agent did not produce any output.",
 			"loadingOlder": "Loading…",
@@ -483,7 +485,6 @@
 			"subtitle": "Named, long-lived sandboxes your agents can attach to across conversations",
 			"newEnvironment": "New Environment",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This environment is restricted — ask a project admin to grant you access before you can use it.",
 			"noPermission": {
 				"title": "You don't have permission to view environments",
 				"description": "Ask a project admin to grant you the environments.read permission."
@@ -526,8 +527,7 @@
 			"tabs": {
 				"overview": "Overview",
 				"folders": "Folders",
-				"portForwards": "Port forwards",
-				"access": "Access"
+				"portForwards": "Port forwards"
 			},
 			"busy": "This environment is already starting, stopping, or restarting. Try again in a moment.",
 			"actionFailed": "That didn't work. Please try again.",
@@ -643,15 +643,6 @@
 					"restartFailed": "Failed to restart environment. Please try again."
 				}
 			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may browse, SSH into, forward ports on, or open a terminal in this environment. Everyone who can manage environments can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
-			},
 			"sshKeys": {
 				"connectHint": "Replace <bastion-host> with this deployment's configured SSH bastion address.",
 				"connectUnavailable": "SSH access isn't configured on this deployment yet.",
@@ -750,7 +741,6 @@
 			"deleteRole": "Delete role",
 			"errors": {
 				"notFound": "This role no longer exists.",
-				"hasMembers": "This role cannot be deleted because it is still assigned to one or more members.",
 				"forbidden": "You don't have permission to delete this role.",
 				"internalError": "Something went wrong. Please try again.",
 				"generic": "Something went wrong."
@@ -764,23 +754,18 @@
 			"roleNameLabel": "Role Name",
 			"roleNamePlaceholder": "e.g. PROJECT_REVIEWER",
 			"permissionsLabel": "Permissions",
-			"fullAccessBadge": "Full access",
 			"fullAccessDescription": "This role automatically includes every permission, including ones added in the future. Changing any toggle below converts it to today's fixed set.",
 			"enabledCount_one": "{{count}} enabled",
 			"enabledCount_other": "{{count}} enabled",
 			"cancel": "Cancel",
 			"saveChanges": "Save changes",
-			"createRole": "Create role",
-			"errors": {
-				"nameTaken": "A role with this name already exists.",
-				"nameInvalid": "Role name must use uppercase letters, numbers, and underscores.",
-				"notFound": "This role no longer exists. It may have already been deleted.",
-				"forbidden": "You don't have permission to perform this action.",
-				"internalError": "Something went wrong on the server. Please try again.",
-				"generic": "Something went wrong."
-			}
+			"createRole": "Create role"
 		},
 		"permissions": {
+			"projectsRead": {
+				"label": "View Project",
+				"description": "Open the project and see its basic details"
+			},
 			"projectsWrite": {
 				"label": "Edit Project",
 				"description": "Update project name, description, and settings"
@@ -795,7 +780,7 @@
 			},
 			"membersWrite": {
 				"label": "Manage Members",
-				"description": "Add, remove, and reassign project members"
+				"description": "Add and remove project members (changing their roles needs Assign Roles)"
 			},
 			"rolesRead": {
 				"label": "View Roles",
@@ -804,6 +789,10 @@
 			"rolesWrite": {
 				"label": "Manage Roles",
 				"description": "Create, edit, and delete project roles"
+			},
+			"rolesAssign": {
+				"label": "Assign Roles",
+				"description": "Give members and agents any role in this project, or take roles away"
 			},
 			"settingsTaskTypesWrite": {
 				"label": "Manage Task Types",
@@ -900,6 +889,10 @@
 			"activitiesRead": {
 				"label": "View Activity Log",
 				"description": "See every activity recorded in this project"
+			},
+			"projectExport": {
+				"label": "Export Project Data",
+				"description": "Export tasks (with comments and activities) and documentation of this project"
 			}
 		},
 		"permissionGroups": {
@@ -939,9 +932,6 @@
 			"taskIdPrefixPlaceholder": "PROJ",
 			"descriptionLabel": "Description",
 			"descriptionPlaceholder": "Describe what this project is about…",
-			"publicProjectLabel": "Public project",
-			"publicProjectHintPublic": "Anyone with the link can view this project. Anonymous users have read-only access.",
-			"publicProjectHintPrivate": "Only team members can access this project.",
 			"saveChanges": "Save changes",
 			"saved": "Saved ✓",
 			"noPermission": "You don't have permission to edit this project.",
@@ -956,7 +946,6 @@
 			"title": "Project Roles",
 			"description": "Manage roles and permissions for members of this project.",
 			"newRole": "New role",
-			"noPermissionsAssigned": "No permissions assigned",
 			"noPermission": {
 				"title": "You don't have permission to view roles",
 				"description": "Ask a project admin to grant you the project.roles.read permission."
@@ -973,10 +962,11 @@
 			},
 			"table": {
 				"name": "Name",
-				"permissions": "Permissions",
+				"description": "Description",
 				"created": "Created"
 			},
-			"systemRolesNote": "System roles are shared templates and cannot be edited or deleted."
+			"systemRolesNote": "Roles shared from the workspace can only be changed in the workspace's role settings.",
+			"noDescription": "No description"
 		},
 		"taskStatuses": {
 			"title": "Task Statuses",
@@ -1172,6 +1162,41 @@
 				"cancel": "Cancel",
 				"deletePermanently": "Delete permanently"
 			}
+		},
+		"export": {
+			"title": "Export",
+			"description": "Download your project's data. Exports are generated in the background and kept for 7 days.",
+			"recent": {
+				"title": "Recent exports",
+				"empty": "No exports yet."
+			},
+			"status": {
+				"pending": "Queued",
+				"processing": "Generating…",
+				"completed": "Ready",
+				"failed": "Failed",
+				"expired": "Expired"
+			},
+			"rows": "Tasks: {{count}}",
+			"availableUntil": "Available until {{date}}",
+			"download": "Download",
+			"failedMessage": "The export could not be generated. Please try again.",
+			"errors": {
+				"inProgress": "An export is already in progress for this project.",
+				"requestFailed": "Could not start the export. Please try again.",
+				"downloadFailed": "Could not download the export. Please try again.",
+				"expired": "This export has expired. Request a new one."
+			},
+			"noPermission": {
+				"title": "You don't have permission to export this project",
+				"description": "Ask a project owner or admin to grant you the export permission."
+			},
+			"archive": {
+				"title": "Project data (ZIP)",
+				"description": "Every task as CSV, with their comments and activities as separate CSV files, plus your documentation as Markdown files.",
+				"button": "Export project",
+				"inProgress": "Exporting…"
+			}
 		}
 	},
 	"taskStatuses": {
@@ -1234,25 +1259,39 @@
 			"noUsersAvailable": "No users available to add.",
 			"loadingMore": "Loading…",
 			"roleLabel": "Role",
-			"rolePlaceholder": "Select a role…",
 			"cancel": "Cancel",
 			"addMember": "Add member",
 			"errors": {
 				"addFailed": "Failed to add member. Please try again.",
 				"alreadyAdded": "This user or agent is already a member of the project.",
+				"roleForbidden": "You don't have permission to assign one of these roles.",
 				"roleNotFound": "That role no longer exists. Please choose another role."
-			}
+			},
+			"modeServiceAccount": "Service account",
+			"serviceAccountLabel": "Service account",
+			"noServiceAccountsAvailable": "No service accounts available to add.",
+			"searchAgentsPlaceholder": "Search by name or handle…",
+			"noAgentsMatch": "No agents match your search.",
+			"searchServiceAccountsPlaceholder": "Search by name or description…",
+			"noServiceAccountsMatch": "No service accounts match your search."
 		},
 		"roleChip": {
 			"changeRole": "Change role",
+			"dialogDescription": "Choose the roles for {{name}}. A member keeps at least one role.",
+			"assign": "Assign role",
+			"assigning": "Assigning…",
 			"errors": {
 				"memberNotFound": "This member is no longer part of the project.",
+				"roleForbidden": "You don't have permission to assign or remove one of these roles.",
 				"roleNotFound": "That role no longer exists.",
 				"changeFailed": "Failed to change role."
 			}
 		},
 		"memberRow": {
-			"removeMember": "Remove member"
+			"removeMember": "Remove member",
+			"agentBadge": "Agent",
+			"actions": "Member actions",
+			"serviceAccountBadge": "Service account"
 		},
 		"descriptionChip": {
 			"edit": "Edit description",
@@ -1270,6 +1309,19 @@
 			"removeFailed": "Failed to remove member. Please try again.",
 			"cancel": "Cancel",
 			"remove": "Remove"
+		},
+		"filters": {
+			"searchPlaceholder": "Search by name or username…",
+			"searchLabel": "Search members",
+			"roleLabel": "Filter by role",
+			"allRoles": "All",
+			"clearSearch": "Clear search",
+			"showingOf": "Showing {{shown}} of {{total}}"
+		},
+		"noMatch": {
+			"title": "No members match",
+			"description": "Try a different search or role filter.",
+			"clear": "Clear filters"
 		}
 	},
 	"aiChat": {
@@ -1290,6 +1342,7 @@
 			"deleteFailed": "Failed to delete task type. Please try again.",
 			"isDefault": "The default type can't be deleted. Make another type the default first.",
 			"isSystem": "System types can't be deleted.",
+			"commitmentsProjectOnly": "The commitment type can't be deleted: this project holds commitments only.",
 			"cancel": "Cancel",
 			"deleteType": "Delete type"
 		},
@@ -1314,7 +1367,8 @@
 				"nameInvalid": "Type name is empty or invalid.",
 				"nameReserved": "That name is reserved for a built-in type.",
 				"saveFailed": "Failed to save task type. Please try again.",
-				"isSystem": "System types can't be edited."
+				"isSystem": "System types can't be edited.",
+				"commitmentsProjectOnly": "This project holds commitments only: other task types can't be added, and the commitment type can't be renamed."
 			}
 		}
 	},
@@ -1370,12 +1424,18 @@
 			"parent": "Parent",
 			"viewParent": "View parent",
 			"removeParent": "Remove parent",
-			"addFields": "Add fields"
+			"addFields": "Add fields",
+			"sprintGroup": {
+				"active": "Active",
+				"planned": "Upcoming",
+				"completed": "Completed"
+			}
 		},
 		"description": {
 			"title": "Description",
 			"writeWithAI": "Write with AI",
 			"writeWithAIDialog": {
+				"searchAgents": "Search agents…",
 				"title": "Write with AI",
 				"description": "Select an agent to write the task description.",
 				"noAgents": "No agents configured for this project.",
@@ -1453,6 +1513,7 @@
 			"searchPlaceholder": "Search tasks by title or number...",
 			"loadingTasks": "Loading tasks…",
 			"noTasksFound": "No tasks found",
+			"loadError": "Couldn't load tasks. Please try again.",
 			"linkTypes": {
 				"blocks": {
 					"label": "Blocks",
@@ -1554,6 +1615,33 @@
 			"descriptionChangeDiff": "Description change diff",
 			"autoAssignSkippedLowConfidence": "couldn't confidently pick an assignee ({{confidence}}% confidence) — left the task unassigned",
 			"autoAssignSkipped": "skipped auto-assign — left the task unassigned"
+		},
+		"searchableList": {
+			"searchPlaceholder": "Search…",
+			"noResults": "No matches"
+		},
+		"commitment": {
+			"label": "Commitment",
+			"inherited": "inherited",
+			"inheritedHint": "Set on the top-level ticket; this ticket inherits it.",
+			"searchPlaceholder": "Search commitments…",
+			"open": "Open commitment",
+			"remove": "Remove from commitment",
+			"loading": "Loading…",
+			"empty": "No open commitments",
+			"workTitle": "Work in this commitment",
+			"workEmpty": "No tickets are attached to this commitment yet.",
+			"workError": "Could not load the attached work.",
+			"hiddenProjects_one": "{{count}} project you cannot view is not shown.",
+			"hiddenProjects_other": "{{count}} projects you cannot view are not shown.",
+			"groupThisProject": "This project",
+			"groupOtherProjects": "Other projects",
+			"projectLabel": "Project",
+			"projectHint": "Which project this commitment is for",
+			"projectSearchPlaceholder": "Search projects…",
+			"projectClear": "Clear project",
+			"projectEmpty": "No projects to choose from",
+			"projectUnknown": "Unknown project"
 		}
 	},
 	"portForwardDetail": {
@@ -1755,6 +1843,7 @@
 			"error": "Couldn't delete the conversation. Please try again."
 		},
 		"filters": {
+			"searchAgents": "Search agents…",
 			"title": "Filters",
 			"agent": "Agent",
 			"status": "Status",
@@ -2459,5 +2548,12 @@
 			"comment": "commented on",
 			"fallback": "did {{type}} on"
 		}
+	},
+	"workstream": {
+		"label": "Workstream",
+		"hint": "Which dashboard this project's commitments default to. A commitment's own Workstream field overrides it.",
+		"delivery": "Delivery",
+		"platform": "PPE",
+		"internal": "Internal"
 	}
 }

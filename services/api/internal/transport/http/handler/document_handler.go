@@ -14,6 +14,7 @@ import (
 	attachmentdom "github.com/Paca-AI/api/internal/domain/attachment"
 	docdom "github.com/Paca-AI/api/internal/domain/doc"
 	notificationdom "github.com/Paca-AI/api/internal/domain/notification"
+	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	"github.com/Paca-AI/api/internal/transport/http/dto"
 	"github.com/Paca-AI/api/internal/transport/http/middleware"
 	"github.com/Paca-AI/api/internal/transport/http/presenter"
@@ -25,12 +26,20 @@ type DocumentHandler struct {
 	activitySvc     docdom.ActivityService
 	avatarSvc       attachmentdom.AvatarService
 	notificationSvc notificationdom.Service
+	listScoper      ListScoper
 }
 
 // NewDocumentHandler returns a DocumentHandler wired to the doc service and
 // activity service.
 func NewDocumentHandler(svc docdom.Service, activitySvc docdom.ActivityService) *DocumentHandler {
 	return &DocumentHandler{svc: svc, activitySvc: activitySvc}
+}
+
+// WithDocListScoper limits document lists and search to the documents the
+// caller may read, inside the query (see scopedContext).
+func (h *DocumentHandler) WithDocListScoper(s ListScoper) *DocumentHandler {
+	h.listScoper = s
+	return h
 }
 
 // WithDocAvatarService configures avatar URL resolution for activity
@@ -64,14 +73,75 @@ func (h *DocumentHandler) toDocActivityResponse(ctx context.Context, a *docdom.A
 // Folder endpoints
 // =============================================================================
 
-// ListFolders handles GET /projects/:projectId/docs/folders.
+// parseTreeParent reads the parent folder of a tree listing: a folder id, or
+// "null"/empty for the root level.
+func parseTreeParent(raw string) (*uuid.UUID, error) {
+	if raw == "" || strings.EqualFold(raw, "null") {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, apierr.New(apierr.CodeBadRequest, "invalid folder id")
+	}
+	return &id, nil
+}
+
+// ListFolders handles GET /projects/:projectId/docs/folders — one
+// cursor-paginated level of the folder tree, in manual order:
+//   - parent_id=<uuid>|null  the folder whose children to list (default null = top level)
+//   - page_size=<1-200>      (default 50)
+//   - cursor=<opaque>        from the previous page's next_cursor
+//
+// Responds with {"items": [...], "next_cursor": ...}.
 func (h *DocumentHandler) ListFolders(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	folders, err := h.svc.ListFolders(r.Context(), projectID)
+	q := r.URL.Query()
+	parent, err := parseTreeParent(q.Get("parent_id"))
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	pageSize, err := parsePageSize(r, 50, 200)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	cursor := parseCursorParam(r)
+	folders, hasMore, err := h.svc.ListFolders(r.Context(), projectID, parent, cursor, pageSize)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	resp := make([]dto.DocFolderResponse, 0, len(folders))
+	for _, f := range folders {
+		resp = append(resp, dto.DocFolderFromEntity(f))
+	}
+	var nextCursor *string
+	if hasMore && len(folders) > 0 {
+		s := docdom.EncodeFolderTreeCursor(folders[len(folders)-1])
+		nextCursor = &s
+	}
+	presenter.OK(w, r, map[string]any{"items": resp, "next_cursor": nextCursor})
+}
+
+// GetFolderPath handles GET /projects/:projectId/docs/folders/:folderId/path —
+// the folders from the root down to this one (inclusive), for breadcrumbs.
+func (h *DocumentHandler) GetFolderPath(w http.ResponseWriter, r *http.Request) {
+	projectID, err := parseProjectID(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	folderID, err := uuid.Parse(chi.URLParam(r, "folderId"))
+	if err != nil {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid folder id"))
+		return
+	}
+	folders, err := h.svc.FolderPath(r.Context(), projectID, folderID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -173,48 +243,45 @@ func (h *DocumentHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 // Document endpoints
 // =============================================================================
 
-// ListDocuments handles GET /projects/:projectId/docs.
-// Optional query params: folder_id — filter by folder; search — case-
-// insensitive title match; page_size (1-200), cursor — opt into keyset
-// pagination (see docdom.Repository.ListDocuments's doc comment). Omitting
-// page_size returns every matching document in one response, as before.
+// ListDocuments handles GET /projects/:projectId/docs — one cursor-paginated
+// page of documents in manual order (position, title), without their bodies:
+//   - folder_id=<uuid>|null  only documents directly in that folder / outside any
+//     folder; omit for documents anywhere in the project
+//   - search=<text>          case-insensitive title match
+//   - page_size=<1-200>      (default 50)
+//   - cursor=<opaque>        from the previous page's next_cursor
+//
+// Responds with {"items": [...], "next_cursor": ...}.
 func (h *DocumentHandler) ListDocuments(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-
-	var folderID *uuid.UUID
-	if raw := r.URL.Query().Get("folder_id"); raw != "" {
-		id, err := uuid.Parse(raw)
+	q := r.URL.Query()
+	var filter docdom.DocumentFilter
+	if raw, ok := q["folder_id"]; ok && len(raw) > 0 && raw[0] != "" {
+		folderID, err := parseTreeParent(raw[0])
 		if err != nil {
-			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid folder_id"))
+			presenter.Error(w, r, err)
 			return
 		}
-		folderID = &id
+		filter.FolderID = folderID
+		filter.RootOnly = folderID == nil
 	}
-
-	var search *string
-	if raw := strings.TrimSpace(r.URL.Query().Get("search")); raw != "" {
-		search = &raw
+	filter.Search = strings.TrimSpace(q.Get("search"))
+	pageSize, err := parsePageSize(r, 50, 200)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
 	}
-
-	var limit *int
-	if raw := r.URL.Query().Get("page_size"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > 200 {
-			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "page_size must be an integer between 1 and 200"))
-			return
-		}
-		limit = &n
+	cursor := parseCursorParam(r)
+	ctx, err := scopedContext(r, h.listScoper, iam.ActionDocsRead, projectID, "doc")
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
 	}
-	var cursor *string
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		cursor = &raw
-	}
-
-	docs, hasMore, err := h.svc.ListDocuments(r.Context(), projectID, folderID, search, cursor, limit)
+	docs, hasMore, err := h.svc.ListDocuments(ctx, projectID, filter, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -225,10 +292,50 @@ func (h *DocumentHandler) ListDocuments(w http.ResponseWriter, r *http.Request) 
 	}
 	var nextCursor *string
 	if hasMore && len(docs) > 0 {
-		s := docdom.EncodeDocumentCursor(docs[len(docs)-1])
+		s := docdom.EncodeDocumentTreeCursor(docs[len(docs)-1])
 		nextCursor = &s
 	}
 	presenter.OK(w, r, map[string]any{"items": resp, "next_cursor": nextCursor})
+}
+
+// SearchDocuments handles GET /projects/:projectId/docs/search.
+// Query params: q (required) — text to find in a document's title or body,
+// case-insensitive; limit (1-50, default 20).
+func (h *DocumentHandler) SearchDocuments(w http.ResponseWriter, r *http.Request) {
+	projectID, err := parseProjectID(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "q is required"))
+		return
+	}
+	limit := 20
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 50 {
+			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "limit must be an integer between 1 and 50"))
+			return
+		}
+		limit = n
+	}
+	ctx, err := scopedContext(r, h.listScoper, iam.ActionDocsRead, projectID, "doc")
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	hits, err := h.svc.SearchDocuments(ctx, projectID, q, limit)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	resp := make([]dto.DocumentSearchHitResponse, 0, len(hits))
+	for _, hit := range hits {
+		resp = append(resp, dto.DocumentSearchHitFromEntity(hit))
+	}
+	presenter.OK(w, r, map[string]any{"items": resp})
 }
 
 // GetDocument handles GET /projects/:projectId/docs/:docId.
@@ -426,7 +533,11 @@ func (h *DocumentHandler) DeleteDocument(w http.ResponseWriter, r *http.Request)
 // Snapshot endpoints
 // =============================================================================
 
-// ListSnapshots handles GET /projects/:projectId/docs/:docId/snapshots.
+// ListSnapshots handles GET /projects/:projectId/docs/:docId/snapshots — one
+// cursor-paginated page of the document's version history, newest first,
+// without the snapshot bodies (GET a single snapshot for its content):
+//   - page_size=<1-100>  (default 30)
+//   - cursor=<opaque>    from the previous page's next_cursor
 func (h *DocumentHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
@@ -438,7 +549,13 @@ func (h *DocumentHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) 
 		presenter.Error(w, r, err)
 		return
 	}
-	snaps, err := h.svc.ListSnapshots(r.Context(), projectID, docID)
+	pageSize, err := parsePageSize(r, 30, 100)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	cursor := parseCursorParam(r)
+	snaps, hasMore, err := h.svc.ListSnapshots(r.Context(), projectID, docID, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -447,7 +564,12 @@ func (h *DocumentHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) 
 	for _, s := range snaps {
 		resp = append(resp, dto.DocSnapshotFromEntity(s))
 	}
-	presenter.OK(w, r, map[string]any{"items": resp})
+	var nextCursor *string
+	if hasMore && len(snaps) > 0 {
+		c := docdom.EncodeSnapshotCursor(snaps[len(snaps)-1])
+		nextCursor = &c
+	}
+	presenter.OK(w, r, map[string]any{"items": resp, "next_cursor": nextCursor})
 }
 
 // GetSnapshot handles GET /projects/:projectId/docs/:docId/snapshots/:snapshotId.
@@ -474,7 +596,9 @@ func (h *DocumentHandler) GetSnapshot(w http.ResponseWriter, r *http.Request) {
 // Activity / comment endpoints
 // =============================================================================
 
-// ListActivities handles GET /projects/:projectId/docs/:docId/activities.
+// ListActivities handles GET /projects/:projectId/docs/:docId/activities — one
+// cursor-paginated page of the timeline, newest first (page_size 1-100,
+// default 30; cursor from the previous page's next_cursor).
 func (h *DocumentHandler) ListActivities(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
@@ -486,7 +610,13 @@ func (h *DocumentHandler) ListActivities(w http.ResponseWriter, r *http.Request)
 		presenter.Error(w, r, err)
 		return
 	}
-	activities, err := h.activitySvc.ListActivities(r.Context(), projectID, docID)
+	pageSize, err := parsePageSize(r, 30, 100)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	cursor := parseCursorParam(r)
+	activities, next, err := h.activitySvc.ListActivities(r.Context(), projectID, docID, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -495,7 +625,7 @@ func (h *DocumentHandler) ListActivities(w http.ResponseWriter, r *http.Request)
 	for _, a := range activities {
 		resp = append(resp, h.toDocActivityResponse(r.Context(), a))
 	}
-	presenter.OK(w, r, map[string]any{"items": resp})
+	presenter.OK(w, r, map[string]any{"items": resp, "next_cursor": next})
 }
 
 // AddComment handles POST /projects/:projectId/docs/:docId/comments.

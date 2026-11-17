@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
 
@@ -75,28 +75,8 @@ export interface Environment {
 	// Forwarding" section. When true, show a "restart required" prompt
 	// (see restartEnvironment below).
 	ports_pending_restart: boolean;
-	// access_mode is "open" (default — any project member who can use
-	// environments at all may use this one) or "restricted" (only members
-	// with an explicit access grant may browse, SSH, forward ports, or open
-	// a terminal in it). access_granted is per-viewer: whether the current
-	// user could actually use this environment right now — always true
-	// when access_mode is "open". Together these drive the locked-
-	// environment UI.
-	access_mode: EnvironmentAccessMode;
-	access_granted: boolean;
 	created_at: string;
 	updated_at: string;
-	folders: EnvironmentFolder[];
-}
-
-export type EnvironmentAccessMode = "open" | "restricted";
-
-export interface EnvironmentAccessGrant {
-	id: string;
-	environment_id: string;
-	member_id: string;
-	granted_by?: string | null;
-	created_at: string;
 }
 
 // EnvironmentStats is one message on the live-usage WebSocket
@@ -147,13 +127,47 @@ export interface EnvironmentPortForward {
 
 // ── Environments ──────────────────────────────────────────────────────────────
 
+export const ENVIRONMENTS_PAGE_SIZE = 30;
+
+/** One page of an environment list. `total_count` is present on the
+ *  per-environment lists (folders, SSH keys, port forwards). */
+export interface EnvironmentListPage<T> {
+	items: T[];
+	page_size: number;
+	next_cursor: string | null;
+	total_count?: number;
+}
+
+export interface EnvironmentListOptions {
+	/** Words that must all appear in the name/slug (environments) or path (folders). */
+	search?: string;
+	/** Only these records (at most 100) — a batch lookup. */
+	ids?: string[];
+	cursor?: string;
+	pageSize?: number;
+}
+
+function listParams(
+	opts: EnvironmentListOptions,
+): Record<string, string | number> {
+	const params: Record<string, string | number> = {
+		page_size: opts.pageSize ?? ENVIRONMENTS_PAGE_SIZE,
+	};
+	if (opts.search?.trim()) params.search = opts.search.trim();
+	if (opts.ids?.length) params.ids = opts.ids.join(",");
+	if (opts.cursor) params.cursor = opts.cursor;
+	return params;
+}
+
+/** One page of a project's environments, newest first. */
 export async function listEnvironments(
 	projectId: string,
-): Promise<Environment[]> {
+	opts: EnvironmentListOptions = {},
+): Promise<EnvironmentListPage<Environment>> {
 	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<{ environments: Environment[] }>
-	>(`/projects/${projectId}/environments`);
-	return data.data.environments;
+		SuccessEnvelope<EnvironmentListPage<Environment>>
+	>(`/projects/${projectId}/environments`, { params: listParams(opts) });
+	return data.data;
 }
 
 export async function getEnvironment(
@@ -190,7 +204,6 @@ export async function updateEnvironment(
 	payload: {
 		name?: string;
 		idle_timeout_minutes?: number;
-		access_mode?: EnvironmentAccessMode;
 	},
 ): Promise<Environment> {
 	const { data } = await apiClient.instance.patch<SuccessEnvelope<Environment>>(
@@ -198,44 +211,6 @@ export async function updateEnvironment(
 		payload,
 	);
 	return data.data;
-}
-
-// ── Access grants ─────────────────────────────────────────────────────────────
-// Who may use a restricted environment — see Environment.access_mode's doc
-// comment. Managing the grant list itself requires environments.write, same
-// tier as every other environment-configuration action.
-
-export async function listEnvironmentAccessGrants(
-	projectId: string,
-	environmentId: string,
-): Promise<EnvironmentAccessGrant[]> {
-	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<{ items: EnvironmentAccessGrant[] }>
-	>(`/projects/${projectId}/environments/${environmentId}/access-grants`);
-	return data.data.items;
-}
-
-export async function addEnvironmentAccessGrant(
-	projectId: string,
-	environmentId: string,
-	memberId: string,
-): Promise<EnvironmentAccessGrant> {
-	const { data } = await apiClient.instance.post<
-		SuccessEnvelope<EnvironmentAccessGrant>
-	>(`/projects/${projectId}/environments/${environmentId}/access-grants`, {
-		member_id: memberId,
-	});
-	return data.data;
-}
-
-export async function removeEnvironmentAccessGrant(
-	projectId: string,
-	environmentId: string,
-	memberId: string,
-): Promise<void> {
-	await apiClient.instance.delete(
-		`/projects/${projectId}/environments/${environmentId}/access-grants/${memberId}`,
-	);
 }
 
 export async function deleteEnvironment(
@@ -300,14 +275,18 @@ export const ENVIRONMENT_HEARTBEAT_INTERVAL_MS = 30_000;
 
 // ── Folders ───────────────────────────────────────────────────────────────────
 
+/** One page of an environment's folders, oldest first. */
 export async function listFolders(
 	projectId: string,
 	environmentId: string,
-): Promise<EnvironmentFolder[]> {
+	opts: EnvironmentListOptions = {},
+): Promise<EnvironmentListPage<EnvironmentFolder>> {
 	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<{ folders: EnvironmentFolder[] }>
-	>(`/projects/${projectId}/environments/${environmentId}/folders`);
-	return data.data.folders;
+		SuccessEnvelope<EnvironmentListPage<EnvironmentFolder>>
+	>(`/projects/${projectId}/environments/${environmentId}/folders`, {
+		params: listParams(opts),
+	});
+	return data.data;
 }
 
 export async function addFolder(
@@ -352,14 +331,18 @@ export async function browseEnvironment(
 
 // ── SSH Keys ──────────────────────────────────────────────────────────────────
 
+/** One page of an environment's SSH keys, oldest first. */
 export async function listSSHKeys(
 	projectId: string,
 	environmentId: string,
-): Promise<EnvironmentSSHKey[]> {
+	opts: Pick<EnvironmentListOptions, "cursor" | "pageSize"> = {},
+): Promise<EnvironmentListPage<EnvironmentSSHKey>> {
 	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<{ ssh_keys: EnvironmentSSHKey[] }>
-	>(`/projects/${projectId}/environments/${environmentId}/ssh-keys`);
-	return data.data.ssh_keys;
+		SuccessEnvelope<EnvironmentListPage<EnvironmentSSHKey>>
+	>(`/projects/${projectId}/environments/${environmentId}/ssh-keys`, {
+		params: listParams(opts),
+	});
+	return data.data;
 }
 
 export async function addSSHKey(
@@ -385,14 +368,18 @@ export async function deleteSSHKey(
 
 // ── Port Forwards ─────────────────────────────────────────────────────────────
 
+/** One page of an environment's port forwards, oldest first. */
 export async function listPortForwards(
 	projectId: string,
 	environmentId: string,
-): Promise<EnvironmentPortForward[]> {
+	opts: Pick<EnvironmentListOptions, "cursor" | "pageSize"> = {},
+): Promise<EnvironmentListPage<EnvironmentPortForward>> {
 	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<{ port_forwards: EnvironmentPortForward[] }>
-	>(`/projects/${projectId}/environments/${environmentId}/port-forwards`);
-	return data.data.port_forwards;
+		SuccessEnvelope<EnvironmentListPage<EnvironmentPortForward>>
+	>(`/projects/${projectId}/environments/${environmentId}/port-forwards`, {
+		params: listParams(opts),
+	});
+	return data.data;
 }
 
 export async function getPortForward(
@@ -519,6 +506,31 @@ export function portForwardUrl(host: string, port: number, path = ""): string {
 // currentUserQueryOptions/branding-style global config is fetched
 // elsewhere in this app. staleTime: Infinity since this can only change by
 // redeploying the backend, never during a session.
+/** One folder looked up by id (null when it no longer exists), so a picker can
+ *  show the selected folder's path without loading the whole folder list. */
+export const environmentFolderQueryOptions = (
+	projectId: string,
+	environmentId: string,
+	folderId: string,
+) =>
+	queryOptions({
+		queryKey: [
+			"projects",
+			projectId,
+			"environments",
+			environmentId,
+			"folder",
+			folderId,
+		] as const,
+		queryFn: async () => {
+			const page = await listFolders(projectId, environmentId, {
+				ids: [folderId],
+				pageSize: 1,
+			});
+			return page.items[0] ?? null;
+		},
+	});
+
 export const environmentConfigQueryOptions = () =>
 	queryOptions({
 		queryKey: ["environments", "config"],
@@ -528,10 +540,22 @@ export const environmentConfigQueryOptions = () =>
 
 // ── Query Options ─────────────────────────────────────────────────────────────
 
-export const environmentsQueryOptions = (projectId: string) =>
-	queryOptions({
-		queryKey: ["projects", projectId, "environments"],
-		queryFn: () => listEnvironments(projectId),
+/** Key prefix of every cached environment query for a project (lists and
+ *  single environments, with their sub-resources) — invalidate it after an
+ *  environment changes. */
+export const environmentsKey = (projectId: string) =>
+	["projects", projectId, "environments"] as const;
+
+export const environmentsInfiniteQueryOptions = (
+	projectId: string,
+	search = "",
+) =>
+	infiniteQueryOptions({
+		queryKey: [...environmentsKey(projectId), "list", search] as const,
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listEnvironments(projectId, { search, cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 	});
 
 // No refetchInterval: kept live via useProjectRealtime's socket-driven
@@ -570,58 +594,60 @@ export const environmentBrowseQueryOptions = (
 		queryFn: () => browseEnvironment(projectId, environmentId, path),
 	});
 
-export const environmentFoldersQueryOptions = (
+export const environmentFoldersInfiniteQueryOptions = (
 	projectId: string,
 	environmentId: string,
+	search = "",
 ) =>
-	queryOptions({
-		queryKey: ["projects", projectId, "environments", environmentId, "folders"],
-		queryFn: () => listFolders(projectId, environmentId),
-	});
-
-export const environmentAccessGrantsQueryOptions = (
-	projectId: string,
-	environmentId: string,
-) =>
-	queryOptions({
+	infiniteQueryOptions({
 		queryKey: [
 			"projects",
 			projectId,
 			"environments",
 			environmentId,
-			"access-grants",
-		],
-		queryFn: () => listEnvironmentAccessGrants(projectId, environmentId),
+			"folders",
+			search,
+		] as const,
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listFolders(projectId, environmentId, { search, cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 	});
 
-export const environmentSSHKeysQueryOptions = (
+export const environmentSSHKeysInfiniteQueryOptions = (
 	projectId: string,
 	environmentId: string,
 ) =>
-	queryOptions({
+	infiniteQueryOptions({
 		queryKey: [
 			"projects",
 			projectId,
 			"environments",
 			environmentId,
 			"ssh-keys",
-		],
-		queryFn: () => listSSHKeys(projectId, environmentId),
+		] as const,
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listSSHKeys(projectId, environmentId, { cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 	});
 
-export const environmentPortForwardsQueryOptions = (
+export const environmentPortForwardsInfiniteQueryOptions = (
 	projectId: string,
 	environmentId: string,
 ) =>
-	queryOptions({
+	infiniteQueryOptions({
 		queryKey: [
 			"projects",
 			projectId,
 			"environments",
 			environmentId,
 			"port-forwards",
-		],
-		queryFn: () => listPortForwards(projectId, environmentId),
+		] as const,
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listPortForwards(projectId, environmentId, { cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 	});
 
 export const portForwardQueryOptions = (

@@ -9,9 +9,13 @@ import {
 	SuggestionMenuController,
 } from "@blocknote/react";
 import { Workflow } from "lucide-react";
-import { EntityAvatarContent } from "@/components/shared/entity-avatar";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
 import { useDebouncedAsyncCallback } from "@/hooks/use-debounced-callback";
-import { searchMentionableTasks } from "@/lib/mention-api";
+import {
+	searchMentionableDocuments,
+	searchMentionableMembers,
+	searchMentionableTasks,
+} from "@/lib/mention-api";
 import type { customSchema } from "./blocknote-schema";
 
 /** BlockNote calls getItems on every keystroke after "#" — debounce the
@@ -32,44 +36,47 @@ interface MentionSuggestionMenuProps {
 		typeof customSchema.inlineContentSchema,
 		typeof customSchema.styleSchema
 	>;
-	teamMembers: Array<{
-		id: string;
-		name: string;
-		username: string;
-		avatarThumbUrl?: string | null | undefined;
-	}>;
-	/** Needed to search tasks live as the user types after "#" — the project's
-	 *  task list has no fixed upper bound, so it's queried on demand instead
-	 *  of being preloaded in full (see mention-api.ts). */
+	/** Needed to search team members (after "@") and tasks (after "#") live as
+	 *  the user types — neither list has a fixed upper bound, so they're
+	 *  queried on demand instead of being preloaded in full (see
+	 *  mention-api.ts). */
 	projectId?: string | null;
-	documents: Array<{ id: string; title: string }>;
 }
 
 export function MentionSuggestionMenus({
 	editor,
-	teamMembers,
 	projectId,
-	documents,
 }: MentionSuggestionMenuProps) {
 	const debouncedSearchMentionableTasks = useDebouncedAsyncCallback(
 		searchMentionableTasks,
 		TASK_SEARCH_DEBOUNCE_MS,
 	);
 
-	const getTeamMentionItems = (): DefaultReactSuggestionItem[] => {
+	const debouncedSearchMentionableMembers = useDebouncedAsyncCallback(
+		searchMentionableMembers,
+		TASK_SEARCH_DEBOUNCE_MS,
+	);
+
+	const debouncedSearchMentionableDocuments = useDebouncedAsyncCallback(
+		searchMentionableDocuments,
+		TASK_SEARCH_DEBOUNCE_MS,
+	);
+
+	const getTeamMentionItems = async (
+		query: string,
+	): Promise<DefaultReactSuggestionItem[]> => {
+		if (!projectId) return [];
+		const teamMembers = await debouncedSearchMentionableMembers(
+			projectId,
+			query,
+		);
 		return teamMembers.map((member) => ({
 			title: member.name,
 			subtext: `@${member.username}`,
 			// Resolved fresh from the live teamMembers list every time the
 			// dropdown opens — safe, unlike the mention chip's own props (see
 			// the avatar: "" comment below), since this is never persisted.
-			icon: (
-				<div className="flex size-5 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10 text-primary text-[10px] font-bold overflow-hidden">
-					<EntityAvatarContent avatarUrl={member.avatarThumbUrl}>
-						{member.name.slice(0, 1).toUpperCase()}
-					</EntityAvatarContent>
-				</div>
-			),
+			icon: <EntityAvatar {...member.avatar} size="xs" />,
 			onItemClick: () => {
 				editor.insertInlineContent([
 					{
@@ -120,7 +127,16 @@ export function MentionSuggestionMenus({
 		}));
 	};
 
-	const getDocReferenceItems = (): DefaultReactSuggestionItem[] => {
+	const getDocReferenceItems = async (
+		query: string,
+	): Promise<DefaultReactSuggestionItem[]> => {
+		if (!projectId) return [];
+		const effectiveQuery =
+			query.trim().length >= MIN_TASK_SEARCH_LENGTH ? query : "";
+		const documents = await debouncedSearchMentionableDocuments(
+			projectId,
+			effectiveQuery,
+		);
 		return documents.map((doc) => ({
 			title: doc.title,
 			subtext: `#${doc.id.slice(0, 8)}`,
@@ -163,18 +179,18 @@ export function MentionSuggestionMenus({
 			/>
 			<SuggestionMenuController
 				triggerCharacter="@"
-				getItems={async (query) =>
-					filterSuggestionItems(getTeamMentionItems(), query)
-				}
+				// Already filtered server-side by `query`.
+				getItems={async (query) => getTeamMentionItems(query)}
 			/>
 			<SuggestionMenuController
 				triggerCharacter="#"
 				getItems={async (query) => [
-					// Tasks are already filtered server-side by `query`; re-running
-					// filterSuggestionItems here would incorrectly drop matches on
-					// the "#<task_number>" subtext for non-title search terms.
+					// Tasks and documents are already filtered server-side by
+					// `query`; re-running filterSuggestionItems here would
+					// incorrectly drop matches on the "#<task_number>" subtext
+					// for non-title search terms.
 					...(await getTaskReferenceItems(query)),
-					...filterSuggestionItems(getDocReferenceItems(), query),
+					...(await getDocReferenceItems(query)),
 				]}
 			/>
 		</>

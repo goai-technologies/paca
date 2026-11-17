@@ -7,14 +7,13 @@ import {
 	Link,
 	Loader2,
 	Search,
-	Sparkles,
 	User,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getTaskTypeIconComponent } from "@/components/projects/task-types/task-type-icons";
-import { EntityAvatarContent } from "@/components/shared/entity-avatar";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -34,17 +33,17 @@ import {
 } from "@/lib/custom-field-colors";
 import { formatDate } from "@/lib/format-date";
 import type { Task } from "@/lib/interaction-api";
-
+import { useMemberDirectory } from "@/lib/member-directory";
 import {
 	type CustomFieldDefinition,
 	findEpicType,
-	type ProjectMember,
 	type TaskStatus,
 	type TaskType,
 } from "@/lib/project-api";
-import { resolveMemberAvatarUrl } from "@/lib/provider-logos";
+import { memberAvatar } from "@/lib/provider-logos";
 import { useHoveredTaskStore } from "@/lib/shortcuts/hovered-task-store";
 import { cn } from "@/lib/utils";
+import { AssigneePicker } from "./assignee-picker";
 
 import {
 	getPriority,
@@ -67,7 +66,6 @@ interface TaskCardProps {
 	taskIdPrefix?: string;
 	statuses: TaskStatus[];
 	taskTypes: TaskType[];
-	members?: ProjectMember[];
 	epics?: Task[];
 	/** Load-more state for the epic picker Popover — omitted when the caller
 	 * doesn't paginate epics (e.g. fewer than one page's worth). */
@@ -97,7 +95,6 @@ export function TaskCard({
 	taskIdPrefix = "",
 	statuses,
 	taskTypes,
-	members = [],
 	epics = [],
 	epicsPagination,
 	visibleFields = DEFAULT_VISIBLE_FIELDS,
@@ -116,6 +113,7 @@ export function TaskCard({
 	const { t } = useTranslation("projects");
 	const isMobile = useIsMobile();
 	const jevEnabled = useJevEnabled(task.project_id);
+	const getMember = useMemberDirectory(task.project_id);
 	const isAutoAssign = isAutoAssignPending(task);
 	const [isHovered, setIsHovered] = useState(false);
 	const [typePopoverOpen, setTypePopoverOpen] = useState(false);
@@ -151,149 +149,18 @@ export function TaskCard({
 	/** Renders the chip/indicator for a single field key. */
 	const renderField = (fieldKey: string) => {
 		switch (fieldKey) {
-			case "assignee": {
-				const assigneeIds = task.assignee_ids ?? [];
-				const visible = assigneeIds.slice(0, 3);
-				const overflow = assigneeIds.length - visible.length;
-				const avatarStack = isAutoAssign ? (
-					<div className="flex size-5 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10 text-primary ring-1 ring-border/25">
-						<Sparkles className="size-2.5" />
-					</div>
-				) : (
-					<div className="flex items-center -space-x-1.5">
-						{visible.length > 0 ? (
-							visible.map((id) => {
-								const m = members.find((mm) => mm.id === id);
-								return (
-									<div
-										key={id}
-										className="flex size-5 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/15 text-primary text-xs font-bold ring-2 ring-card"
-									>
-										<EntityAvatarContent
-											avatarUrl={m ? resolveMemberAvatarUrl(m) : undefined}
-										>
-											{m ? (
-												(m.full_name || m.username).slice(0, 1).toUpperCase()
-											) : (
-												<User className="size-2.5" />
-											)}
-										</EntityAvatarContent>
-									</div>
-								);
-							})
-						) : (
-							<div className="flex size-5 items-center justify-center rounded-full bg-linear-to-br from-muted/80 to-muted/40 text-muted-foreground text-xs font-bold ring-1 ring-border/25">
-								<User className="size-2.5" />
-							</div>
-						)}
-						{overflow > 0 && (
-							<div className="flex size-5 items-center justify-center rounded-full bg-muted text-muted-foreground text-[10px] font-bold ring-2 ring-card">
-								+{overflow}
-							</div>
-						)}
-					</div>
+			case "assignee":
+				return (
+					<AssigneePicker
+						key="assignee"
+						projectId={task.project_id}
+						assigneeIds={task.assignee_ids ?? []}
+						isAutoAssign={isAutoAssign}
+						autoEnabled={jevEnabled}
+						canEdit={!!canEdit}
+						onChange={(patch) => onUpdate?.(task.id, patch)}
+					/>
 				);
-
-				return canEdit && members.length > 0 ? (
-					<Popover key="assignee">
-						<PopoverTrigger
-							type="button"
-							onClick={(e) => e.stopPropagation()}
-							className="nodrag flex items-center rounded-full transition-all duration-150 hover:ring-2 hover:ring-primary/30"
-						>
-							{avatarStack}
-						</PopoverTrigger>
-						<PopoverContent
-							className="w-48 p-1 rounded-xl border border-border/40 shadow-lg"
-							align="start"
-						>
-							{jevEnabled && (
-								<button
-									type="button"
-									className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-muted/60 transition-colors duration-100"
-									onClick={(e) => {
-										e.stopPropagation();
-										onUpdate?.(
-											task.id,
-											isAutoAssign
-												? { assignment_mode: "manual" }
-												: { assignment_mode: "auto", assignee_ids: [] },
-										);
-									}}
-								>
-									<div className="flex size-5 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10 text-primary shrink-0">
-										<Sparkles className="size-3" />
-									</div>
-									<span className="flex-1 text-left truncate">
-										{t("taskDetail.properties.autoAssign")}
-									</span>
-									{isAutoAssign && <Check className="size-3.5 text-primary" />}
-								</button>
-							)}
-							<button
-								type="button"
-								className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors duration-100"
-								onClick={(e) => {
-									e.stopPropagation();
-									onUpdate?.(task.id, {
-										...(isAutoAssign
-											? { assignment_mode: "manual" as const }
-											: {}),
-										assignee_ids: [],
-									});
-								}}
-							>
-								<User className="size-3.5 opacity-60" />
-								<span className="flex-1 text-left">
-									{t("board.taskCard.unassigned")}
-								</span>
-								{!isAutoAssign && assigneeIds.length === 0 && (
-									<Check className="size-3.5 text-primary" />
-								)}
-							</button>
-							{members.map((m) => {
-								const isSelected =
-									!isAutoAssign && (task.assignee_ids?.includes(m.id) ?? false);
-								return (
-									<button
-										key={m.id}
-										type="button"
-										className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-muted/60 transition-colors duration-100"
-										onClick={(e) => {
-											e.stopPropagation();
-											const current = isAutoAssign
-												? []
-												: (task.assignee_ids ?? []);
-											onUpdate?.(task.id, {
-												...(isAutoAssign
-													? { assignment_mode: "manual" as const }
-													: {}),
-												assignee_ids: isSelected
-													? current.filter((id) => id !== m.id)
-													: [...current, m.id],
-											});
-										}}
-									>
-										<div className="flex size-5 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10 text-primary text-xs font-bold">
-											<EntityAvatarContent
-												avatarUrl={resolveMemberAvatarUrl(m)}
-											>
-												{(m.full_name || m.username).slice(0, 1).toUpperCase()}
-											</EntityAvatarContent>
-										</div>
-										<span className="flex-1 text-left truncate">
-											{m.full_name || m.username}
-										</span>
-										{isSelected && <Check className="size-3.5 text-primary" />}
-									</button>
-								);
-							})}
-						</PopoverContent>
-					</Popover>
-				) : (
-					<div key="assignee">{avatarStack}</div>
-				);
-			}
 
 			case "type":
 				return canEdit && taskTypes.length > 0 ? (
@@ -526,32 +393,23 @@ export function TaskCard({
 
 			case "reporter": {
 				const reporter = task.reporter_id
-					? members.find((m) => m.id === task.reporter_id)
+					? getMember(task.reporter_id)
 					: undefined;
 				return (
-					<div
+					<span
 						key="reporter"
 						title={
 							reporter
 								? reporter.full_name || reporter.username
 								: t("board.taskCard.reporterTitle")
 						}
-						className="flex size-5 items-center justify-center rounded-full bg-linear-to-br from-muted/80 to-muted/40 text-muted-foreground text-xs font-bold ring-1 ring-border/25"
 					>
-						<EntityAvatarContent
-							avatarUrl={
-								reporter ? resolveMemberAvatarUrl(reporter) : undefined
-							}
-						>
-							{reporter ? (
-								(reporter.full_name || reporter.username)
-									.slice(0, 1)
-									.toUpperCase()
-							) : (
-								<User className="size-2.5" />
-							)}
-						</EntityAvatarContent>
-					</div>
+						<EntityAvatar
+							{...(reporter ? memberAvatar(reporter) : { name: "" })}
+							fallback={<User className="size-2.5" />}
+							size="xs"
+						/>
+					</span>
 				);
 			}
 

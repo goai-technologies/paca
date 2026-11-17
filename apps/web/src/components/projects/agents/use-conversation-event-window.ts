@@ -20,7 +20,7 @@ export type UseConversationEventWindow = {
 	hasOlder: boolean;
 	isLoadingOlder: boolean;
 	loadOlder: () => void;
-	/** Events waiting past the window while not following. */
+	/** New user-visible messages waiting past the window while not following. */
 	newBelow: number;
 	following: boolean;
 	setFollowing: (following: boolean) => void;
@@ -149,13 +149,60 @@ export function useConversationEventWindow({
 		return frozen.length > 0 ? [...pagedEvents, ...frozen] : pagedEvents;
 	}, [pagedEvents, liveEvents, lastPagedIndex, following]);
 
-	const loaded =
-		events.length === 0 ? 0 : (events.at(-1)?.event_index ?? -1) + 1;
-	const serverKnown = Math.max(
-		data?.pages.at(-1)?.total ?? 0,
-		(tailIndex ?? -1) + 1,
-		loaded,
-	);
+	// Count user-visible messages in the new events rather than raw events.
+	// A single user message + agent turn produces dozens of raw events
+	// (tool_call, agent_message_chunk, agent_thought_chunk, turn_end, etc.)
+	// but renders as only two bubbles (one user, one assistant). Showing the
+	// raw event count as "X new messages" is wildly misleading.
+	const newBelowCount = useMemo(() => {
+		const lastSeenIndex =
+			events.length === 0 ? -1 : (events.at(-1)?.event_index ?? -1);
+		const newEvents = liveEvents.filter((e) => e.event_index > lastSeenIndex);
+		if (newEvents.length === 0) return 0;
+
+		// Check if the visible events ended mid-assistant-turn (no turn_end or
+		// user_message after the last agent event). If so, agent events continuing
+		// that turn in the new events aren't a "new" message — they're the same one.
+		let visibleMidTurn = false;
+		for (let i = events.length - 1; i >= 0; i--) {
+			const t = events[i].event_type;
+			if (t === "turn_end" || t === "user_message") break;
+			if (
+				t === "agent_message_chunk" ||
+				t === "agent_thought_chunk" ||
+				t === "tool_call" ||
+				t === "MessageEvent" ||
+				t === "ActionEvent" ||
+				t === "ACPToolCallEvent"
+			) {
+				visibleMidTurn = true;
+				break;
+			}
+		}
+
+		let count = 0;
+		let inAgentTurn = visibleMidTurn;
+		for (const ev of newEvents) {
+			const t = ev.event_type;
+			if (t === "user_message") {
+				count++;
+				inAgentTurn = false;
+			} else if (
+				!inAgentTurn &&
+				(t === "agent_message_chunk" ||
+					t === "agent_thought_chunk" ||
+					t === "tool_call" ||
+					t === "MessageEvent" ||
+					t === "ActionEvent" ||
+					t === "ACPToolCallEvent")
+			) {
+				count++;
+				inAgentTurn = true;
+			}
+			if (t === "turn_end") inAgentTurn = false;
+		}
+		return count;
+	}, [liveEvents, events]);
 
 	return {
 		events,
@@ -165,7 +212,7 @@ export function useConversationEventWindow({
 		loadOlder: () => {
 			void fetchPreviousPage();
 		},
-		newBelow: following ? 0 : Math.max(0, serverKnown - loaded),
+		newBelow: following ? 0 : newBelowCount,
 		following,
 		setFollowing,
 		jumpToLatest: () => setFollowing(true),

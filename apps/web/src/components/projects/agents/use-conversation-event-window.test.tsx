@@ -235,8 +235,14 @@ describe("useConversationEventWindow", () => {
 		await signal(stream.grow(3));
 
 		// Reported, not merged in — the reader's scrolled-away view shouldn't
-		// move under them.
-		await waitFor(() => expect(result.current.newBelow).toBe(3));
+		// move under them. newBelow counts user-visible messages, not raw
+		// events — 3 ACPToolCallEvents continuing an existing turn is 0 new
+		// messages (the same agent turn is still streaming). The explicit
+		// flush makes the assertion read the post-signal render: the pre-
+		// signal value is also 0, so without it a broken mid-turn probe
+		// could regress this to 1 while the test keeps passing.
+		await act(async () => {});
+		expect(result.current.newBelow).toBe(0);
 		expect(lastIndex(result.current.events)).toBe(274);
 		expect(requests(PROJECT_PATH)).toHaveLength(callsAfterOpen);
 
@@ -267,14 +273,57 @@ describe("useConversationEventWindow", () => {
 		expect(result.current.events).toHaveLength(201);
 
 		// Further growth is still just reported, not merged, while paused.
+		// newBelow counts messages, not raw events — 1 ACPToolCallEvent
+		// continuing an existing turn is 0 new messages. Flush before
+		// asserting for the same stale-render reason as above.
 		await signal(stream.grow(1));
-		await waitFor(() => expect(result.current.newBelow).toBe(1));
+		await act(async () => {});
+		expect(result.current.newBelow).toBe(0);
 		expect(lastIndex(result.current.events)).toBe(200);
 		expect(requests(PROJECT_PATH)).toHaveLength(callsAfterOpen);
 
 		act(() => result.current.jumpToLatest());
 		await waitFor(() => expect(lastIndex(result.current.events)).toBe(201));
 		expect(result.current.newBelow).toBe(0);
+	});
+
+	it("counts user-visible messages, not raw events, in newBelow", async () => {
+		fakeStream(200);
+		const { result, signal } = open();
+		await waitFor(() => expect(result.current.events).toHaveLength(200));
+
+		act(() => result.current.setFollowing(false));
+
+		// Simulate a user message + agent turn arriving live: 1 user_message,
+		// a few agent chunks, then a turn_end. All the agent events are one
+		// assistant message — newBelow should be 2 (1 user + 1 assistant),
+		// not 5 (the raw event count).
+		const userMsg: AgentConversationEvent = {
+			...ev(200),
+			event_type: "user_message",
+			event_source: "user",
+		};
+		const agentChunk1: AgentConversationEvent = {
+			...ev(201),
+			event_type: "agent_message_chunk",
+		};
+		const toolCall: AgentConversationEvent = {
+			...ev(202),
+			event_type: "tool_call",
+		};
+		const agentChunk2: AgentConversationEvent = {
+			...ev(203),
+			event_type: "agent_message_chunk",
+		};
+		const turnEnd: AgentConversationEvent = {
+			...ev(204),
+			event_type: "turn_end",
+		};
+		await signal([userMsg, agentChunk1, toolCall, agentChunk2, turnEnd]);
+
+		await waitFor(() => expect(result.current.newBelow).toBe(2));
+		// Events aren't merged while not following.
+		expect(lastIndex(result.current.events)).toBe(199);
 	});
 
 	it("takes events for a conversation that was empty when opened", async () => {

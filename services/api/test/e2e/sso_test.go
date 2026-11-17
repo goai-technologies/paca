@@ -163,9 +163,9 @@ func TestSSOSignIn(t *testing.T) {
 
 	const password = "supersecret"
 	seedUser(t, env, "root", password, "Root")
-	assignGlobalRolesByName(t, env, "root", "SUPER_ADMIN")
+	assignPlatformRole(t, env, "root", "SUPER_ADMIN")
 	seedUser(t, env, "admin", password, "Admin")
-	assignGlobalRolesByName(t, env, "admin", "ADMIN")
+	assignPlatformRole(t, env, "admin", "ADMIN")
 	root := newLoggedInClient(t, env, "root", password)
 	admin := newLoggedInClient(t, env, "admin", password)
 
@@ -225,7 +225,7 @@ func TestSSOSignIn(t *testing.T) {
 			t.Fatalf("GET /users/me: want 200, got %d", status)
 		}
 		me := assertDataMap(t, out)
-		if me["username"] != "jane" || me["full_name"] != "Jane Doe" || me["email"] != "jane@corp.example" || me["role"] != "USER" {
+		if me["username"] != "jane" || me["full_name"] != "Jane Doe" || me["email"] != "jane@corp.example" || strings.Join(roleNames(me), ",") != "USER" {
 			t.Fatalf("provisioned user = %v", me)
 		}
 		janeID, _ = me["id"].(string)
@@ -275,7 +275,7 @@ func TestSSOSignIn(t *testing.T) {
 		wg.Wait()
 		var count int
 		if err := env.db.GetContext(env.ctx, &count,
-			`SELECT COUNT(*) FROM users WHERE username LIKE 'racer%' AND deleted_at IS NULL`); err != nil {
+			`SELECT COUNT(*) FROM users u JOIN accounts a ON a.id = u.id WHERE u.username LIKE 'racer%' AND a.deleted_at IS NULL`); err != nil {
 			t.Fatal(err)
 		}
 		if count != 1 {

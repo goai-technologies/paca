@@ -126,6 +126,8 @@ apps/e2e/
     ├── admin/              # users, global roles, agents, settings, plugins, changelog
     ├── auth/               # login flows, forced password change
     ├── docs/               # project documentation (folders, editor, history, comments)
+    ├── iam/                # IAM authorization: evaluation, scoped access, roles:assign,
+    │                       # role scope rules, role editor, badges, plugin legacy warning
     ├── profile/            # profile editing, personal API keys
     ├── projects/           # project management, tasks, sprints, views, roles,
     │                       # agents, automation, conversations, environments
@@ -148,6 +150,7 @@ Playwright-BDD adapter is wired in.
 | `admin/` | `agents`, `changelog`, `global-roles`, `plugins`, `settings`, `users` |
 | `auth/` | `login`, `change-password` |
 | `docs/` | `docs` |
+| `iam/` | `evaluation`, `scoped-access`, `list-scoping`, `roles-assign`, `role-scope-rules`, `role-editor`, `role-badges-selector`, `plugin-legacy-warning`, `docs-guide-examples` |
 | `profile/` | `profile`, `api-keys` |
 | `projects/` | `agents`, `automation`, `conversations`, `custom-fields`, `environments`, `interaction-sidebar`, `interaction-views`, `management`, `roles`, `sprint-lifecycle`, `task-detail`, `task-statuses`, `task-types`, `timeline`, `view-settings`, `view-settings-fields` |
 | `security/` | `login` |

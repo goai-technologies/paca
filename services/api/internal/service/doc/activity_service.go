@@ -100,20 +100,20 @@ func (s *ActivitySvc) RecordActivity(ctx context.Context, in docdom.RecordActivi
 	return nil
 }
 
-// ListActivities returns all non-deleted activities for a document, oldest first.
-func (s *ActivitySvc) ListActivities(ctx context.Context, projectID, documentID uuid.UUID) ([]*docdom.Activity, error) {
+// ListActivities returns one page of a document's activities, newest first.
+func (s *ActivitySvc) ListActivities(ctx context.Context, projectID, documentID uuid.UUID, cursor *string, limit int) ([]*docdom.Activity, *string, error) {
 	if err := s.documentInProject(ctx, projectID, documentID, docdom.ErrDocNotFound); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	items, err := s.act.ListForEntity(ctx, events.EntityDoc, documentID)
+	items, next, err := s.act.ListForEntity(ctx, events.EntityDoc, documentID, cursor, limit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]*docdom.Activity, 0, len(items))
 	for _, a := range items {
 		out = append(out, toDocActivity(a))
 	}
-	return out, nil
+	return out, next, nil
 }
 
 // AddComment creates a comment on the document.

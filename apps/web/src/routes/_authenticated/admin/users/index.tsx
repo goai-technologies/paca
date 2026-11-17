@@ -8,9 +8,11 @@ import { DeleteUserDialog } from "@/components/admin/users/DeleteUserDialog";
 import { ResetPasswordDialog } from "@/components/admin/users/ResetPasswordDialog";
 import { UserFormDialog } from "@/components/admin/users/UserFormDialog";
 import { UserRoleDialog } from "@/components/admin/users/UserRoleDialog";
+import { UsersFilters } from "@/components/admin/users/UsersFilters";
 import { UsersHeader } from "@/components/admin/users/UsersHeader";
 import {
 	EmptyUsersState,
+	NoUsersMatchState,
 	UsersErrorState,
 } from "@/components/admin/users/UsersStates";
 import { UsersStats } from "@/components/admin/users/UsersStats";
@@ -27,6 +29,8 @@ import {
 } from "@/lib/admin-api";
 import { currentUserQueryOptions } from "@/lib/auth-api";
 import { hasPermission } from "@/lib/permissions";
+import { platformRolesQueryOptions } from "@/lib/role-api";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/admin/users/")({
 	beforeLoad: async ({ context: { queryClient } }) => {
@@ -35,9 +39,9 @@ export const Route = createFileRoute("/_authenticated/admin/users/")({
 			.catch(() => [] as string[]);
 
 		const canAccess =
-			hasPermission(permissions, "users.read") ||
-			hasPermission(permissions, "users.write") ||
-			hasPermission(permissions, "users.delete");
+			hasPermission(permissions, "users:read") ||
+			hasPermission(permissions, "users:write") ||
+			hasPermission(permissions, "users:delete");
 
 		if (!canAccess) {
 			throw redirect({ to: "/home" });
@@ -49,25 +53,39 @@ export const Route = createFileRoute("/_authenticated/admin/users/")({
 function UsersManagementPage() {
 	const { t } = useTranslation("admin");
 	const { hasPermission, isLoading: isPermissionsLoading } = usePermissions();
-	const canRead = hasPermission("users.read");
-	const canWrite = hasPermission("users.write");
+	const canRead = hasPermission("users:read");
+	const canWrite = hasPermission("users:write");
 	// Deleting a user is its own permission, separate from editing one —
 	// mirrors canAssignRole below. Without this the delete button showed for
 	// anyone who could edit a user, even without users.delete, and the
 	// server then refused the request.
-	const canDelete = hasPermission("users.delete");
+	const canDelete = hasPermission("users:delete");
 	// Changing a role is its own permission, separate from editing the user.
 	const canAssignRole = useCanAssignGlobalRole();
 
 	const [page, setPage] = useState(1);
+	const [search, setSearch] = useState("");
+	const [role, setRole] = useState("");
+	// Bumped to remount the filter bar (and so empty its search box) when the
+	// "No users match" state clears the filters.
+	const [filtersKey, setFiltersKey] = useState(0);
 	const pageSize = 20;
+	const isFiltering = search.trim() !== "" || role !== "";
+
+	// Role chips need global_roles.read. Without it the chip row is simply
+	// hidden — search still works.
+	const { data: globalRoles } = useQuery({
+		...platformRolesQueryOptions,
+		retry: false,
+	});
 
 	const {
 		data: pagedUsers,
 		isLoading: isDataLoading,
+		isFetching,
 		isError,
 	} = useQuery({
-		...usersQueryOptions(page, pageSize),
+		...usersQueryOptions(page, pageSize, { search: search.trim(), role }),
 		enabled: canRead,
 		placeholderData: keepPreviousData,
 	});
@@ -100,6 +118,22 @@ function UsersManagementPage() {
 		}
 	}, [isLoading, isError, page, totalPages]);
 
+	// A new filter always starts from the first page.
+	const changeSearch = (value: string) => {
+		setSearch(value);
+		setPage(1);
+	};
+	const changeRole = (value: string) => {
+		setRole(value);
+		setPage(1);
+	};
+	const clearFilters = () => {
+		setSearch("");
+		setRole("");
+		setPage(1);
+		setFiltersKey((k) => k + 1);
+	};
+
 	return (
 		<div className="flex flex-col gap-6 p-6 max-w-5xl w-full mx-auto">
 			<UsersHeader canWrite={canWrite} onCreate={() => setCreateOpen(true)} />
@@ -108,12 +142,26 @@ function UsersManagementPage() {
 				<UserFormDialog open={createOpen} onOpenChange={setCreateOpen} />
 			) : null}
 
-			{canRead && !isLoading && !isError && (
+			{canRead && !isLoading && !isError && !isFiltering && (
 				<UsersStats
 					total={total}
 					mustChangePasswordCount={mustChangePasswordCount}
 				/>
 			)}
+
+			{canRead && !isPermissionsLoading ? (
+				<UsersFilters
+					key={filtersKey}
+					roles={(globalRoles ?? []).map((r) => r.name)}
+					selectedRole={role}
+					isFetching={isFetching}
+					isFiltering={isFiltering}
+					resultCount={total}
+					onSearchChange={changeSearch}
+					onRoleChange={changeRole}
+					onClear={clearFilters}
+				/>
+			) : null}
 
 			{!isPermissionsLoading && !canRead ? (
 				<NoPermissionState
@@ -125,19 +173,29 @@ function UsersManagementPage() {
 				<UsersTableSkeleton />
 			) : isError ? (
 				<UsersErrorState />
+			) : users.length === 0 && isFiltering ? (
+				<NoUsersMatchState onClear={clearFilters} />
 			) : users.length === 0 ? (
 				<EmptyUsersState
 					canWrite={canWrite}
 					onCreate={() => setCreateOpen(true)}
 				/>
 			) : (
-				<div className="flex flex-col gap-4">
+				<div
+					className={cn(
+						"flex flex-col gap-4 transition-opacity",
+						// keepPreviousData leaves the old rows up while the new
+						// filter loads; dim them so it reads as "updating".
+						isFetching && "opacity-60",
+					)}
+				>
 					<UsersTable
 						users={users}
 						canWrite={canWrite}
 						canDelete={canDelete}
 						canAssignRole={canAssignRole}
 						currentUserId={currentUser?.id}
+						roleDirectory={globalRoles}
 						onEdit={setEditUser}
 						onDelete={setDeleteUser}
 						onResetPassword={setResetPasswordUser}

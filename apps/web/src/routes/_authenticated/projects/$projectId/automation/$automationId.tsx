@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	useInfiniteQuery,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowLeft,
@@ -9,7 +14,7 @@ import {
 	Workflow,
 	X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AutomationCanvas } from "@/components/projects/automation/automation-canvas";
 import { AutomationNodeConfigPanel } from "@/components/projects/automation/automation-node-config-panel";
@@ -46,9 +51,9 @@ import {
 	updateAutomationNode,
 } from "@/lib/automation-api";
 import { sprintsQueryOptions } from "@/lib/interaction-api";
+import { useMemberDirectory } from "@/lib/member-directory";
 import {
 	customFieldsQueryOptions,
-	projectMembersQueryOptions,
 	taskStatusesQueryOptions,
 	taskTypesQueryOptions,
 } from "@/lib/project-api";
@@ -89,7 +94,7 @@ function AutomationBuilderPage() {
 	const { projectId, automationId } = Route.useParams();
 	const qc = useQueryClient();
 	const { hasProjectPermission } = useProjectPermissions(projectId);
-	const canManage = hasProjectPermission("workflows.write");
+	const canManage = hasProjectPermission("workflows:write");
 
 	const { data: graph } = useQuery(
 		automationQueryOptions(projectId, automationId),
@@ -111,16 +116,23 @@ function AutomationBuilderPage() {
 		};
 	}, [graph, automationId, projectId]);
 	const { data: statuses = [] } = useQuery(taskStatusesQueryOptions(projectId));
-	const { data: members = [] } = useQuery(
-		projectMembersQueryOptions(projectId),
-	);
+	// Node summaries name members by id, looked up on demand.
+	const getMember = useMemberDirectory(projectId);
 	const { data: customFields = [] } = useQuery(
 		customFieldsQueryOptions(projectId),
 	);
 	const { data: taskTypes = [] } = useQuery(taskTypesQueryOptions(projectId));
 	const { data: sprints = [] } = useQuery(sprintsQueryOptions(projectId));
-	const { data: runs = [] } = useQuery(
-		automationRunsQueryOptions(projectId, automationId),
+	const {
+		data: runPages,
+		fetchNextPage: fetchMoreRuns,
+		hasNextPage: hasMoreRuns,
+		isFetchingNextPage: isFetchingMoreRuns,
+		isFetchNextPageError: isMoreRunsError,
+	} = useInfiniteQuery(automationRunsQueryOptions(projectId, automationId));
+	const runs = useMemo(
+		() => runPages?.pages.flatMap((p) => p.items) ?? [],
+		[runPages],
 	);
 	const { data: pluginTypes } = useQuery(
 		pluginNodeTypesQueryOptions(projectId),
@@ -315,7 +327,7 @@ function AutomationBuilderPage() {
 					if (!cfg.member_id) {
 						return t("automation.nodeConfig.description.unassigned");
 					}
-					const member = members.find((m) => m.id === cfg.member_id);
+					const member = getMember(cfg.member_id);
 					return member?.full_name || member?.username;
 				}
 				case "update_task": {
@@ -356,9 +368,7 @@ function AutomationBuilderPage() {
 						taskTypes.find((tt) => tt.id === fields.task_type_id)?.name,
 					);
 					if (fields.assignee_ids?.length) {
-						const member = members.find(
-							(m) => m.id === fields.assignee_ids?.[0],
-						);
+						const member = getMember(fields.assignee_ids?.[0]);
 						pushField("assignee_ids", member?.full_name || member?.username);
 					}
 					if (fields.importance !== undefined) {
@@ -372,8 +382,8 @@ function AutomationBuilderPage() {
 					}
 					pushField(
 						"reporter_id",
-						members.find((m) => m.id === fields.reporter_id)?.full_name ||
-							members.find((m) => m.id === fields.reporter_id)?.username,
+						getMember(fields.reporter_id)?.full_name ||
+							getMember(fields.reporter_id)?.username,
 					);
 					pushField(
 						"sprint_id",
@@ -710,7 +720,6 @@ function AutomationBuilderPage() {
 							projectId={projectId}
 							automationId={automationId}
 							statuses={statuses}
-							members={members}
 							customFields={customFields}
 							taskTypes={taskTypes}
 							canEdit={canManage}
@@ -733,6 +742,12 @@ function AutomationBuilderPage() {
 					projectId={projectId}
 					automationId={automationId}
 					runs={runs}
+					pagination={{
+						hasMore: !!hasMoreRuns,
+						isLoadingMore: isFetchingMoreRuns,
+						isError: isMoreRunsError,
+						onLoadMore: () => void fetchMoreRuns(),
+					}}
 					nodeLabel={nodeLabel}
 				/>
 			)}

@@ -30,7 +30,8 @@
 		"team": "Команда",
 		"settings": "Настройки",
 		"changelog": "Что нового",
-		"activity": "Активность"
+		"activity": "Активность",
+		"serviceAccounts": "Сервисные аккаунты"
 	},
 	"projectSwitcher": {
 		"projects": "Проекты",

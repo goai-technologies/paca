@@ -42,7 +42,6 @@ secrets:
   # Pre-shared key authenticating services/api <-> agent-runner's
   # internal-only routes. Only required when agentRunner.enabled.
   internalApiKey: ""
-  agentApiKey: ""
   postgresPassword: ""
   # Only read when rustfs.enabled is false (external S3) — the bundled
   # RustFS's own credentials live under rustfs.secret.rustfs.* instead, see

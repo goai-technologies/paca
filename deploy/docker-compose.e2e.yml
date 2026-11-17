@@ -18,7 +18,6 @@ services:
       POSTGRES_PASSWORD: e2e-postgres-password
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../services/api/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U paca -d paca"]
       interval: 5s
@@ -67,9 +66,6 @@ services:
       ENCRYPTION_KEY: "3b4a93a4f2ffa732a5f7cf44b9a37050e49f5f9c3f105c3995432b9dd49e28ac"
       # Public base URL used by plugins to generate callback/webhook URLs.
       PUBLIC_URL: http://localhost
-      # Pre-shared key for the agent-runner service to authenticate with the API.
-      # Must match PACA_API_KEY in the agent-runner service.
-      AGENT_API_KEY: e2e-agent-api-key
       # Base URL of the agent-runner service. Explicit rather than relying
       # on the Go code's own http://ai-agent:8080 default — see
       # docker-compose.dev.yml's identical note for why that default no
@@ -240,8 +236,6 @@ services:
       # URLs (e.g. /plugins-mcp/<id>/mcp.js).  The gateway (Caddy) serves these
       # files, not the API service.
       PACA_GATEWAY_URL: http://gateway:8080
-      # Must match AGENT_API_KEY in the api service.
-      PACA_API_KEY: e2e-agent-api-key
       # Must match ENCRYPTION_KEY in the api service.
       ENCRYPTION_KEY: "3b4a93a4f2ffa732a5f7cf44b9a37050e49f5f9c3f105c3995432b9dd49e28ac"
       DOCKER_SOCKET: /var/run/docker.sock

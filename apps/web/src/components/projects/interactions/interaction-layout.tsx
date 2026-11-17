@@ -83,13 +83,13 @@ import {
 	viewsByContextQueryOptions,
 } from "@/lib/interaction-api";
 import type { PluginRegistration } from "@/lib/plugin-api";
+import { usePluginAccess } from "@/lib/plugins/access";
 import { RemoteComponent } from "@/lib/plugins/loader";
 import { usePluginBaseProps } from "@/lib/plugins/plugin-props";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import {
 	customFieldsQueryOptions,
 	findEpicType,
-	projectMembersQueryOptions,
 	projectQueryOptions,
 	taskStatusesQueryOptions,
 	taskTypesQueryOptions,
@@ -113,6 +113,7 @@ import {
 	getDefaultPageSize,
 	getTaskColumnKeys,
 	keepPreviousDataOnPageSizeChangeOnly,
+	peopleFromTasks,
 	resolveSelectedTask,
 	shouldClearColumnExtras,
 	type TaskFieldUpdate,
@@ -519,8 +520,9 @@ export function InteractionLayout({
 
 	// Plugin view registrations (for the "Add view" popover layout options)
 	const { getRegistrations } = usePluginRegistry();
+	const canAccessPlugin = usePluginAccess(projectId);
 	const pluginViewRegistrations = getRegistrations("view").filter(
-		(r) => !r.hidden,
+		(r) => !r.hidden && canAccessPlugin(r),
 	);
 
 	// If the active view is a plugin view, resolve its registration from config
@@ -594,10 +596,6 @@ export function InteractionLayout({
 		}
 	});
 
-	const { data: members = [] } = useQuery(
-		projectMembersQueryOptions(projectId),
-	);
-
 	const { data: sprints = [] } = useQuery(sprintsQueryOptions(projectId));
 
 	// Fetch Epic tasks for display in the epic field on task cards/rows.
@@ -635,9 +633,11 @@ export function InteractionLayout({
 		let assignee_ids: string[] | undefined;
 		let assignee_null: true | undefined;
 		if (activeViewConfig?.filters?.assignees) {
+			// The filter lists the chosen people explicitly (an "all" config
+			// means no assignee filter), so there is no member list to expand.
 			const resolved = resolveFilterConfig(
 				activeViewConfig.filters.assignees,
-				members.map((m) => m.id),
+				[],
 			);
 			const hasUnassigned = resolved.includes(UNASSIGNED_FILTER_ID);
 			const memberIds = resolved.filter((id) => id !== UNASSIGNED_FILTER_ID);
@@ -739,24 +739,24 @@ export function InteractionLayout({
 		activeViewConfig?.filters,
 		customFields,
 		defaultPageTaskTypeIds,
-		members,
 		sprints,
 		sprintId,
 		statuses,
 		taskTypes,
 	]);
+	const columnBy = activeViewConfig?.column_by ?? "status";
+
+	// Column defs used to fetch tasks per column never depend on people (grouping
+	// by assignee/reporter loads one filtered list and groups it client-side;
+	// see peopleFromTasks below).
 	const viewCtx: ViewContext = useMemo(
-		() => ({ statuses, taskTypes, members, customFields, sprints }),
-		[statuses, taskTypes, members, customFields, sprints],
+		() => ({ statuses, taskTypes, members: [], customFields, sprints }),
+		[statuses, taskTypes, customFields, sprints],
 	);
 
 	// ── Per-column pagination ─────────────────────────────────────────────────
-	const columnBy = activeViewConfig?.column_by ?? "status";
 	const isColumnBySupported =
-		columnBy === "status" ||
-		columnBy === "sprint" ||
-		columnBy === "assignee" ||
-		columnBy === "type";
+		columnBy === "status" || columnBy === "sprint" || columnBy === "type";
 
 	const fetchColumnDefs = useMemo(() => {
 		if (!isColumnBySupported) return [];
@@ -1122,10 +1122,18 @@ export function InteractionLayout({
 		setGlobalExtraTasks([]);
 	}, [colQueriesEnabled, fallbackQuery.data?.next_cursor]);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: reset only when filters/layout change
+	// Compare by value, not reference (see colBaseOptsKey above): an upstream
+	// dependency can recompute fallbackBaseOpts to a new object with identical
+	// values after a background refetch (e.g. on tab refocus), which must not
+	// wipe the "load more" depth back to the first page.
+	const fallbackBaseOptsKey = useMemo(
+		() => JSON.stringify(fallbackBaseOpts),
+		[fallbackBaseOpts],
+	);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the *value* of fallbackBaseOpts or the layout page size changes
 	useEffect(() => {
 		setGlobalExpandedPageSize(null);
-	}, [fallbackBaseOpts, initialGlobalPageSize]);
+	}, [fallbackBaseOptsKey, initialGlobalPageSize]);
 
 	const handleLoadMoreGlobal = useCallback(async () => {
 		if (globalLoadingMore) return;
@@ -1188,6 +1196,14 @@ export function InteractionLayout({
 		fallbackQuery.data,
 		globalExtraTasks,
 	]);
+
+	// "Group by assignee/reporter" offers a column per person who has tasks in
+	// the loaded view — taken from the people the task list embeds — instead of
+	// one per project member.
+	const { assignees: members, reporters } = useMemo(
+		() => peopleFromTasks(tasks),
+		[tasks],
+	);
 
 	// Epics referenced by tasks currently on screen but not yet among the
 	// paginated epicTasks pages (the picker loads 20 at a time — a task's
@@ -1389,19 +1405,11 @@ export function InteractionLayout({
 	};
 
 	const updateStatusMutation = useMutation({
-		mutationFn: ({
-			taskId,
-			statusId,
-			taskSprintId,
-		}: {
-			taskId: string;
-			statusId: string;
-			taskSprintId: string | null | undefined;
-		}) =>
-			updateTask(projectId, taskId, {
-				status_id: statusId,
-				sprint_id: taskSprintId ?? null,
-			}),
+		// Send only status_id: the PATCH writes just the submitted fields, so
+		// echoing back sprint_id from a possibly stale cached task could
+		// overwrite a concurrent sprint change.
+		mutationFn: ({ taskId, statusId }: { taskId: string; statusId: string }) =>
+			updateTask(projectId, taskId, { status_id: statusId }),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: tasksListQueryKey });
 			// Status changes affect a sprint's incomplete-task count (surfaced in
@@ -1412,14 +1420,9 @@ export function InteractionLayout({
 
 	const handleStatusChange = useCallback(
 		(taskId: string, newStatusId: string) => {
-			const task = tasks.find((t) => t.id === taskId);
-			updateStatusMutation.mutate({
-				taskId,
-				statusId: newStatusId,
-				taskSprintId: task?.sprint_id,
-			});
+			updateStatusMutation.mutate({ taskId, statusId: newStatusId });
 		},
-		[updateStatusMutation, tasks],
+		[updateStatusMutation],
 	);
 
 	const createTaskMutation = useMutation({
@@ -2048,7 +2051,6 @@ export function InteractionLayout({
 							tasks: tasks,
 							statuses,
 							taskTypes,
-							members,
 							canCreate,
 							canEdit,
 							searchQuery,
@@ -2073,6 +2075,7 @@ export function InteractionLayout({
 						statuses={statuses}
 						taskTypes={creatableTaskTypes}
 						members={members}
+						reporters={reporters}
 						customFields={customFields}
 						sprints={sprints}
 						epics={displayEpics}
@@ -2109,10 +2112,16 @@ export function InteractionLayout({
 						statuses={statuses}
 						taskTypes={creatableTaskTypes}
 						members={members}
+						reporters={reporters}
 						sprints={sprints}
 						customFields={customFields}
 						columnBy={columnBy}
+						viewConfig={activeViewConfig}
 						canCreate={canCreate}
+						canEdit={canEdit}
+						manualSort={isManualSort}
+						onReorderTask={effectiveViewId ? handleReorderTask : undefined}
+						onMoveToColumn={canEdit ? handleMoveToColumn : undefined}
 						pagination={globalPagination}
 						onCreateTask={handleCreateTask}
 						onTaskClick={handleTaskClick}
@@ -2125,6 +2134,7 @@ export function InteractionLayout({
 						statuses={statuses}
 						taskTypes={creatableTaskTypes}
 						members={members}
+						reporters={reporters}
 						customFields={customFields}
 						epics={displayEpics}
 						epicsPagination={epicsPagination}
@@ -2193,7 +2203,6 @@ export function InteractionLayout({
 				projectId={projectId}
 				statuses={statuses}
 				taskTypes={taskTypes}
-				members={members}
 				canEdit={canEdit}
 			/>
 

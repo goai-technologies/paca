@@ -36,8 +36,8 @@ Where the current implementation and the schema diverge, this document calls tha
 
 - Protected endpoints require `Authorization: Bearer <access-token>`.
 - Access and refresh token lifecycle is handled under `/api/v1/auth`.
-- Authorization is permission-based and enforced in middleware for protected operations.
-- Permissions come only from what the caller's assigned roles store (a global role, and a role in each project they belong to) — never from a role's name. See [authorization](../architecture/authorization.md).
+- Authorization is IAM-style and enforced in middleware for protected operations: each route names the action it needs (`domain:verb`, e.g. `tasks:write`) and the resource it applies to.
+- What a caller may do comes only from the JSON policies of the roles attached to them (any number, platform-wide or per project; explicit `Deny` wins) — never from a role's name. See [authorization](../architecture/authorization.md), the [roles and policies guide](../guides/roles-and-policies.md) and the [roles and policies API](roles-and-policies.md).
 
 ### Identifier strategy
 
@@ -105,7 +105,7 @@ Recommended paginated response shape:
 
 These routes already exist in the Go API service.
 
-In the **Auth** column, permissions joined by `+` are all required, and the permission a route lists is the only thing that grants access: it is read from the caller's role as stored, never inferred from the role's name. See [authorization](../architecture/authorization.md).
+In the **Auth** column, actions joined by `+` are all required, and the action a route lists is the only thing that grants access: it is evaluated against the policies of the caller's attached roles, never inferred from a role's name. Where a route addresses one entity (a task, an agent, an environment, ...) the action is checked on that entity, so a `Deny` or condition on it applies; see [authorization](../architecture/authorization.md). Role, assignment, validate/simulate and "my permissions" endpoints are specified in [roles-and-policies.md](roles-and-policies.md).
 
 | Method | Path | Auth | Function |
 |---|---|---|---|
@@ -116,81 +116,93 @@ In the **Auth** column, permissions joined by `+` are all required, and the perm
 | `PATCH` | `/api/v1/users/me/password` | Access token | Change the authenticated user's own password. Allowed even when `must_change_password` is true. Revokes the current session after a successful change. |
 | `GET` | `/api/v1/users/me` | Access token (fresh) | Return the authenticated caller's own profile. |
 | `PATCH` | `/api/v1/users/me` | Access token (fresh) | Update mutable profile fields (`full_name`) for the caller. |
-| `GET` | `/api/v1/users/me/global-permissions` | Access token (fresh) | Return the authenticated caller's effective global permissions. |
-| `GET` | `/api/v1/admin/users` | Access token (fresh) + `users.read` | List all users with pagination. |
-| `POST` | `/api/v1/admin/users` | Access token (fresh) + `users.write` | Create a new user account with the default global role (the one marked `is_default`, `USER` unless changed). Sets `must_change_password = true`. A `role` in the body is rejected with `400`. Fails with `409 GLOBAL_ROLE_NO_DEFAULT` if no role is the default. |
-| `GET` | `/api/v1/admin/users/:userId` | Access token (fresh) + `users.read` | Get a user profile by ID. |
-| `PATCH` | `/api/v1/admin/users/:userId` | Access token (fresh) + `users.write` | Update a user's `full_name` or `email`. A `role` in the body is rejected with `400`; change roles with `PUT .../global-roles`. |
-| `PATCH` | `/api/v1/admin/users/:userId/password` | Access token (fresh) + `users.write` | Admin password reset. Sets `must_change_password = true`. |
-| `DELETE` | `/api/v1/admin/users/:userId` | Access token (fresh) + `users.delete` | Soft-delete a user account. |
-| `GET` | `/api/v1/admin/global-roles` | Access token (fresh) + `global_roles.read` | List available global roles and permissions. Exactly one carries `is_default = true`. |
-| `POST` | `/api/v1/admin/global-roles` | Access token (fresh) + `global_roles.write` | Create a new global role definition. Root-equivalent: see [authorization](../architecture/authorization.md). |
-| `PATCH` | `/api/v1/admin/global-roles/:roleId` | Access token (fresh) + `global_roles.write` | Update a global role definition. Root-equivalent: see [authorization](../architecture/authorization.md). |
-| `DELETE` | `/api/v1/admin/global-roles/:roleId` | Access token (fresh) + `global_roles.write` | Remove a global role definition. Fails with `409 GLOBAL_ROLE_IS_DEFAULT` for the default role, and with `409 GLOBAL_ROLE_HAS_ASSIGNED_USERS` if users or global agents are assigned to it. |
-| `PUT` | `/api/v1/admin/global-roles/:roleId/set-default` | Access token (fresh) + `global_roles.write` | Make a role the default that new users and new global agents start with, clearing the flag on the previous default. Returns the role. Root-equivalent: see [authorization](../architecture/authorization.md). |
-| `PUT` | `/api/v1/admin/users/:userId/global-roles` | Access token (fresh) + `global_roles.assign` | Assign or replace the single global role for a user. The only route that changes a user's role. Root-equivalent: see [authorization](../architecture/authorization.md). |
-| `PUT` | `/api/v1/admin/agents/:agentId/global-role` | Access token (fresh) + `agents.write` + `global_roles.assign` | Bind a global agent to the global role that decides what it may do. The only route that sets one. Root-equivalent: see [authorization](../architecture/authorization.md). |
-| `DELETE` | `/api/v1/admin/agents/:agentId/global-role` | Access token (fresh) + `agents.write` + `global_roles.assign` | Unbind a global agent from its global role. |
+| `GET` | `/api/v1/users/me/global-permissions` | Access token (fresh) | Return the authenticated caller's effective platform-level actions, `{"actions": [...]}`. |
+| `GET` | `/api/v1/admin/users` | Access token (fresh) + `users:read` | List users with pagination, optional `search` and `role` filters. |
+| `POST` | `/api/v1/admin/users` | Access token (fresh) + `users:write` | Create a new user account with the default role attached (the one marked `is_default`, `USER` unless changed). Sets `must_change_password = true`. A `role` in the body is rejected with `400`. Fails with `409 ROLE_NO_DEFAULT` if no role is the default. |
+| `GET` | `/api/v1/admin/users/:userId` | Access token (fresh) + `users:read` | Get a user profile by ID. |
+| `PATCH` | `/api/v1/admin/users/:userId` | Access token (fresh) + `users:write` | Update a user's `full_name` or `email`. A `role` in the body is rejected with `400`; change roles with `PUT .../roles`. |
+| `PATCH` | `/api/v1/admin/users/:userId/password` | Access token (fresh) + `users:write` | Admin password reset. Sets `must_change_password = true`. |
+| `DELETE` | `/api/v1/admin/users/:userId` | Access token (fresh) + `users:delete` | Soft-delete a user account. |
+| `GET` | `/api/v1/admin/roles` | Access token (fresh) + `roles:read` | List platform roles with their policy documents. Exactly one carries `is_default = true`. |
+| `POST` | `/api/v1/admin/roles` | Access token (fresh) + `roles:write` | Create a platform role from a policy document. Root-equivalent: see [authorization](../architecture/authorization.md). |
+| `GET` | `/api/v1/admin/roles/:roleId` | Access token (fresh) + `roles:read` | Get a platform role. |
+| `PUT` | `/api/v1/admin/roles/:roleId` | Access token (fresh) + `roles:write` | Replace a platform role's name, description and policy. System roles can be edited. |
+| `DELETE` | `/api/v1/admin/roles/:roleId` | Access token (fresh) + `roles:write` | Delete a role and its attachments. `409 ROLE_IS_DEFAULT` for the default role, `409 ROLE_IS_SYSTEM` for system roles. |
+| `PUT` | `/api/v1/admin/roles/:roleId/default` | Access token (fresh) + `roles:write` | Make a role the default that new users and new global agents start with, clearing the flag on the previous default. Returns the role. Root-equivalent. |
+| `GET` | `/api/v1/admin/users/:userId/roles` | Access token (fresh) + `roles:read` | A user's platform-wide roles. |
+| `PUT` | `/api/v1/admin/users/:userId/roles` | Access token (fresh) + `roles:assign` | Replace the user's platform-wide roles with `role_ids`. The only route that changes a user's roles. Root-equivalent. |
+| `GET` | `/api/v1/admin/agents/:agentId/roles` | Access token (fresh) + `roles:read` + `agents:read` | A global agent's roles. |
+| `PUT` | `/api/v1/admin/agents/:agentId/roles` | Access token (fresh) + `agents:write` + `roles:assign` | Replace a global agent's roles with `role_ids`. The only route that sets them. Root-equivalent. |
+| `GET` | `/api/v1/roles/actions`, `/api/v1/roles/attribute-schema` | Access token (fresh) | Action catalogue and condition-attribute schema for the role editor. |
+| `POST` | `/api/v1/roles/validate`, `/api/v1/roles/simulate` | Access token (fresh); `simulate` naming a `principal` also needs `roles:read` | Validate a policy; evaluate a request against it. |
 | `GET` | `/api/v1/projects` | Access token (fresh) | List projects visible to the caller. |
-| `POST` | `/api/v1/projects` | Access token (fresh) + `projects.create` | Create a new project. |
-| `GET` | `/api/v1/projects/:projectId` | Access token (fresh) + `projects.read` | Get project details. |
-| `PATCH` | `/api/v1/projects/:projectId` | Access token (fresh) + `projects.write` | Update project name or description. |
-| `DELETE` | `/api/v1/projects/:projectId` | Access token (fresh) + `projects.delete` | Delete a project. |
-| `GET` | `/api/v1/projects/:projectId/members` | Access token (fresh) + `project.members.read` (or global `projects.read`); anonymous on a public project | List project members. |
-| `POST` | `/api/v1/projects/:projectId/members` | Access token (fresh) + `project.members.write` | Add a user to a project. |
-| `PATCH` | `/api/v1/projects/:projectId/members/:userId` | Access token (fresh) + `project.members.write` | Change a member's project role. |
-| `DELETE` | `/api/v1/projects/:projectId/members/:userId` | Access token (fresh) + `project.members.write` | Remove a member from a project. |
-| `GET` | `/api/v1/projects/:projectId/roles` | Access token (fresh) + `project.roles.read` (or global `projects.read`); anonymous on a public project | List custom project roles. |
-| `POST` | `/api/v1/projects/:projectId/roles` | Access token (fresh) + `project.roles.write` | Create a project-scoped role. |
-| `PATCH` | `/api/v1/projects/:projectId/roles/:roleId` | Access token (fresh) + `project.roles.write` | Update a project role. |
-| `DELETE` | `/api/v1/projects/:projectId/roles/:roleId` | Access token (fresh) + `project.roles.write` | Delete a project role. |
-| `GET` | `/api/v1/projects/:projectId/task-types` | Access token (fresh) + `tasks.read` (or global `projects.read`); anonymous on a public project | List task type definitions. System types (`is_system = true`) are included in the response but are marked as non-editable. |
-| `POST` | `/api/v1/projects/:projectId/task-types` | Access token (fresh) + `project.settings.task_types.write` | Create a task type (e.g. story, bug, chore). Cannot be used to create system types (Epic, Subtask) — returns `400 TASK_TYPE_SYSTEM_TYPE_NOT_ALLOWED`. |
-| `PATCH` | `/api/v1/projects/:projectId/task-types/:typeId` | Access token (fresh) + `project.settings.task_types.write` | Update a task type. Returns `409 TASK_TYPE_IS_SYSTEM` if the target type is a system type. |
-| `DELETE` | `/api/v1/projects/:projectId/task-types/:typeId` | Access token (fresh) + `project.settings.task_types.write` | Delete a task type. Returns `409 TASK_TYPE_IS_SYSTEM` if the target type is a system type, and `409 TASK_TYPE_IS_DEFAULT` if it is the project's default type. |
-| `PUT` | `/api/v1/projects/:projectId/task-types/:typeId/set-default` | Access token (fresh) + `project.settings.task_types.write` | Make a task type the default that new tasks get, clearing the flag on the previous default. |
-| `GET` | `/api/v1/projects/:projectId/task-statuses` | Access token (fresh) + `tasks.read` (or global `projects.read`); anonymous on a public project | List workflow statuses in board order. |
-| `POST` | `/api/v1/projects/:projectId/task-statuses` | Access token (fresh) + `project.settings.task_statuses.write` | Create a workflow status. |
-| `PATCH` | `/api/v1/projects/:projectId/task-statuses/:statusId` | Access token (fresh) + `project.settings.task_statuses.write` | Update a workflow status. |
-| `DELETE` | `/api/v1/projects/:projectId/task-statuses/:statusId` | Access token (fresh) + `project.settings.task_statuses.write` | Delete a workflow status. Returns `409 TASK_STATUS_IS_DEFAULT` if it is the project's default status. |
-| `PUT` | `/api/v1/projects/:projectId/task-statuses/:statusId/set-default` | Access token (fresh) + `project.settings.task_statuses.write` | Make a status the default that new tasks start in, clearing the flag on the previous default. |
-| `GET` | `/api/v1/projects/:projectId/sprints` | Access token (fresh) + `sprints.read` (or global `projects.read`); anonymous on a public project | List sprints for a project ordered by creation date. |
-| `POST` | `/api/v1/projects/:projectId/sprints` | Access token (fresh) + `sprints.write` | Quick-create a sprint with a system-generated default name ("Sprint N"). No request body required. The sprint is created with `status = planned`. |
-| `GET` | `/api/v1/projects/:projectId/sprints/:sprintId` | Access token (fresh) + `sprints.read` (or global `projects.read`); anonymous on a public project | Get sprint details (goal, dates, status). |
-| `PATCH` | `/api/v1/projects/:projectId/sprints/:sprintId` | Access token (fresh) + `sprints.write` | Update sprint metadata (name, goal, start_date, end_date). Cannot be used to change `status`; use the dedicated lifecycle actions instead. |
-| `DELETE` | `/api/v1/projects/:projectId/sprints/:sprintId` | Access token (fresh) + `sprints.write` | Delete a sprint. Fails with `409 SPRINT_IS_ACTIVE` if the sprint is currently active. |
-| `POST` | `/api/v1/projects/:projectId/sprints/:sprintId/start` | Access token (fresh) + `sprints.write` | Start a planned sprint: set name, goal, start date, and due date, then transition `status` to `active`. Multiple sprints may be active simultaneously. Fails with `409 SPRINT_NOT_PLANNED` if the sprint is not in `planned` state. |
-| `POST` | `/api/v1/projects/:projectId/sprints/:sprintId/complete` | Access token (fresh) + `sprints.write` | Complete an active sprint: transition `status` to `completed` and move all incomplete tasks to the specified sprint (or back to no-sprint if `move_to_sprint_id` is `null`). Fails with `409 SPRINT_NOT_ACTIVE` if the sprint is not in `active` state. |
-| `GET` | `/api/v1/projects/:projectId/views?context=sprint&sprint_id=:sprintId` | Access token (fresh) + `sprints.read` | List saved view configurations. `context` must be `sprint`, `backlog`, or `timeline`; the `sprint` context requires `sprint_id`. |
-| `POST` | `/api/v1/projects/:projectId/views?context=sprint&sprint_id=:sprintId` | Access token (fresh) + `sprints.write` | Create a saved view configuration. `context` must be `sprint`, `backlog`, or `timeline`; the `sprint` context requires `sprint_id`. Sprint creation seeds one Board and one Table view with `column_by = status`, the current sprint selected, and non-system task types. Project creation seeds one backlog Table view with `column_by = sprint` plus one timeline Roadmap view filtered to Epics. |
-| `GET` | `/api/v1/projects/:projectId/views/:viewId` | Access token (fresh) + `views.read` (or global `projects.read`); anonymous on a public project | Get a single view configuration. |
-| `PATCH` | `/api/v1/projects/:projectId/views/:viewId` | Access token (fresh) + `views.write` | Update a view's name or config. |
-| `DELETE` | `/api/v1/projects/:projectId/views/:viewId` | Access token (fresh) + `views.write` | Delete a view. Fails with `409 VIEW_IS_LAST_VIEW` if it is the only remaining view. |
-| `PUT` | `/api/v1/projects/:projectId/views/positions?context=sprint&sprint_id=:sprintId` | Access token (fresh) + `sprints.write` | Reorder all views for the given context. `context` must be `sprint` (with `sprint_id`), `backlog`, or `timeline`. Body: `{ "view_ids": ["<uuid>", ...] }` — must include every view ID in the desired tab order. Returns `400 VIEW_REORDER_INVALID` if the list is missing or contains unknown IDs. |
-| `GET` | `/api/v1/projects/:projectId/views/:viewId/task-positions` | Access token (fresh) + `tasks.read` (or global `projects.read`); anonymous on a public project | List manual task ordering positions within a view. |
-| `PUT` | `/api/v1/projects/:projectId/views/:viewId/task-positions/:taskId` | Access token (fresh) + `tasks.write` | Set or update the manual position of a task within a view. |
-| `PUT` | `/api/v1/projects/:projectId/views/:viewId/task-positions` | Access token (fresh) + `tasks.write` | Bulk-upsert manual positions of multiple tasks within a view. |
-| `GET` | `/api/v1/projects/:projectId/tasks` | Access token (fresh) + `tasks.read` (or global `projects.read`); anonymous on a public project | List tasks through one shared endpoint. Supported filters include `sprint_id`, `sprint_ids`, `status_id`, `status_ids`, `assignee_id`, `assignee_ids`, `task_type_ids`, and `parent_task_id`. `sprint_id=null` is still supported for unscheduled-only backlog queries. Timeline pages should use `task_type_ids` to request Epic tasks, and manual ordering should be read from `/views/:viewId/task-positions`. |
-| `POST` | `/api/v1/projects/:projectId/tasks` | Access token (fresh) + `tasks.write` | Create a task. |
-| `GET` | `/api/v1/projects/:projectId/tasks/:taskId` | Access token (fresh) + `tasks.read` (or global `projects.read`); anonymous on a public project | Get task detail. |
-| `PATCH` | `/api/v1/projects/:projectId/tasks/:taskId` | Access token (fresh) + `tasks.write` | Update a task. |
-| `DELETE` | `/api/v1/projects/:projectId/tasks/:taskId` | Access token (fresh) + `tasks.write` | Soft-delete a task. |
-| `GET` | `/api/v1/projects/:projectId/custom-fields` | Access token (fresh) + `tasks.read` (or global `projects.read`); anonymous on a public project | List custom field definitions for a project. |
-| `POST` | `/api/v1/projects/:projectId/custom-fields` | Access token (fresh) + `project.settings.custom_fields.write` | Create a custom field definition. |
-| `GET` | `/api/v1/projects/:projectId/custom-fields/:fieldId` | Access token (fresh) + `tasks.read` (or global `projects.read`); anonymous on a public project | Get a custom field definition by ID. |
-| `PATCH` | `/api/v1/projects/:projectId/custom-fields/:fieldId` | Access token (fresh) + `project.settings.custom_fields.write` | Update a custom field definition. |
-| `DELETE` | `/api/v1/projects/:projectId/custom-fields/:fieldId` | Access token (fresh) + `project.settings.custom_fields.write` | Delete a custom field definition. |
-| `GET` | `/api/v1/projects/:projectId/github` | Access token (fresh) + `projects.write` | Get the GitHub integration for a project (token presence only — the PAT value is never returned). Returns `404 GITHUB_INTEGRATION_NOT_FOUND` when no integration is configured. |
-| `PUT` | `/api/v1/projects/:projectId/github/token` | Access token (fresh) + `projects.write` | Validate and store (or replace) a GitHub personal access token. The token is validated against the GitHub API before being encrypted at rest. Returns `422 GITHUB_INVALID_TOKEN` if the token is rejected. |
-| `DELETE` | `/api/v1/projects/:projectId/github/token` | Access token (fresh) + `projects.write` | Remove the stored GitHub integration and delete all linked repositories and their webhooks. |
-| `GET` | `/api/v1/projects/:projectId/github/repositories` | Access token (fresh) + `projects.write` | List all repositories accessible with the project's GitHub PAT. Proxies the GitHub API. |
-| `GET` | `/api/v1/projects/:projectId/github/linked-repositories` | Access token (fresh) + `projects.write` | List the repositories currently linked to the project. |
-| `POST` | `/api/v1/projects/:projectId/github/linked-repositories` | Access token (fresh) + `projects.write` | Link a repository to the project. Automatically registers a webhook on the GitHub repository using the `PUBLIC_URL` base. |
-| `DELETE` | `/api/v1/projects/:projectId/github/linked-repositories/:repoId` | Access token (fresh) + `projects.write` | Unlink a specific linked repository from the project and delete its webhook. |
-| `GET` | `/api/v1/projects/:projectId/tasks/:taskId/github/pull-requests` | Access token (fresh) + `tasks.read` | List pull requests linked to a task. |
-| `POST` | `/api/v1/projects/:projectId/tasks/:taskId/github/pull-requests` | Access token (fresh) + `tasks.write` | Link a pull request to a task by PR number. Fetches and caches the PR metadata from GitHub. |
-| `DELETE` | `/api/v1/projects/:projectId/tasks/:taskId/github/pull-requests/:prId` | Access token (fresh) + `tasks.write` | Unlink a pull request from a task. |
-| `POST` | `/api/v1/projects/:projectId/tasks/:taskId/github/branches` | Access token (fresh) + `tasks.write` | Create a new git branch in the linked repository from an optional source branch (defaults to `default_branch`). |
+| `POST` | `/api/v1/projects` | Access token (fresh) + `projects:create` | Create a new project. |
+| `GET` | `/api/v1/projects/:projectId` | Access token (fresh) + `projects:read` | Get project details. |
+| `PATCH` | `/api/v1/projects/:projectId` | Access token (fresh) + `projects:write` | Update project name or description. |
+| `DELETE` | `/api/v1/projects/:projectId` | Access token (fresh) + `projects:delete` | Delete a project. |
+| `POST` | `/api/v1/projects/:projectId/exports` | Access token (fresh) + `project:export` | Queue an export of the project: tasks, task comments and activities as CSV files, and the documentation as Markdown files, zipped together. Answers `202` with the queued export; returns `409 PROJECT_EXPORT_IN_PROGRESS` while another is queued or running. See [Project Export Contracts](#project-export-contracts). |
+| `GET` | `/api/v1/projects/:projectId/exports` | Access token (fresh) + `project:export` | List the project's recent exports, newest first. |
+| `GET` | `/api/v1/projects/:projectId/exports/:exportId` | Access token (fresh) + `project:export` | Get one export's status and file metadata. |
+| `GET` | `/api/v1/projects/:projectId/exports/:exportId/download` | Access token (fresh) + `project:export` | Get a short-lived presigned URL for a completed export's zip. `409 PROJECT_EXPORT_NOT_READY` until it is `completed`; `410 PROJECT_EXPORT_EXPIRED` after the retention window. |
+| `GET` | `/api/v1/projects/:projectId/members` | Access token (fresh) + `project.members:read` | List project members, cursor-paginated: `{items, page_size, next_cursor, total_count}` (`total_count` on the first page only, i.e. when no `cursor` is sent). Query: `page_size` (1-100, default 20), `cursor`, `search` (every word must match username, name or handle), `role_id`, `member_type` (`human`, `agent`, `service_account`), `ids` (up to 100 membership or account ids — a batch lookup). |
+| `POST` | `/api/v1/projects/:projectId/members` | Access token (fresh) + `project.members:write` | Add a user (`user_id`) or invite a global agent (`agent_id`) to a project with `role_ids` (at least one, else `400 ROLE_REQUIRED`; each role must be one the caller could grant). |
+| `PATCH` | `/api/v1/projects/:projectId/members/:memberId` | Access token (fresh) + `project.members:write` | Update a member's `description`. Roles are changed with `PUT .../roles`. |
+| `DELETE` | `/api/v1/projects/:projectId/members/:memberId` | Access token (fresh) + `project.members:write` | Remove a member from a project. |
+| `GET` | `/api/v1/projects/:projectId/members/:memberId/roles` | Access token (fresh) + `project.members:read` | The roles a member holds in the project. |
+| `PUT` | `/api/v1/projects/:projectId/members/:memberId/roles` | Access token (fresh) + `roles:assign` on `project/:projectId/role/:roleId` for each role added or removed (no `project.members:write`) | Replace the member's roles in the project with `role_ids`. |
+| `GET` | `/api/v1/projects/:projectId/members/me/permissions` | Access token (fresh) | The caller's effective actions in the project, `{"actions": [...]}`. |
+| `GET` | `/api/v1/projects/:projectId/roles` | Access token (fresh) + `roles:read` | List the project's own roles and the platform roles already attached inside the project. |
+| `POST` | `/api/v1/projects/:projectId/roles` | Access token (fresh) + `roles:write` | Create a role owned by the project, from a policy document. |
+| `GET` | `/api/v1/projects/:projectId/roles/:roleId` | Access token (fresh) + `roles:read` | Get a project role. |
+| `PUT` | `/api/v1/projects/:projectId/roles/:roleId` | Access token (fresh) + `roles:write` | Replace a project role's name, description and policy. |
+| `DELETE` | `/api/v1/projects/:projectId/roles/:roleId` | Access token (fresh) + `roles:write` | Delete a project role. |
+| `GET` | `/api/v1/projects/:projectId/task-types` | Access token (fresh) + `tasks:read` | List task type definitions. System types (`is_system = true`) are included in the response but are marked as non-editable. |
+| `POST` | `/api/v1/projects/:projectId/task-types` | Access token (fresh) + `project.settings.task_types:write` | Create a task type (e.g. story, bug, chore). Cannot be used to create system types (Epic, Subtask) — returns `400 TASK_TYPE_SYSTEM_TYPE_NOT_ALLOWED`. |
+| `PATCH` | `/api/v1/projects/:projectId/task-types/:typeId` | Access token (fresh) + `project.settings.task_types:write` | Update a task type. Returns `409 TASK_TYPE_IS_SYSTEM` if the target type is a system type. |
+| `DELETE` | `/api/v1/projects/:projectId/task-types/:typeId` | Access token (fresh) + `project.settings.task_types:write` | Delete a task type. Returns `409 TASK_TYPE_IS_SYSTEM` if the target type is a system type, and `409 TASK_TYPE_IS_DEFAULT` if it is the project's default type. |
+| `PUT` | `/api/v1/projects/:projectId/task-types/:typeId/set-default` | Access token (fresh) + `project.settings.task_types:write` | Make a task type the default that new tasks get, clearing the flag on the previous default. |
+| `GET` | `/api/v1/projects/:projectId/task-statuses` | Access token (fresh) + `tasks:read` | List workflow statuses in board order. |
+| `POST` | `/api/v1/projects/:projectId/task-statuses` | Access token (fresh) + `project.settings.task_statuses:write` | Create a workflow status. |
+| `PATCH` | `/api/v1/projects/:projectId/task-statuses/:statusId` | Access token (fresh) + `project.settings.task_statuses:write` | Update a workflow status. |
+| `DELETE` | `/api/v1/projects/:projectId/task-statuses/:statusId` | Access token (fresh) + `project.settings.task_statuses:write` | Delete a workflow status. Returns `409 TASK_STATUS_IS_DEFAULT` if it is the project's default status. |
+| `PUT` | `/api/v1/projects/:projectId/task-statuses/:statusId/set-default` | Access token (fresh) + `project.settings.task_statuses:write` | Make a status the default that new tasks start in, clearing the flag on the previous default. |
+| `GET` | `/api/v1/projects/:projectId/sprints` | Access token (fresh) + `sprints:read` | List sprints for a project ordered by creation date. |
+| `POST` | `/api/v1/projects/:projectId/sprints` | Access token (fresh) + `sprints:write` | Quick-create a sprint with a system-generated default name ("Sprint N"). No request body required. The sprint is created with `status = planned`. |
+| `GET` | `/api/v1/projects/:projectId/sprints/:sprintId` | Access token (fresh) + `sprints:read` | Get sprint details (goal, dates, status). |
+| `PATCH` | `/api/v1/projects/:projectId/sprints/:sprintId` | Access token (fresh) + `sprints:write` | Update sprint metadata (name, goal, start_date, end_date). Cannot be used to change `status`; use the dedicated lifecycle actions instead. |
+| `DELETE` | `/api/v1/projects/:projectId/sprints/:sprintId` | Access token (fresh) + `sprints:write` | Delete a sprint. Fails with `409 SPRINT_IS_ACTIVE` if the sprint is currently active. |
+| `POST` | `/api/v1/projects/:projectId/sprints/:sprintId/start` | Access token (fresh) + `sprints:write` | Start a planned sprint: set name, goal, start date, and due date, then transition `status` to `active`. Multiple sprints may be active simultaneously. Fails with `409 SPRINT_NOT_PLANNED` if the sprint is not in `planned` state. |
+| `POST` | `/api/v1/projects/:projectId/sprints/:sprintId/complete` | Access token (fresh) + `sprints:write` | Complete an active sprint: transition `status` to `completed` and move all incomplete tasks to the specified sprint (or back to no-sprint if `move_to_sprint_id` is `null`). Fails with `409 SPRINT_NOT_ACTIVE` if the sprint is not in `active` state. |
+| `GET` | `/api/v1/projects/:projectId/views?context=sprint&sprint_id=:sprintId` | Access token (fresh) + `sprints:read` | List saved view configurations. `context` must be `sprint`, `backlog`, or `timeline`; the `sprint` context requires `sprint_id`. |
+| `POST` | `/api/v1/projects/:projectId/views?context=sprint&sprint_id=:sprintId` | Access token (fresh) + `sprints:write` | Create a saved view configuration. `context` must be `sprint`, `backlog`, or `timeline`; the `sprint` context requires `sprint_id`. Sprint creation seeds one Board and one Table view with `column_by = status`, the current sprint selected, and non-system task types. Project creation seeds one backlog Table view with `column_by = sprint` plus one timeline Roadmap view filtered to Epics. |
+| `GET` | `/api/v1/projects/:projectId/views/:viewId` | Access token (fresh) + `views:read` | Get a single view configuration. |
+| `PATCH` | `/api/v1/projects/:projectId/views/:viewId` | Access token (fresh) + `views:write` | Update a view's name or config. |
+| `DELETE` | `/api/v1/projects/:projectId/views/:viewId` | Access token (fresh) + `views:write` | Delete a view. Fails with `409 VIEW_IS_LAST_VIEW` if it is the only remaining view. |
+| `PUT` | `/api/v1/projects/:projectId/views/positions?context=sprint&sprint_id=:sprintId` | Access token (fresh) + `sprints:write` | Reorder all views for the given context. `context` must be `sprint` (with `sprint_id`), `backlog`, or `timeline`. Body: `{ "view_ids": ["<uuid>", ...] }` — must include every view ID in the desired tab order. Returns `400 VIEW_REORDER_INVALID` if the list is missing or contains unknown IDs. |
+| `GET` | `/api/v1/projects/:projectId/views/:viewId/task-positions` | Access token (fresh) + `tasks:read` | List manual task ordering positions within a view. |
+| `PUT` | `/api/v1/projects/:projectId/views/:viewId/task-positions/:taskId` | Access token (fresh) + `tasks:write` | Set or update the manual position of a task within a view. |
+| `PUT` | `/api/v1/projects/:projectId/views/:viewId/task-positions` | Access token (fresh) + `tasks:write` | Bulk-upsert manual positions of multiple tasks within a view. |
+| `GET` | `/api/v1/projects/:projectId/tasks` | Access token (fresh) + `tasks:read` | List tasks through one shared endpoint. Supported filters include `sprint_id`, `sprint_ids`, `status_id`, `status_ids`, `assignee_id`, `assignee_ids`, `task_type_ids`, and `parent_task_id`. `sprint_id=null` is still supported for unscheduled-only backlog queries. Timeline pages should use `task_type_ids` to request Epic tasks, and manual ordering should be read from `/views/:viewId/task-positions`. `include=assignees,reporter` embeds the people behind `assignee_ids` / `reporter_id` in each task as `assignees` / `reporter` (identity only: names, avatar, kind — no roles). `GET /tasks/count` takes the same filters and returns `{"total_count": n}`. |
+| `POST` | `/api/v1/projects/:projectId/tasks` | Access token (fresh) + `tasks:write` | Create a task. |
+| `GET` | `/api/v1/projects/:projectId/tasks/:taskId` | Access token (fresh) + `tasks:read` | Get task detail. |
+| `PATCH` | `/api/v1/projects/:projectId/tasks/:taskId` | Access token (fresh) + `tasks:write` | Update a task. |
+| `DELETE` | `/api/v1/projects/:projectId/tasks/:taskId` | Access token (fresh) + `tasks:write` | Soft-delete a task. |
+| `GET` | `/api/v1/projects/:projectId/custom-fields` | Access token (fresh) + `tasks:read` | List custom field definitions for a project. |
+| `POST` | `/api/v1/projects/:projectId/custom-fields` | Access token (fresh) + `project.settings.custom_fields:write` | Create a custom field definition. |
+| `GET` | `/api/v1/projects/:projectId/custom-fields/:fieldId` | Access token (fresh) + `tasks:read` | Get a custom field definition by ID. |
+| `PATCH` | `/api/v1/projects/:projectId/custom-fields/:fieldId` | Access token (fresh) + `project.settings.custom_fields:write` | Update a custom field definition. |
+| `DELETE` | `/api/v1/projects/:projectId/custom-fields/:fieldId` | Access token (fresh) + `project.settings.custom_fields:write` | Delete a custom field definition. |
+| `GET` | `/api/v1/projects/:projectId/github` | Access token (fresh) + `projects:write` | Get the GitHub integration for a project (token presence only — the PAT value is never returned). Returns `404 GITHUB_INTEGRATION_NOT_FOUND` when no integration is configured. |
+| `PUT` | `/api/v1/projects/:projectId/github/token` | Access token (fresh) + `projects:write` | Validate and store (or replace) a GitHub personal access token. The token is validated against the GitHub API before being encrypted at rest. Returns `422 GITHUB_INVALID_TOKEN` if the token is rejected. |
+| `DELETE` | `/api/v1/projects/:projectId/github/token` | Access token (fresh) + `projects:write` | Remove the stored GitHub integration and delete all linked repositories and their webhooks. |
+| `GET` | `/api/v1/projects/:projectId/github/repositories` | Access token (fresh) + `projects:write` | List all repositories accessible with the project's GitHub PAT. Proxies the GitHub API. |
+| `GET` | `/api/v1/projects/:projectId/github/linked-repositories` | Access token (fresh) + `projects:write` | List the repositories currently linked to the project. |
+| `POST` | `/api/v1/projects/:projectId/github/linked-repositories` | Access token (fresh) + `projects:write` | Link a repository to the project. Automatically registers a webhook on the GitHub repository using the `PUBLIC_URL` base. |
+| `DELETE` | `/api/v1/projects/:projectId/github/linked-repositories/:repoId` | Access token (fresh) + `projects:write` | Unlink a specific linked repository from the project and delete its webhook. |
+| `GET` | `/api/v1/projects/:projectId/tasks/:taskId/github/pull-requests` | Access token (fresh) + `tasks:read` | List pull requests linked to a task. |
+| `POST` | `/api/v1/projects/:projectId/tasks/:taskId/github/pull-requests` | Access token (fresh) + `tasks:write` | Link a pull request to a task by PR number. Fetches and caches the PR metadata from GitHub. |
+| `DELETE` | `/api/v1/projects/:projectId/tasks/:taskId/github/pull-requests/:prId` | Access token (fresh) + `tasks:write` | Unlink a pull request from a task. |
+| `POST` | `/api/v1/projects/:projectId/tasks/:taskId/github/branches` | Access token (fresh) + `tasks:write` | Create a new git branch in the linked repository from an optional source branch (defaults to `default_branch`). |
 | `POST` | `/api/v1/github/webhook` | No (HMAC signature verified) | Receive GitHub webhook events (push, pull_request, check_run, etc.). Signature is verified with the per-repo HMAC-SHA256 secret. Always responds `204`. |
 
 > **"fresh" access token**: an access token whose `must_change_password` claim is `false`. If the claim is `true`, the request is rejected with `403 AUTH_PASSWORD_CHANGE_REQUIRED` and the user must call `PATCH /api/v1/users/me/password` first.
@@ -340,9 +352,8 @@ Error codes:
 
 Function:
 
-- return the authenticated caller's effective global permissions;
-- merge legacy compatibility permissions from the user's stored role with permissions granted by assigned global roles;
-- return a deduplicated permission list.
+- return the authenticated caller's effective platform-level IAM actions, exactly what the authorizer would allow them on the platform roots (`user/*`, `role/*`, `settings`, ...);
+- the list is not padded with defaults keyed on a role name, so the UI never offers what the API would refuse.
 
 Success response:
 
@@ -350,14 +361,16 @@ Success response:
 {
   "success": true,
   "data": {
-    "permissions": [
-      "users.read",
-      "global_roles.read"
+    "actions": [
+      "users:read",
+      "roles:read"
     ]
   },
   "request_id": "..."
 }
 ```
+
+See [roles-and-policies.md](roles-and-policies.md#my-permissions) for the project and agent variants.
 
 ## Implemented Administration API
 
@@ -365,7 +378,7 @@ Success response:
 
 Function:
 
-- list all non-deleted users ordered by creation date;
+- list all non-deleted users sorted by name (full name, falling back to username), optionally narrowed by `search` and `role`;
 - paginated via `page` and `page_size` query parameters.
 
 Query parameters:
@@ -374,6 +387,10 @@ Query parameters:
 |---|---|---|
 | `page` | `1` | 1-based page number |
 | `page_size` | `20` | Items per page (max 100) |
+| `search` | _(none)_ | Case-insensitive; split on whitespace and every word must appear in the username, full name or email. `%` and `_` match literally. |
+| `role` | _(none)_ | Exact name of a platform role attached to the user |
+
+`total` counts the users matching the filters, not all users.
 
 Success response data:
 
@@ -399,12 +416,12 @@ Success response data:
 
 Function:
 
-- create a new user account with the default global role (see `PUT /api/v1/admin/global-roles/:roleId/set-default`; `USER` until another role is made the default);
-- return `409 GLOBAL_ROLE_NO_DEFAULT` if no role is the default, rather than guessing one;
+- create a new user account with the default role (see `PUT /api/v1/admin/roles/:roleId/default`; `USER` until another role is made the default);
+- return `409 ROLE_NO_DEFAULT` if no role is the default, rather than guessing one;
 - hash password before persistence;
 - set `must_change_password = true` so the user is required to change their password on first login.
 
-Assigning a role is a separate privilege (`global_roles.assign`) with its own route, so this body has no `role`: sending one is rejected with `400`. The account always starts with the default role, whatever the caller may assign. To give it another role, create the account and then call `PUT /api/v1/admin/users/:userId/global-roles`.
+Assigning a role is a separate privilege (`roles:assign`) with its own route, so this body has no `role`: sending one is rejected with `400`. The account always starts with the default role, whatever the caller may assign. To give it another role, create the account and then call `PUT /api/v1/admin/users/:userId/roles`.
 
 Request body:
 
@@ -436,7 +453,7 @@ Function:
 Function:
 
 - update a user's profile: `full_name` and `email`;
-- a user's role is not part of the profile — a `role` in the body is rejected with `400`; change it with `PUT /api/v1/admin/users/:userId/global-roles`, which requires `global_roles.assign`.
+- a user's role is not part of the profile — a `role` in the body is rejected with `400`; change it with `PUT /api/v1/admin/users/:userId/roles`, which requires `roles:assign`.
 
 Request body:
 
@@ -468,67 +485,57 @@ Success response: `204 No Content`
 Function:
 
 - soft-delete a user account (sets `deleted_at`);
-- restricted to callers with the `users.delete` permission.
+- restricted to callers holding the `users:delete` action.
 
 Success response: `204 No Content`
 
-### `GET /api/v1/admin/global-roles`
+### Roles and role assignment
 
-Function:
+Roles are IAM policy documents. The endpoints below are summarized here and specified in full in [roles-and-policies.md](roles-and-policies.md) (request and response bodies, project roles, validate/simulate, error codes).
 
-- list global role definitions;
-- return each role with its assigned permission map and whether it is the default (`is_default`).
+### `GET /api/v1/admin/roles`
 
-### `POST /api/v1/admin/global-roles`
+- list platform roles; each carries its `policy` document (`{"version": ..., "statements": [...]}`), `is_system`, `is_default` and `attachment_count`.
 
-Function:
-
-- create a global role definition;
-- persist a role name and permission map.
+### `POST /api/v1/admin/roles` and `PUT /api/v1/admin/roles/:roleId`
 
 Request body:
 
 ```json
 {
-  "name": "SECURITY_ADMIN",
-  "permissions": {
-    "global_roles.read": true,
-    "users.delete": true
+  "name": "Security admin",
+  "description": "Reads roles and deletes users",
+  "policy": {
+    "version": "2026-10-01",
+    "statements": [
+      { "effect": "Allow", "actions": ["roles:read", "users:delete"], "resources": ["role/*", "user/*"] }
+    ]
   }
 }
 ```
 
-### `PATCH /api/v1/admin/global-roles/:roleId`
+- the policy is validated against the action registry and the attribute schema; a role owned by a project may only name resources inside that project (`project/<id>` and below); problems return `422 ROLE_POLICY_INVALID` with `issues: [{ "path", "message" }]`;
+- the caller may only save a policy that grants what they hold themselves (`403 FORBIDDEN` otherwise).
 
-Function:
+### `DELETE /api/v1/admin/roles/:roleId`
 
-- update the target global role's name and permission map.
+- removes the role together with its attachments;
+- `409 ROLE_IS_DEFAULT` for the default role (new users and global agents start with it; make another role the default first);
+- `409 ROLE_IS_SYSTEM` for system roles (they can be edited, not deleted);
+- `409 ROLE_LAST_FULL_ACCESS` if it would leave no platform-wide `*` on `*` assignment.
 
-### `DELETE /api/v1/admin/global-roles/:roleId`
+### `PUT /api/v1/admin/roles/:roleId/default`
 
-Function:
+- makes the role the default: the one every new user and every new global agent starts with;
+- clears the flag on the previous default in the same transaction, so exactly one role is the default at any moment (a partial unique index on `roles.is_default` enforces it);
+- existing users and agents keep the roles they have;
+- no request body. `200 OK` with the role; `404 ROLE_NOT_FOUND` if it does not exist or is project-owned.
 
-- remove a global role definition;
-- returns `409 GLOBAL_ROLE_IS_DEFAULT` if the role is the default — new users and global agents start with it, so make another role the default first;
-- returns `409 GLOBAL_ROLE_HAS_ASSIGNED_USERS` if any users or global agents are currently assigned to the role — reassign them first.
+### `PUT /api/v1/admin/users/:userId/roles`
 
-### `PUT /api/v1/admin/global-roles/:roleId/set-default`
-
-Function:
-
-- make the role the default: the one every new user and every new global agent starts with;
-- clear the flag on the previous default in the same transaction, so exactly one role is the default at any moment (a partial unique index on `global_roles.is_default` enforces it);
-- existing users and agents keep the role they have;
-- same shape as `PUT /api/v1/projects/:projectId/task-statuses/:statusId/set-default` and its task type sibling.
-
-No request body. Success response: `200 OK` with the role. Returns `404 GLOBAL_ROLE_NOT_FOUND` if the role does not exist.
-
-### `PUT /api/v1/admin/users/:userId/global-roles`
-
-Function:
-
-- set the global role assigned to a user (a user holds exactly one, so this replaces it);
-- requires `global_roles.assign`, a privilege separate from `users.write`: no other route changes a user's role.
+- replaces the user's platform-wide roles (a user may hold several);
+- requires `roles:assign` on `role/:roleId` for each role added to or removed from the user (like `iam:PassRole`: the caller need not hold what the role grants). It is a privilege separate from `users:write`: no other route changes a user's roles;
+- unchanged roles need no permission; an unknown id is answered with `422`.
 
 Request body:
 
@@ -540,31 +547,74 @@ Request body:
 }
 ```
 
-### `PUT /api/v1/admin/agents/:agentId/global-role`
+### `PUT /api/v1/admin/agents/:agentId/roles`
 
-Function:
+- replaces a global agent's platform-wide roles;
+- requires `agents:write` on the agent and `roles:assign` on `role/:roleId` for each role added or removed;
+- the only route that sets an agent's roles: `POST /api/v1/admin/agents` and `PATCH /api/v1/admin/agents/:agentId` take no role. A new global agent starts with the default role, or none when none is the default (creating an agent never fails for lack of one);
+- same body as for users. Detach everything with `{"role_ids": []}`.
 
-- bind a global agent to the global role that decides what it may do at global scope;
-- requires both `agents.write` and `global_roles.assign`;
-- the only route that sets an agent's global role: `POST /api/v1/admin/agents` and `PATCH /api/v1/admin/agents/:agentId` reject a `global_role_id` with `400`;
-- a new global agent already holds the default global role, or no role when none is the default (creating an agent never fails for lack of one), so this route is for choosing a different role or the first one.
+## Project Export Contracts
 
-Request body:
+Exporting a project is asynchronous so a large project never holds an HTTP request open or makes the web app loop over the task API:
+
+1. `POST .../exports` records a `pending` export and appends a message to the `paca.project_exports` Valkey stream, then returns `202`.
+2. `worker.ProjectExportConsumer` (a stream consumer inside the API service) claims the export (`processing`), reads every task with the keyset cursor, builds the zip, uploads it to object storage (RustFS or S3, the same bucket attachments use) and marks it `completed` — or `failed`.
+3. The client polls `GET .../exports` until the export settles, then calls `GET .../exports/:exportId/download` for a presigned URL (valid for 10 minutes, `Content-Disposition: attachment`).
+
+All four routes require the dedicated `project:export` action, including list/get/download: an export is the whole project in one file, so it is not implied by `tasks:read`. The project `Admin` role holds it through `*`; grant it to other roles by adding `project:export` to their policy.
+
+Only one export per project may be queued or running at a time. Files are kept for 7 days (`expires_at`), after which the consumer's hourly sweep deletes the object and the row; a failed export is kept (without a file) for the same 7 days so the failure stays visible, then swept too. Requests are serialized per project, so concurrent requests cannot queue two exports. An export stuck `pending`/`processing` for 30 minutes (its worker died) is failed by the same sweep and stops blocking new requests.
+
+### Export response
 
 ```json
 {
-  "global_role_id": "uuid"
+  "id": "0b1c...",
+  "project_id": "7d2e...",
+  "requested_by": "a3f4...",
+  "kind": "project_archive",
+  "status": "completed",
+  "file_name": "Paca-export-2026-10-03.zip",
+  "file_size": 18234,
+  "row_count": 120,
+  "created_at": "2026-10-03T10:00:00Z",
+  "completed_at": "2026-10-03T10:00:05Z",
+  "expires_at": "2026-10-10T10:00:05Z",
+  "expired": false
 }
 ```
 
-Success response: `200 OK` with the agent. Returns `404` if the agent is not a global agent or the role does not exist.
+`status` is one of `pending`, `processing`, `completed`, `failed`. A `failed` export carries a generic `error_message`; the underlying cause is only logged server-side. The storage key is never exposed.
 
-### `DELETE /api/v1/admin/agents/:agentId/global-role`
+### Archive contents
 
-Function:
+`<project>-export-<date>.zip` contains:
 
-- unbind a global agent from its global role, leaving it with no global permissions;
-- same permissions as binding one: removing a role is the same privileged action.
+| Entry | Contents |
+| --- | --- |
+| `tasks.csv` | One row per task, oldest first. |
+| `task-comments.csv` | Every task comment, newest first: `Task ID`, `Task Title`, `Author`, `Origin`, `Comment` (plain text), `Created At`, `Edited At`. |
+| `task-activities.csv` | Every other task activity (status changes, field edits, assignments, ...), newest first: `Task ID`, `Task Title`, `Event` (the event topic, e.g. `task.updated`), `Actor`, `Origin`, `Details`, `Created At`. `Details` is the entry's own JSON as stored; its shape depends on the event. |
+| `docs/**.md` | Each document as a Markdown file, in the same folder tree as in the app, starting with a `# <title>` heading. |
+
+Comments and activities of a since-deleted task keep their title but have an empty `Task ID`. Task comments and activities are exported; doc comments are not.
+
+#### `tasks.csv`
+
+Columns: `ID` (e.g. `PAC-12`), `Title`, `Description` (plain text), `Type`, `Status`, `Status Category`, `Sprint`, `Parent` (parent task's ID), `Assignees`, `Reporter`, `Priority`, `Story Points`, `Start Date`, `Due Date`, `Tags`, `Created At`, `Updated At`, then one column per custom field (its display name). IDs are resolved to names; multi-valued cells are joined with `; `.
+
+#### CSV conventions
+
+All three CSVs are UTF-8 with a BOM (so Excel opens them correctly). Cells beginning with `=`, `+`, `-`, `@`, tab or CR are prefixed with `'` so spreadsheet apps cannot evaluate user-controlled text as a formula.
+
+#### Markdown conversion
+
+Documents are stored as BlockNote JSON and converted to Markdown by [`github.com/Paca-AI/go-blocknote2md`](https://github.com/Paca-AI/go-blocknote2md), a Go port of BlockNote's own `blocksToMarkdownLossy`. The output is byte-identical to what the editor's "Copy as Markdown" produces, so BlockNote's quirks are intentional: ordinary text is not escaped, bullets use `*`, lists with paragraphs are loose, tables get an empty header row unless they have header rows/columns, image captions become a separate paragraph, and mentions export as their plain name. The library's README describes how that equivalence is verified against the real BlockNote.
+
+The converter is given the app's public URL (`PUBLIC_URL`) so annotation cards export as a working link. Folder and document titles are sanitized into path segments (no separators or `..`) and de-duplicated, so an extracted archive can never write outside its own folder.
+
+When the web app upgrades BlockNote or its Markdown dependencies, upgrade the library's pinned versions with it (see its README, "Pinned versions").
 
 ## Sprint Lifecycle Contracts
 
@@ -1214,6 +1264,7 @@ Query parameters:
 | `status_id` | – | Filter to tasks with a specific status |
 | `assignee_id` | – | Filter to tasks assigned to a specific user |
 | `view_id` | – | UUID of a view; enriches each task with its manual position in that view |
+| `include` | – | `assignees`, `reporter` or both (comma-separated): embed the people behind `assignee_ids` / `reporter_id` in each task as `assignees` / `reporter` |
 | `exclude_system_types` | `false` | When `true`, omit tasks whose type has `is_system = true` (Epic, Subtask) |
 
 Success response data (without `view_id`):
@@ -1632,7 +1683,7 @@ Sub-resources of tasks that are not yet implemented.
 |---|---|---|
 | `GET` | `/api/v1/projects/:projectId/tasks/:taskId/children` | List child tasks under a parent task. |
 | `POST` | `/api/v1/projects/:projectId/tasks/:taskId/children` | Create a child task under the specified parent task. |
-| `GET` | `/api/v1/projects/:projectId/tasks/:taskId/activities` | Access token (fresh) + `tasks.read` (or global `projects.read`); anonymous on a public project |
+| `GET` | `/api/v1/projects/:projectId/tasks/:taskId/activities` | Access token (fresh) + `tasks:read` |
 | `POST` | `/api/v1/projects/:projectId/tasks/:taskId/activities` | Add a task activity entry such as comment, status change note, or system event. |
 | `GET` | `/api/v1/projects/:projectId/tasks/:taskId/time-logs` | List time logs recorded against a task. |
 | `POST` | `/api/v1/projects/:projectId/tasks/:taskId/time-logs` | Record time spent on a task. |
@@ -1686,7 +1737,7 @@ The auth/user implementation is aligned with the database schema:
 - Users are identified by `username` (unique, required) and stored with `full_name`.
 - Authentication uses `username` + password; there is no email field.
 - UUIDs are used for all public resource identifiers.
-- The `users` table stores a `role_id` FK pointing to `global_roles`; the role name is resolved via a JOIN on every read.
+- A user's roles are `role_attachments` rows (platform-wide, `project_id` NULL) pointing to `roles`; user responses carry them as `roles: [{id, name}]`. The legacy `users.role_id` column is no longer used for authorization.
 - `must_change_password` is persisted in `users` and embedded in access tokens so middleware can enforce the force-change requirement without a DB round-trip.
 
 The schema and HTTP contract are consistent. Before adding the next slice (projects/tasks), update [../architecture/database-schema.md](../architecture/database-schema.md) first so the storage model and HTTP contract continue to move together.
@@ -1703,20 +1754,20 @@ The schema and HTTP contract are consistent. Before adding the next slice (proje
 | `USER_NOT_FOUND` | 404 | User with the given ID does not exist. |
 | `USER_USERNAME_TAKEN` | 409 | Username already in use. |
 | `USER_INVALID_CURRENT_PASSWORD` | 422 | Supplied `current_password` does not match the stored hash. |
-| `FORBIDDEN` | 403 | Caller lacks the required permission. |
-| `GLOBAL_ROLE_NOT_FOUND` | 404 | Global role with the given ID does not exist. |
-| `GLOBAL_ROLE_NAME_TAKEN` | 409 | A global role with that name already exists. |
-| `GLOBAL_ROLE_NAME_INVALID` | 400 | Role name does not meet naming requirements. |
-| `GLOBAL_ROLE_HAS_ASSIGNED_USERS` | 409 | Role cannot be deleted while users or global agents are assigned to it. |
-| `GLOBAL_ROLE_IS_DEFAULT` | 409 | The default role cannot be deleted; make another role the default first. |
-| `GLOBAL_ROLE_NO_DEFAULT` | 409 | No global role is the default, so a new user cannot be given one. Creating a global agent does not fail: it is created without a role. |
+| `FORBIDDEN` | 403 | Caller lacks the required action (or the `roles:assign` resource of a role the request adds or removes). |
+| `ROLE_NOT_FOUND` | 404 | Role with the given ID does not exist in the addressed scope. |
+| `ROLE_NAME_TAKEN` | 409 | A role with that name already exists in the same scope (platform, or the project). |
+| `ROLE_NAME_INVALID` | 400 | Role name is empty or over 100 characters. |
+| `ROLE_POLICY_INVALID` | 422 | The policy document is invalid; `issues` lists `{path, message}` problems. A role owned by a project that names a resource outside that project (`*`, `project/*`, another project) is rejected with an issue at `statements[i].resources[j]`. |
+| `ROLE_IS_SYSTEM` | 409 | System roles cannot be deleted (they can be edited). |
+| `ROLE_IS_DEFAULT` | 409 | The default role cannot be deleted; make another role the default first. |
+| `ROLE_NO_DEFAULT` | 409 | No role is the default, so a new user cannot be given one. Creating a global agent does not fail: it is created without a role. |
+| `ROLE_LAST_FULL_ACCESS` | 409 | The change would leave no platform-wide full-access (`*` on `*`) assignment. |
+| `ROLE_NOT_ATTACHABLE` | 422 | A role id is unknown or cannot be attached in this scope, including a project-role template (every resource has a wildcard project segment, e.g. `project/*`) attached platform-wide or made the default. |
+| `ROLE_REQUIRED` | 400 | Adding a project member or project agent needs at least one entry in `role_ids`. |
 | `PROJECT_NOT_FOUND` | 404 | Project with the given ID does not exist. |
 | `PROJECT_NAME_TAKEN` | 409 | A project with that name already exists. |
 | `PROJECT_NAME_INVALID` | 400 | Project name is empty or does not meet naming requirements. |
-| `PROJECT_ROLE_NOT_FOUND` | 404 | Project role with the given ID does not exist. |
-| `PROJECT_ROLE_NAME_TAKEN` | 409 | A role with that name already exists within the project. |
-| `PROJECT_ROLE_NAME_INVALID` | 400 | Project role name is empty or invalid. |
-| `PROJECT_ROLE_HAS_MEMBERS` | 409 | Project role cannot be deleted while members are assigned to it. |
 | `PROJECT_MEMBER_NOT_FOUND` | 404 | Membership record for the given user in this project does not exist. |
 | `PROJECT_MEMBER_ALREADY_ADDED` | 409 | User is already a member of the project. |
 | `TASK_NOT_FOUND` | 404 | Task with the given ID does not exist. |

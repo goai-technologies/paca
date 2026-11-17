@@ -21,6 +21,7 @@ export interface Notification {
 	actor_agent_type?: string; // "llm" | "acp"
 	actor_agent_llm_provider?: string;
 	actor_agent_acp_provider?: string | null;
+	actor_agent_cli_provider?: string | null;
 	task_id: string | null;
 	task_title: string;
 	task_number: number;

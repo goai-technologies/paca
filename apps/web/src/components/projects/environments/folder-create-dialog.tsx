@@ -19,9 +19,7 @@ import {
 	type EnvironmentFolder,
 	type EnvironmentStatus,
 	environmentBrowseQueryOptions,
-	environmentFoldersQueryOptions,
 	environmentQueryOptions,
-	environmentsQueryOptions,
 } from "@/lib/environment-api";
 import { cn } from "@/lib/utils";
 
@@ -90,13 +88,8 @@ export function FolderCreateDialog({
 		mutationFn: () =>
 			addFolder(projectId, environmentId, { path: path.trim() }),
 		onSuccess: (folder) => {
-			qc.invalidateQueries({
-				queryKey: environmentsQueryOptions(projectId).queryKey,
-			});
-			qc.invalidateQueries({
-				queryKey: environmentFoldersQueryOptions(projectId, environmentId)
-					.queryKey,
-			});
+			// Prefix of the environment and all its sub-resources, so every
+			// folder list (any search) refetches.
 			qc.invalidateQueries({
 				queryKey: environmentQueryOptions(projectId, environmentId).queryKey,
 			});

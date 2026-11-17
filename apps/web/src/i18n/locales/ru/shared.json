@@ -96,7 +96,6 @@
 			"loadingMore": "Загрузка…"
 		},
 		"projectCard": {
-			"public": "Публичный",
 			"noDescription": "Без описания"
 		},
 		"gettingStarted": {
@@ -156,11 +155,6 @@
 			"descriptionLabel": "Описание",
 			"optionalHint": "(необязательно)",
 			"descriptionPlaceholder": "О чём этот проект?",
-			"publicProject": {
-				"label": "Публичный проект",
-				"publicHint": "Любой, у кого есть ссылка, сможет просматривать этот проект. Анонимным пользователям доступен только просмотр.",
-				"privateHint": "Доступ есть только у участников команды."
-			},
 			"cancel": "Отмена",
 			"submit": "Создать проект",
 			"errors": {
@@ -170,6 +164,39 @@
 				"prefixInvalid": "Префикс должен содержать 1–10 заглавных букв/цифр (например, PACA).",
 				"generic": "Что-то пошло не так. Попробуйте ещё раз."
 			}
+		},
+		"legacyPluginsBanner": {
+			"title_one": "Плагину нужно обновление",
+			"title_other": "Плагинам нужно обновление",
+			"description_one": "{{names}} всё ещё использует старую модель прав requirePermissions. Он продолжает работать, но его нельзя переустановить или обновить, пока автор не выпустит версию с requireActions.",
+			"description_other": "{{names}} всё ещё используют старую модель прав requirePermissions. Они продолжают работать, но их нельзя переустановить или обновить, пока авторы не выпустят версии с requireActions.",
+			"manage": "Управление плагинами",
+			"dismiss": "Скрыть"
 		}
+	},
+	"roleChange": {
+		"adding": "Добавить",
+		"removing": "Убрать",
+		"noChanges": "Изменений пока нет. Выберите или снимите роли выше."
+	},
+	"roleBadge": {
+		"fullAccess": "Полный доступ",
+		"builtIn": "Встроенная",
+		"default": "По умолчанию",
+		"current": "Текущая",
+		"noDescription": "Нет описания",
+		"noRoles": "Нет ролей",
+		"showMore": "Показать ещё роли (+{{count}})",
+		"allRoles": "Все роли ({{count}})"
+	},
+	"roleSelect": {
+		"searchLabel": "Поиск ролей",
+		"searchPlaceholder": "Поиск ролей…",
+		"clearSearch": "Очистить поиск",
+		"noMatch": "Нет ролей, соответствующих «{{query}}»",
+		"selectedCount": "Выбрано: {{count}}",
+		"minOne": "Требуется хотя бы одна роль.",
+		"clear": "Очистить",
+		"placeholder": "Выберите роли"
 	}
 }

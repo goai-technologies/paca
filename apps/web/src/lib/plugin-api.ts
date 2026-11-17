@@ -30,7 +30,7 @@ export interface PluginNavItem {
 	component: string;
 	icon?: string;
 	/**
-	 * Permission key (built-in, or one of this plugin's own
+	 * IAM action (built-in, e.g. "tasks:read", or one of this plugin's own
 	 * `customPermissions`) required to see and access this nav item's page.
 	 * Checked against the caller's global permissions for `scope: "admin"`
 	 * or their project permissions for `scope: "project"`. If omitted, the
@@ -69,8 +69,9 @@ export interface PluginCustomPermission {
 	key: string;
 	label: string;
 	description?: string;
-	/** Which role editor this permission appears in. Defaults to "project". */
-	scope?: "project" | "global";
+	/** Which role editor this permission appears in; "both" lists it in the
+	 *  project and the global one. Defaults to "project". */
+	scope?: "project" | "global" | "both";
 }
 
 export interface Plugin {
@@ -80,6 +81,10 @@ export interface Plugin {
 	manifest: PluginManifest;
 	extension_settings?: PluginExtensionSetting[];
 	enabled: boolean;
+	/** The installed package still uses the retired requirePermissions
+	 *  middleware; reinstalling or upgrading that build is rejected until the
+	 *  author publishes one that uses requireActions. */
+	legacy_permissions?: boolean;
 	installed_at: string;
 	updated_at: string;
 }
@@ -326,7 +331,8 @@ export function collectPluginCustomPermissions(
 	for (const plugin of plugins) {
 		if (!plugin.enabled) continue;
 		for (const perm of plugin.manifest.customPermissions ?? []) {
-			if ((perm.scope ?? "project") !== scope) continue;
+			const declared = perm.scope ?? "project";
+			if (declared !== scope && declared !== "both") continue;
 			result.push({
 				...perm,
 				pluginId: plugin.manifest.id,

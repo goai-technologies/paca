@@ -78,10 +78,7 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 		presenter.Error(w, r, err)
 		return
 	}
-	var cursor *string
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		cursor = &raw
-	}
+	cursor := parseCursorParam(r)
 
 	notifications, hasMore, err := h.svc.ListNotifications(r.Context(), userID, pageSize, cursor)
 	if err != nil {

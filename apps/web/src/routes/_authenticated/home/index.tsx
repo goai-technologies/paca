@@ -11,10 +11,8 @@ import {
 	Calendar,
 	FolderKanban,
 	GitMerge,
-	Globe,
 	Layers,
 	Loader2,
-	Lock,
 	Plus,
 	Users,
 	Zap,
@@ -22,8 +20,15 @@ import {
 import { type ComponentType, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AssignedTasksList } from "@/components/home/assigned-tasks-list";
+import { LegacyPluginsBanner } from "@/components/home/LegacyPluginsBanner";
 import { UpdateBanner } from "@/components/home/UpdateBanner";
-import { EntityAvatarContent } from "@/components/shared/entity-avatar";
+import {
+	DEFAULT_WORKSTREAM,
+	type Workstream,
+	WorkstreamPicker,
+	withWorkstream,
+} from "@/components/projects/settings/workstream-picker";
+import { EntityAvatar } from "@/components/shared/entity-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,7 +44,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { usePermissions } from "@/hooks/use-permissions";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
@@ -47,11 +51,11 @@ import { currentUserQueryOptions } from "@/lib/auth-api";
 import { assignedTasksQueryOptions } from "@/lib/interaction-api";
 import {
 	createProject,
-	getProjectInitials,
 	type Project,
 	projectsInfiniteQueryOptions,
 	workspaceStatsQueryOptions,
 } from "@/lib/project-api";
+import { projectAvatar } from "@/lib/provider-logos";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/home/")({
@@ -93,7 +97,7 @@ function CreateProjectDialog({
 	const [name, setName] = useState("");
 	const [description, setDescription] = useState("");
 	const [prefix, setPrefix] = useState("");
-	const [isPublic, setIsPublic] = useState(false);
+	const [workstream, setWorkstream] = useState<Workstream>(DEFAULT_WORKSTREAM);
 	const [prefixTouched, setPrefixTouched] = useState(false);
 	const [nameError, setNameError] = useState<string | null>(null);
 	const [prefixError, setPrefixError] = useState<string | null>(null);
@@ -103,7 +107,7 @@ function CreateProjectDialog({
 		setName("");
 		setDescription("");
 		setPrefix("");
-		setIsPublic(false);
+		setWorkstream(DEFAULT_WORKSTREAM);
 		setPrefixTouched(false);
 		setNameError(null);
 		setPrefixError(null);
@@ -117,7 +121,7 @@ function CreateProjectDialog({
 				name: name.trim(),
 				description: description.trim() || undefined,
 				task_id_prefix: prefix.trim() || undefined,
-				is_public: isPublic,
+				settings: withWorkstream(undefined, workstream),
 			});
 		},
 		onSuccess: async () => {
@@ -265,35 +269,7 @@ function CreateProjectDialog({
 							className="resize-none"
 						/>
 					</div>
-					<div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
-						<div className="flex items-start gap-3">
-							<div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 border border-primary/15">
-								{isPublic ? (
-									<Globe className="size-4 text-primary" />
-								) : (
-									<Lock className="size-4 text-primary" />
-								)}
-							</div>
-							<div>
-								<Label
-									htmlFor="is-public"
-									className="font-medium cursor-pointer"
-								>
-									{t("home.createDialog.publicProject.label")}
-								</Label>
-								<p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-									{isPublic
-										? t("home.createDialog.publicProject.publicHint")
-										: t("home.createDialog.publicProject.privateHint")}
-								</p>
-							</div>
-						</div>
-						<Switch
-							id="is-public"
-							checked={isPublic}
-							onCheckedChange={setIsPublic}
-						/>
-					</div>
+					<WorkstreamPicker value={workstream} onChange={setWorkstream} />
 					{error ? (
 						<p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
 							{error}
@@ -335,7 +311,6 @@ function CreateProjectDialog({
 
 function ProjectCard({ project }: { project: Project }) {
 	const { t } = useTranslation("shared");
-	const initials = getProjectInitials(project.name);
 
 	const formattedDate = new Date(project.created_at).toLocaleDateString(
 		"en-US",
@@ -350,25 +325,18 @@ function ProjectCard({ project }: { project: Project }) {
 		>
 			<div className="absolute inset-x-0 top-0 h-px rounded-t-xl bg-primary/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
 			<div className="flex items-start gap-3.5 mb-4">
-				<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 border border-primary/15 font-[Syne] text-sm font-bold text-primary">
-					<EntityAvatarContent avatarUrl={project.avatar_thumb_url}>
-						{initials || <FolderKanban className="size-4" />}
-					</EntityAvatarContent>
-				</div>
+				<EntityAvatar
+					{...projectAvatar(project)}
+					fallback={<FolderKanban className="size-4" />}
+					size="lg"
+					shape="rounded"
+					className="font-[Syne]"
+				/>
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2 mb-0.5">
 						<p className="font-[Syne] text-sm font-bold truncate leading-snug">
 							{project.name}
 						</p>
-						{project.is_public && (
-							<Badge
-								variant="secondary"
-								className="gap-1 px-1.5 py-0 text-xs font-medium border border-border/60 shrink-0"
-							>
-								<Globe className="size-3" />
-								{t("home.projectCard.public")}
-							</Badge>
-						)}
 					</div>
 					{project.description ? (
 						<p className="mt-0.5 text-xs text-muted-foreground line-clamp-2 leading-relaxed">
@@ -464,7 +432,7 @@ function HomePage() {
 	const { hasPermission } = usePermissions();
 	const [createOpen, setCreateOpen] = useState(false);
 
-	const canCreate = hasPermission("projects.create");
+	const canCreate = hasPermission("projects:create");
 
 	const projects = useMemo(
 		() => projectsData?.pages.flatMap((p) => p.items) ?? [],
@@ -488,6 +456,7 @@ function HomePage() {
 	return (
 		<div className="flex flex-col">
 			<UpdateBanner />
+			<LegacyPluginsBanner />
 			{/* Hero banner */}
 			<div className="relative overflow-hidden border-b border-border/50">
 				<div

@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next";
 import { Skeleton } from "@/components/ui/skeleton";
 import { assignedTasksQueryOptions, type Task } from "@/lib/interaction-api";
 import {
-	projectMembersQueryOptions,
 	projectsLookupInfiniteQueryOptions,
 	taskStatusesQueryOptions,
 	taskTypesQueryOptions,
@@ -119,9 +118,6 @@ export function AssignedTasksList() {
 	const typeQueries = useQueries({
 		queries: projectIds.map((id) => taskTypesQueryOptions(id)),
 	});
-	const memberQueries = useQueries({
-		queries: projectIds.map((id) => projectMembersQueryOptions(id)),
-	});
 
 	const projectsById = useMemo(
 		() =>
@@ -181,7 +177,7 @@ export function AssignedTasksList() {
 						tasks={tasksByProject.get(projectId) ?? []}
 						statuses={statusQueries[idx]?.data ?? []}
 						taskTypes={typeQueries[idx]?.data ?? []}
-						members={memberQueries[idx]?.data ?? []}
+						members={[]}
 						customFields={[]}
 						canCreate={false}
 						isStatusGrouping={false}

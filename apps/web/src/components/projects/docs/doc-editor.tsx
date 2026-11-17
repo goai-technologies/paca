@@ -18,7 +18,6 @@ import { MentionSuggestionMenus } from "@/components/shared/mention-suggestion-m
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import { useThemeMode } from "@/hooks/use-theme-mode";
 import { getDocFileDownloadURL, uploadDocFile } from "@/lib/doc-api";
-import { useMentionData } from "@/lib/mention-api";
 import { cleanBlocks } from "@/lib/utils";
 
 /** Custom URI scheme used to store doc file references in the block content. */
@@ -49,7 +48,6 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(
 		ref,
 	) {
 		const { resolvedMode } = useThemeMode();
-		const { teamMembers, documents } = useMentionData(projectId);
 
 		const lastSavedRef = useRef<string | null>(null);
 		const initializedRef = useRef(false);
@@ -188,12 +186,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(
 				>
 					<SideMenuController sideMenu={CustomSideMenu} />
 					{editable && (
-						<MentionSuggestionMenus
-							editor={editor}
-							teamMembers={teamMembers}
-							projectId={projectId}
-							documents={documents}
-						/>
+						<MentionSuggestionMenus editor={editor} projectId={projectId} />
 					)}
 				</BlockNoteView>
 			</div>

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ConversationCursor holds the stable ordering fields for keyset-based
@@ -67,4 +69,35 @@ func DecodeConversationEventCursor(s string) (*ConversationEventCursor, error) {
 		return nil, fmt.Errorf("decode cursor json: %w", err)
 	}
 	return &c, nil
+}
+
+type agentCursor struct {
+	Name string `json:"n"`
+	ID   string `json:"id"`
+}
+
+// EncodeAgentCursor builds the cursor for resuming the name-ordered agent
+// list after a. The name is stored as-is: the query lowercases both sides with
+// the database's LOWER, so Go and Postgres case folding can never disagree.
+func EncodeAgentCursor(a *Agent) string {
+	b, _ := json.Marshal(agentCursor{Name: a.Name, ID: a.ID.String()})
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+// DecodeAgentCursor returns the (name, id) position in a token
+// produced by EncodeAgentCursor; any failure wraps ErrInvalidCursor.
+func DecodeAgentCursor(s string) (name string, id uuid.UUID, err error) {
+	b, err := base64.URLEncoding.DecodeString(s)
+	if err != nil {
+		return "", uuid.Nil, fmt.Errorf("%w: base64: %v", ErrInvalidCursor, err)
+	}
+	var c agentCursor
+	if err := json.Unmarshal(b, &c); err != nil {
+		return "", uuid.Nil, fmt.Errorf("%w: json: %v", ErrInvalidCursor, err)
+	}
+	id, err = uuid.Parse(c.ID)
+	if err != nil {
+		return "", uuid.Nil, fmt.Errorf("%w: id: %v", ErrInvalidCursor, err)
+	}
+	return c.Name, id, nil
 }

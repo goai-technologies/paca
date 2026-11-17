@@ -126,6 +126,22 @@ func (s *Server) assignSSHPort(ctx context.Context, id uuid.UUID) int {
 	return port
 }
 
+// ensureCLIHomeDirs creates the provider-CLI home directories on the
+// environment's volume (see sandbox.EnsureCLIHomeDirs) so a CLI login made
+// from the environment terminal before any conversation has run lands on
+// the persistent volume. Best-effort, like bootstrapSSHKeys: a failure is
+// logged, and syncProviderCLIConfig repeats the mkdir for its own provider
+// on every conversation attach.
+func (s *Server) ensureCLIHomeDirs(ctx context.Context, environmentID uuid.UUID, backendRef string) {
+	var dirs []string
+	for _, a := range providercli.All() {
+		dirs = append(dirs, providercli.HomeRoot+"/"+a.Name())
+	}
+	if err := sandbox.EnsureCLIHomeDirs(ctx, s.SandboxMgr, backendRef, dirs); err != nil {
+		s.Log.Warn("acpbridge: failed to create cli home dirs", "environment_id", environmentID, "error", err)
+	}
+}
+
 // bootstrapSSHKeys renders backendRef's authorized_keys from every SSH key
 // registered on environmentID and starts its sshd — called once, right
 // after a fresh container/Pod exists with nothing pushed to it yet: from
@@ -276,6 +292,7 @@ func (s *Server) ExecuteCreateEnvironment(ctx context.Context, req createEnviron
 		return nil, err
 	}
 
+	s.ensureCLIHomeDirs(ctx, environmentID, handle.BackendRef)
 	if sshPort != 0 {
 		s.bootstrapSSHKeys(ctx, environmentID, handle.BackendRef)
 	}
@@ -467,6 +484,7 @@ func (s *Server) StartEnvironmentByID(ctx context.Context, environmentID uuid.UU
 	if handle.BackendRef != "" && handle.BackendRef != backendRef {
 		recreatedBackendRef = handle.BackendRef
 	}
+	s.ensureCLIHomeDirs(ctx, environmentID, firstNonEmpty(recreatedBackendRef, backendRef))
 	if sshPort != 0 {
 		s.bootstrapSSHKeys(ctx, environmentID, firstNonEmpty(recreatedBackendRef, backendRef))
 	}
@@ -973,6 +991,9 @@ func (s *Server) ExecuteRestartEnvironmentPorts(ctx context.Context, req restart
 	// Pod (see RestartEnvironmentPorts's own doc comment on both
 	// backends), so re-bootstrapping there would be redundant work against
 	// a Pod that already has everything it needs.
+	if s.Backend != "kubernetes" {
+		s.ensureCLIHomeDirs(ctx, environmentID, handle.BackendRef)
+	}
 	if sshPort != 0 && s.Backend != "kubernetes" {
 		s.bootstrapSSHKeys(ctx, environmentID, handle.BackendRef)
 	}

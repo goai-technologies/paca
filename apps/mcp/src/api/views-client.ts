@@ -34,9 +34,6 @@ export class PacaAPIViewsClient {
 			"Content-Type": "application/json",
 			"X-API-Key": this.config.apiKey,
 		};
-		if (this.config.agentId) {
-			headers["X-Agent-ID"] = this.config.agentId;
-		}
 
 		const options: RequestInit = {
 			method,
@@ -326,9 +323,6 @@ export class PacaAPIViewsClient {
 		const headers: Record<string, string> = {
 			"X-API-Key": this.config.apiKey,
 		};
-		if (this.config.agentId) {
-			headers["X-Agent-ID"] = this.config.agentId;
-		}
 
 		const response = await fetch(url, { headers });
 		if (!response.ok) {

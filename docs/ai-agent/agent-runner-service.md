@@ -144,7 +144,7 @@ See [repository-plugin-adapter.md](repository-plugin-adapter.md) for the full to
 
 ### MCP Servers
 
-`internal/executor/executor.go`'s `buildMCPServers` sends the agent's own configured `agent_mcp_servers` rows first, then always appends the built-in Paca MCP server last (so it can't be shadowed by a same-named user entry) whenever `PACA_API_KEY` is configured. The wire shape is ACP's real schema (a `type`-discriminated stdio/http/sse enum, `env` as an array of `{name, value}` pairs) — verified against the spec directly after a hand-guessed shape omitting both made `session/new` hang. `oauth`-transport servers (a value the DB schema allows) have no ACP equivalent yet and are skipped.
+`internal/executor/executor.go`'s `buildMCPServers` sends the agent's own configured `agent_mcp_servers` rows first, then always appends the built-in Paca MCP server last (so it can't be shadowed by a same-named user entry) whenever `PACA_API_URL` is configured. The server authenticates as the agent itself: `internal/repository/postgres/agent_key_repository.go` provides the agent's own API key (an `api_keys` row of its account; derived from `ENCRYPTION_KEY` and the agent id, so it is stable across conversations and only its hash is stored). The wire shape is ACP's real schema (a `type`-discriminated stdio/http/sse enum, `env` as an array of `{name, value}` pairs) — verified against the spec directly after a hand-guessed shape omitting both made `session/new` hang. `oauth`-transport servers (a value the DB schema allows) have no ACP equivalent yet and are skipped.
 
 ---
 
@@ -183,7 +183,6 @@ The three internal endpoints require `X-Internal-Token` matching `INTERNAL_API_K
 | `AGENT_SERVER_IMAGE` | ✅ | Deliberately no hardcoded default — must be a digest- or tag-pinned reference to `services/agent-server/Dockerfile`, chosen deliberately |
 | `INTERNAL_API_KEY` | ✅ | Shared secret for `services/api`'s calls into the internal HTTP endpoints above; must equal `services/api`'s `AI_AGENT_INTERNAL_KEY` |
 | `AGENT_RUNNER_ALLOWED_AGENT_IDS` | ✅ | Comma-separated agent UUIDs, or `*` for every agent — see `config.Gate`'s doc comment |
-| `PACA_API_KEY` | | Credential for the built-in Paca MCP server; omit to disable it entirely |
 | `PACA_API_URL` / `PACA_GATEWAY_URL` | | Internal URLs the Paca MCP server calls out to |
 | `PORT_POOL_START` / `PORT_POOL_SIZE` | | Container port pool. Default: `10000` / `100` |
 | `WORKER_CONCURRENCY` | | Trigger goroutines in flight at once. Default: `5` |

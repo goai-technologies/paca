@@ -1,15 +1,18 @@
+import { useQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { SearchableList } from "@/components/projects/interactions/task-detail/property-field/searchable-list";
+import { RemoteSelect } from "@/components/shared/remote-select";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectSeparator,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import type { Environment } from "@/lib/environment-api";
+	useEnvironmentFolderSearch,
+	useEnvironmentSearch,
+} from "@/hooks/use-environment-search";
+import {
+	type Environment,
+	environmentFolderQueryOptions,
+	environmentQueryOptions,
+} from "@/lib/environment-api";
 import { EnvironmentCreateDialog } from "./environment-create-dialog";
 import { FolderCreateDialog } from "./folder-create-dialog";
 
@@ -34,23 +37,59 @@ import { FolderCreateDialog } from "./folder-create-dialog";
 // feeds each caller's own dirty-checking/save-payload logic; only the
 // Select markup and create-dialog wiring are shared here.
 
-const NO_ENVIRONMENT = "__none__";
-const NO_FOLDER = "__none__";
-const CREATE_NEW_ENVIRONMENT = "__create_environment__";
-const CREATE_NEW_FOLDER = "__create_folder__";
+/** Row that opens a "create new…" dialog, pinned above the search results. */
+export function PinnedRow({
+	onSelect,
+	selected,
+	children,
+}: {
+	onSelect: () => void;
+	selected?: boolean;
+	children: ReactNode;
+}) {
+	return (
+		<button
+			type="button"
+			className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-muted/60 transition-colors duration-100"
+			onClick={onSelect}
+			aria-pressed={selected}
+		>
+			{children}
+		</button>
+	);
+}
+
+/** Name of an environment looked up by id (cached), for a select's trigger. */
+export function useEnvironmentName(projectId: string, environmentId: string) {
+	const { data } = useQuery({
+		...environmentQueryOptions(projectId, environmentId),
+		enabled: !!projectId && !!environmentId,
+	});
+	return data?.name;
+}
+
+/** Path of a folder looked up by id (cached), for a select's trigger. */
+export function useFolderPath(
+	projectId: string,
+	environmentId: string,
+	folderId: string,
+) {
+	const { data } = useQuery({
+		...environmentFolderQueryOptions(projectId, environmentId, folderId),
+		enabled: !!projectId && !!environmentId && !!folderId,
+	});
+	return data?.path;
+}
 
 export function DefaultEnvironmentSelect({
 	projectId,
-	environments,
 	value,
 	onChange,
 	required = false,
 	disabled,
 	className,
-	triggerSize,
 }: {
 	projectId: string;
-	environments: Environment[];
 	value: string;
 	onChange: (id: string) => void;
 	/** Omits the "no default environment" option and shows a placeholder
@@ -58,70 +97,70 @@ export function DefaultEnvironmentSelect({
 	required?: boolean;
 	disabled?: boolean;
 	className?: string;
-	triggerSize?: "sm" | "default";
 }) {
 	const { t } = useTranslation("projects");
+	const [open, setOpen] = useState(false);
 	const [createOpen, setCreateOpen] = useState(false);
+	const search = useEnvironmentSearch(projectId, open && !disabled);
+	const name = useEnvironmentName(projectId, value);
 
 	return (
 		<>
-			<Select
-				value={required ? value : value || NO_ENVIRONMENT}
-				onValueChange={(v) => {
-					if (!v) return;
-					if (v === CREATE_NEW_ENVIRONMENT) {
-						setCreateOpen(true);
-						return;
-					}
-					onChange(!required && v === NO_ENVIRONMENT ? "" : v);
-				}}
-				items={[
-					...(required
-						? []
-						: [
-								{
-									value: NO_ENVIRONMENT,
-									label: t("agents.detail.overview.noDefaultEnvironment"),
-								},
-							]),
-					...environments.map((env) => ({ value: env.id, label: env.name })),
-					{
-						value: CREATE_NEW_ENVIRONMENT,
-						label: t("environments.picker.createNew"),
-					},
-				]}
+			<RemoteSelect
+				open={open}
+				onOpenChange={setOpen}
 				disabled={disabled}
+				className={className}
+				label={
+					value
+						? name
+						: required
+							? undefined
+							: t("agents.detail.overview.noDefaultEnvironment")
+				}
+				placeholder={
+					required ? t("agents.createDialog.environmentPlaceholder") : undefined
+				}
 			>
-				<SelectTrigger className={className} size={triggerSize}>
-					<SelectValue
-						placeholder={
-							required
-								? t("agents.createDialog.environmentPlaceholder")
-								: undefined
-						}
-					/>
-				</SelectTrigger>
-				<SelectContent>
-					{!required && (
+				<SearchableList
+					remote={search}
+					pinned={
 						<>
-							<SelectItem value={NO_ENVIRONMENT}>
-								{t("agents.detail.overview.noDefaultEnvironment")}
-							</SelectItem>
-							<SelectSeparator />
+							{!required && (
+								<PinnedRow
+									onSelect={() => {
+										onChange("");
+										setOpen(false);
+									}}
+								>
+									{t("agents.detail.overview.noDefaultEnvironment")}
+								</PinnedRow>
+							)}
+							<PinnedRow
+								onSelect={() => {
+									setOpen(false);
+									setCreateOpen(true);
+								}}
+							>
+								<Plus className="size-3.5" />
+								{t("environments.picker.createNew")}
+							</PinnedRow>
 						</>
-					)}
-					{environments.map((env) => (
-						<SelectItem key={env.id} value={env.id}>
-							{env.name}
-						</SelectItem>
-					))}
-					<SelectSeparator />
-					<SelectItem value={CREATE_NEW_ENVIRONMENT}>
-						<Plus className="size-3.5" />
-						{t("environments.picker.createNew")}
-					</SelectItem>
-				</SelectContent>
-			</Select>
+					}
+					items={search.environments.map((env) => ({
+						key: env.id,
+						label: env.name,
+						selected: env.id === value,
+						onSelect: () => {
+							onChange(env.id);
+							setOpen(false);
+						},
+						content: (
+							<span className="flex-1 truncate text-left">{env.name}</span>
+						),
+					}))}
+				/>
+			</RemoteSelect>
 			<EnvironmentCreateDialog
 				projectId={projectId}
 				open={createOpen}
@@ -139,74 +178,85 @@ export function DefaultFolderSelect({
 	onChange,
 	disabled,
 	className,
-	triggerSize,
+	required = false,
 }: {
 	projectId: string;
+	/** Drops the "no default folder" choice — the caller needs a folder. */
+	required?: boolean;
 	/** The currently-selected default environment — the folder select has
 	 * nothing to offer (and isn't rendered by any caller) without one. */
-	environment: Environment;
+	environment: Pick<Environment, "id" | "status">;
 	value: string;
 	onChange: (id: string) => void;
 	disabled?: boolean;
 	className?: string;
-	triggerSize?: "sm" | "default";
 }) {
 	const { t } = useTranslation("projects");
+	const [open, setOpen] = useState(false);
 	const [createOpen, setCreateOpen] = useState(false);
-	// Defensive fallback, not just belt-and-suspenders: a Go nil slice
-	// serializes to JSON `null` (not `[]`) unless explicitly initialized,
-	// so a freshly-created environment's `folders` can legitimately arrive
-	// here as null/undefined rather than an empty array.
-	const folders = environment.folders ?? [];
+	const search = useEnvironmentFolderSearch(
+		projectId,
+		environment.id,
+		open && !disabled,
+	);
+	const path = useFolderPath(projectId, environment.id, value);
 
 	return (
 		<>
-			<Select
-				value={value || NO_FOLDER}
-				onValueChange={(v) => {
-					if (!v) return;
-					if (v === CREATE_NEW_FOLDER) {
-						setCreateOpen(true);
-						return;
-					}
-					onChange(v === NO_FOLDER ? "" : v);
-				}}
-				items={[
-					{
-						value: NO_FOLDER,
-						label: t("agents.detail.overview.noDefaultFolder"),
-					},
-					...folders.map((folder) => ({
-						value: folder.id,
-						label: folder.path,
-					})),
-					{
-						value: CREATE_NEW_FOLDER,
-						label: t("environments.picker.folderCreateNew"),
-					},
-				]}
+			<RemoteSelect
+				open={open}
+				onOpenChange={setOpen}
 				disabled={disabled}
+				className={className}
+				label={
+					value
+						? path
+						: required
+							? undefined
+							: t("agents.detail.overview.noDefaultFolder")
+				}
 			>
-				<SelectTrigger className={className} size={triggerSize}>
-					<SelectValue />
-				</SelectTrigger>
-				<SelectContent>
-					<SelectItem value={NO_FOLDER}>
-						{t("agents.detail.overview.noDefaultFolder")}
-					</SelectItem>
-					{folders.length > 0 && <SelectSeparator />}
-					{folders.map((folder) => (
-						<SelectItem key={folder.id} value={folder.id}>
-							{folder.path}
-						</SelectItem>
-					))}
-					<SelectSeparator />
-					<SelectItem value={CREATE_NEW_FOLDER}>
-						<Plus className="size-3.5" />
-						{t("environments.picker.folderCreateNew")}
-					</SelectItem>
-				</SelectContent>
-			</Select>
+				<SearchableList
+					remote={search}
+					pinned={
+						<>
+							{!required && (
+								<PinnedRow
+									onSelect={() => {
+										onChange("");
+										setOpen(false);
+									}}
+								>
+									{t("agents.detail.overview.noDefaultFolder")}
+								</PinnedRow>
+							)}
+							<PinnedRow
+								onSelect={() => {
+									setOpen(false);
+									setCreateOpen(true);
+								}}
+							>
+								<Plus className="size-3.5" />
+								{t("environments.picker.folderCreateNew")}
+							</PinnedRow>
+						</>
+					}
+					items={search.folders.map((folder) => ({
+						key: folder.id,
+						label: folder.path,
+						selected: folder.id === value,
+						onSelect: () => {
+							onChange(folder.id);
+							setOpen(false);
+						},
+						content: (
+							<span className="flex-1 truncate text-left font-mono text-xs">
+								{folder.path}
+							</span>
+						),
+					}))}
+				/>
+			</RemoteSelect>
 			<FolderCreateDialog
 				projectId={projectId}
 				environmentId={environment.id}

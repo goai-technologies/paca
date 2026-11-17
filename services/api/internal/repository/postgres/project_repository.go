@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	projectdom "github.com/Paca-AI/api/internal/domain/project"
+	roledom "github.com/Paca-AI/api/internal/domain/role"
 )
 
 // --- sqlx models ------------------------------------------------------------
@@ -21,7 +23,6 @@ type projectRecord struct {
 	Name            string     `db:"name"`
 	Description     string     `db:"description"`
 	TaskIDPrefix    string     `db:"task_id_prefix"`
-	IsPublic        bool       `db:"is_public"`
 	Settings        []byte     `db:"settings"`
 	AvatarKey       *string    `db:"avatar_key"`
 	AvatarThumbKey  *string    `db:"avatar_thumb_key"`
@@ -33,26 +34,16 @@ type projectRecord struct {
 	JevModel        string     `db:"jev_model"`
 }
 
-type projectRoleRecord struct {
-	ID          string    `db:"id"`
-	ProjectID   *string   `db:"project_id"`
-	RoleName    string    `db:"role_name"`
-	Permissions []byte    `db:"permissions"`
-	CreatedAt   time.Time `db:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at"`
-}
-
 // projectMemberReadRow is the result of the SELECT … JOIN query.
 type projectMemberReadRow struct {
 	ID                  string     `db:"id"`
 	ProjectID           string     `db:"project_id"`
+	AccountID           string     `db:"account_id"`
 	UserID              *string    `db:"user_id"`
-	ProjectRoleID       string     `db:"project_role_id"`
 	MemberType          string     `db:"member_type"`
 	AgentID             *string    `db:"agent_id"`
 	Username            string     `db:"username"`
 	FullName            string     `db:"full_name"`
-	RoleName            string     `db:"role_name"`
 	AgentName           string     `db:"agent_name"`
 	AgentHandle         string     `db:"agent_handle"`
 	UserAvatarKey       *string    `db:"user_avatar_key"`
@@ -62,6 +53,7 @@ type projectMemberReadRow struct {
 	AgentType           string     `db:"agent_type"`
 	AgentLLMProvider    string     `db:"agent_llm_provider"`
 	AgentACPProvider    *string    `db:"agent_acp_provider"`
+	AgentCLIProvider    *string    `db:"agent_cli_provider"`
 	AgentDescription    string     `db:"agent_description"`
 	Description         string     `db:"description"`
 	CreatedAt           time.Time  `db:"created_at"`
@@ -80,8 +72,8 @@ func NewProjectRepository(db *sqlx.DB) *ProjectRepository {
 	return &ProjectRepository{db: db}
 }
 
-const projectSelectCols = `id, name, description, task_id_prefix, is_public, settings, avatar_key, avatar_thumb_key, created_by, created_at, deleted_at, jev_api_key_secret, jev_base_url, jev_model`
-const projectSelectColsQualified = `projects.id, projects.name, projects.description, projects.task_id_prefix, projects.is_public, projects.settings, projects.avatar_key, projects.avatar_thumb_key, projects.created_by, projects.created_at, projects.deleted_at, projects.jev_api_key_secret, projects.jev_base_url, projects.jev_model`
+const projectSelectCols = `id, name, description, task_id_prefix, settings, avatar_key, avatar_thumb_key, created_by, created_at, deleted_at, jev_api_key_secret, jev_base_url, jev_model`
+const projectSelectColsQualified = `projects.id, projects.name, projects.description, projects.task_id_prefix, projects.settings, projects.avatar_key, projects.avatar_thumb_key, projects.created_by, projects.created_at, projects.deleted_at, projects.jev_api_key_secret, projects.jev_base_url, projects.jev_model`
 
 // --- Projects ---------------------------------------------------------------
 
@@ -114,7 +106,7 @@ func (r *ProjectRepository) ListAccessible(ctx context.Context, userID uuid.UUID
 	if err := r.db.GetContext(ctx, &total, `
 		SELECT COUNT(*) FROM projects
 		JOIN project_members ON project_members.project_id = projects.id
-		WHERE project_members.user_id = $1 AND project_members.deleted_at IS NULL AND projects.deleted_at IS NULL`, userID.String()); err != nil {
+		WHERE project_members.account_id = $1 AND project_members.deleted_at IS NULL AND projects.deleted_at IS NULL`, userID.String()); err != nil {
 		return nil, 0, fmt.Errorf("project repo: list accessible count: %w", err)
 	}
 
@@ -122,7 +114,7 @@ func (r *ProjectRepository) ListAccessible(ctx context.Context, userID uuid.UUID
 	if err := r.db.SelectContext(ctx, &records, `
 		SELECT `+projectSelectColsQualified+` FROM projects
 		JOIN project_members ON project_members.project_id = projects.id
-		WHERE project_members.user_id = $1 AND project_members.deleted_at IS NULL AND projects.deleted_at IS NULL
+		WHERE project_members.account_id = $1 AND project_members.deleted_at IS NULL AND projects.deleted_at IS NULL
 		ORDER BY projects.created_at ASC OFFSET $2 LIMIT $3`, userID.String(), offset, limit); err != nil {
 		return nil, 0, fmt.Errorf("project repo: list accessible: %w", err)
 	}
@@ -166,25 +158,63 @@ func (r *ProjectRepository) FindByTaskIDPrefix(ctx context.Context, prefix strin
 	return toProjectEntity(&record)
 }
 
-// Create persists a new project.
-func (r *ProjectRepository) Create(ctx context.Context, p *projectdom.Project) error {
+// Create persists a new project together with what setup describes — its
+// roles and the creator's membership and role attachment — in one
+// transaction, so a project never exists without them.
+func (r *ProjectRepository) Create(ctx context.Context, p *projectdom.Project, setup projectdom.ProjectSetup) error {
 	rec, err := fromProjectEntity(p)
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO projects (id, name, description, task_id_prefix, is_public, settings, created_by, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		rec.ID, rec.Name, rec.Description, rec.TaskIDPrefix, rec.IsPublic,
-		rec.Settings, rec.CreatedBy, rec.CreatedAt,
-	)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return projectdom.ErrNameTaken
+	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO projects (id, name, description, task_id_prefix, settings, created_by, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			rec.ID, rec.Name, rec.Description, rec.TaskIDPrefix,
+			rec.Settings, rec.CreatedBy, rec.CreatedAt,
+		); err != nil {
+			if isUniqueViolation(err) {
+				return projectdom.ErrNameTaken
+			}
+			return fmt.Errorf("project repo: create: %w", err)
 		}
-		return fmt.Errorf("project repo: create: %w", err)
-	}
-	return nil
+
+		roleIDs := make(map[string]uuid.UUID, len(setup.Roles))
+		for _, role := range setup.Roles {
+			var id string
+			if err := tx.GetContext(ctx, &id, `
+				INSERT INTO roles (name, description, policy, project_id, is_system)
+				VALUES ($1, $2, $3::jsonb, $4::uuid, $5) RETURNING id`,
+				role.Name, role.Description, string(role.Policy), p.ID.String(), role.System); err != nil {
+				if isRoleNameViolation(err) {
+					return roledom.ErrNameTaken
+				}
+				return fmt.Errorf("project repo: create role %s: %w", role.Name, err)
+			}
+			parsed, err := uuid.Parse(id)
+			if err != nil {
+				return fmt.Errorf("project repo: create role %s: bad id: %w", role.Name, err)
+			}
+			roleIDs[role.Name] = parsed
+		}
+
+		if setup.Creator == nil {
+			return nil
+		}
+		creatorRole, ok := roleIDs[setup.CreatorRole]
+		if !ok {
+			return fmt.Errorf("project repo: creator role %q is not among the project roles", setup.CreatorRole)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO project_members (id, project_id, account_id, created_at, deleted_at)
+			VALUES ($1, $2, $3, NOW(), NULL)`,
+			uuid.NewString(), p.ID.String(), setup.Creator.String()); err != nil {
+			return fmt.Errorf("project repo: add creator: %w", err)
+		}
+		_, err := attachRolesTx(ctx, tx, *setup.Creator, &p.ID,
+			[]uuid.UUID{creatorRole}, setup.Creator)
+		return err
+	})
 }
 
 // Update saves changes to a project.
@@ -201,10 +231,10 @@ func (r *ProjectRepository) Update(ctx context.Context, p *projectdom.Project) e
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE projects SET name=$1, description=$2, task_id_prefix=$3, is_public=$4, settings=$5,
-		  avatar_key=$6, avatar_thumb_key=$7, created_by=$8
-		WHERE id=$9`,
-		p.Name, p.Description, p.TaskIDPrefix, p.IsPublic, settings,
+		UPDATE projects SET name=$1, description=$2, task_id_prefix=$3, settings=$4,
+		  avatar_key=$5, avatar_thumb_key=$6, created_by=$7
+		WHERE id=$8`,
+		p.Name, p.Description, p.TaskIDPrefix, settings,
 		p.AvatarKey, p.AvatarThumbKey, createdBy, p.ID.String(),
 	)
 	if err != nil {
@@ -256,142 +286,45 @@ func (r *ProjectRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// --- Project Roles ----------------------------------------------------------
-
-const projectRoleCols = `id, project_id, role_name, permissions, created_at, updated_at`
-
-// ListRoles returns project-scoped roles for a given project.
-func (r *ProjectRepository) ListRoles(ctx context.Context, projectID uuid.UUID) ([]*projectdom.ProjectRole, error) {
-	var records []projectRoleRecord
-	if err := r.db.SelectContext(ctx, &records, `SELECT `+projectRoleCols+` FROM project_roles WHERE project_id = $1 ORDER BY role_name ASC`, projectID.String()); err != nil {
-		return nil, fmt.Errorf("project repo: list roles: %w", err)
-	}
-
-	roles := make([]*projectdom.ProjectRole, 0, len(records))
-	for i := range records {
-		role, err := toProjectRoleEntity(&records[i])
-		if err != nil {
-			return nil, err
-		}
-		roles = append(roles, role)
-	}
-	return roles, nil
-}
-
-// FindRoleByID returns a project role by its primary key.
-func (r *ProjectRepository) FindRoleByID(ctx context.Context, id uuid.UUID) (*projectdom.ProjectRole, error) {
-	var record projectRoleRecord
-	err := r.db.GetContext(ctx, &record, `SELECT `+projectRoleCols+` FROM project_roles WHERE id = $1`, id.String())
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, projectdom.ErrRoleNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("project repo: find role by id: %w", err)
-	}
-	return toProjectRoleEntity(&record)
-}
-
-// FindRoleByName returns a role by name within the given project scope.
-func (r *ProjectRepository) FindRoleByName(ctx context.Context, projectID uuid.UUID, name string) (*projectdom.ProjectRole, error) {
-	var record projectRoleRecord
-	err := r.db.GetContext(ctx, &record, `SELECT `+projectRoleCols+` FROM project_roles WHERE project_id = $1 AND role_name = $2`, projectID.String(), name)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, projectdom.ErrRoleNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("project repo: find role by name: %w", err)
-	}
-	return toProjectRoleEntity(&record)
-}
-
-// CreateRole persists a new project role.
-func (r *ProjectRepository) CreateRole(ctx context.Context, role *projectdom.ProjectRole) error {
-	rec, err := fromProjectRoleEntity(role)
-	if err != nil {
-		return err
-	}
-	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO project_roles (id, project_id, role_name, permissions, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		rec.ID, rec.ProjectID, rec.RoleName, rec.Permissions, rec.CreatedAt, rec.UpdatedAt,
-	)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return projectdom.ErrRoleNameTaken
-		}
-		return fmt.Errorf("project repo: create role: %w", err)
-	}
-	return nil
-}
-
-// UpdateRole saves changes to a project role.
-func (r *ProjectRepository) UpdateRole(ctx context.Context, role *projectdom.ProjectRole) error {
-	perms, err := json.Marshal(role.Permissions)
-	if err != nil {
-		return fmt.Errorf("project repo: marshal role permissions: %w", err)
-	}
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE project_roles SET role_name=$1, permissions=$2, updated_at=$3 WHERE id=$4`,
-		role.RoleName, perms, role.UpdatedAt, role.ID.String(),
-	)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return projectdom.ErrRoleNameTaken
-		}
-		return fmt.Errorf("project repo: update role: %w", err)
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return projectdom.ErrRoleNotFound
-	}
-	return nil
-}
-
-// DeleteRole removes a project role.
-func (r *ProjectRepository) DeleteRole(ctx context.Context, id uuid.UUID) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM project_roles WHERE id = $1`, id.String())
-	if err != nil {
-		return fmt.Errorf("project repo: delete role: %w", err)
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		return projectdom.ErrRoleNotFound
-	}
-	return nil
-}
-
-// CountMembersWithRole returns the number of active project members assigned to the role.
-func (r *ProjectRepository) CountMembersWithRole(ctx context.Context, roleID uuid.UUID) (int64, error) {
-	var count int64
-	if err := r.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM project_members WHERE project_role_id = $1`, roleID.String()); err != nil {
-		return 0, fmt.Errorf("project repo: count members with role: %w", err)
-	}
-	return count, nil
-}
-
 // --- Project Members --------------------------------------------------------
 
+// projectMemberCols reads a member: the membership row (pm), the shared
+// identity from the member's account (ac) and the kind-specific rows (u for a
+// user, a for an agent). member_type is the account kind, with 'human' for a
+// user. It must be used with projectMemberFrom.
 const projectMemberCols = `
-	pm.id, pm.project_id, pm.user_id, pm.project_role_id, pm.member_type, pm.agent_id, pm.created_at,
-	COALESCE(u.username, '') AS username, COALESCE(u.full_name, '') AS full_name, pr.role_name,
-	COALESCE(a.name, '') AS agent_name, COALESCE(a.handle, '') AS agent_handle,
-	u.avatar_key AS user_avatar_key, u.avatar_thumb_key AS user_avatar_thumb_key,
-	a.avatar_key AS agent_avatar_key, a.avatar_thumb_key AS agent_avatar_thumb_key,
+	pm.id, pm.project_id, pm.account_id,
+	CASE WHEN ac.kind = 'user' THEN pm.account_id END AS user_id,
+	CASE ac.kind WHEN 'user' THEN 'human' ELSE ac.kind END AS member_type,
+	CASE WHEN ac.kind = 'agent' THEN pm.account_id END AS agent_id,
+	pm.created_at,
+	COALESCE(u.username, '') AS username,
+	CASE WHEN ac.kind <> 'agent' THEN ac.name ELSE '' END AS full_name,
+	CASE WHEN ac.kind = 'agent' THEN ac.name ELSE '' END AS agent_name,
+	COALESCE(a.handle, '') AS agent_handle,
+	CASE WHEN ac.kind <> 'agent' THEN ac.avatar_key END AS user_avatar_key,
+	CASE WHEN ac.kind <> 'agent' THEN ac.avatar_thumb_key END AS user_avatar_thumb_key,
+	CASE WHEN ac.kind = 'agent' THEN ac.avatar_key END AS agent_avatar_key,
+	CASE WHEN ac.kind = 'agent' THEN ac.avatar_thumb_key END AS agent_avatar_thumb_key,
 	COALESCE(a.agent_type, '') AS agent_type, COALESCE(a.llm_provider, '') AS agent_llm_provider,
-	a.acp_provider AS agent_acp_provider, COALESCE(a.description, '') AS agent_description,
+	a.acp_provider AS agent_acp_provider,
+	a.cli_provider AS agent_cli_provider,
+	CASE WHEN ac.kind = 'agent' THEN ac.description ELSE '' END AS agent_description,
 	COALESCE(pm.description, '') AS description`
 
-// ListMembers returns all active (non-deleted) members of a project enriched with user and role info.
-func (r *ProjectRepository) ListMembers(ctx context.Context, projectID uuid.UUID) ([]*projectdom.ProjectMember, error) {
+const projectMemberFrom = `project_members pm
+		JOIN accounts ac ON ac.id = pm.account_id
+		LEFT JOIN users u ON u.id = pm.account_id
+		LEFT JOIN agents a ON a.id = pm.account_id`
+
+// ListAllMembers returns all active (non-deleted) members of a project enriched with user and role info.
+func (r *ProjectRepository) ListAllMembers(ctx context.Context, projectID uuid.UUID) ([]*projectdom.ProjectMember, error) {
 	var rows []projectMemberReadRow
 	if err := r.db.SelectContext(ctx, &rows, `
 		SELECT `+projectMemberCols+`
-		FROM project_members pm
-		LEFT JOIN users u ON u.id = pm.user_id AND u.deleted_at IS NULL
-		JOIN project_roles pr ON pr.id = pm.project_role_id
-		LEFT JOIN agents a ON a.id = pm.agent_id AND a.deleted_at IS NULL
+		FROM `+projectMemberFrom+`
 		WHERE pm.project_id = $1 AND pm.deleted_at IS NULL
-		ORDER BY COALESCE(u.username, a.handle) ASC`, projectID.String()); err != nil {
+		ORDER BY COALESCE(u.username, a.handle, ac.name) ASC`, projectID.String()); err != nil {
 		return nil, fmt.Errorf("project repo: list members: %w", err)
 	}
 
@@ -399,12 +332,149 @@ func (r *ProjectRepository) ListMembers(ctx context.Context, projectID uuid.UUID
 	for i := range rows {
 		members = append(members, toMemberEntity(&rows[i]))
 	}
+	if err := r.loadMemberRoles(ctx, projectID, members); err != nil {
+		return nil, err
+	}
 	return members, nil
+}
+
+const memberNameSortKey = `LOWER(COALESCE(u.username, a.handle, ac.name))`
+
+// memberListWhere builds the WHERE clause (and args, numbered from $1) for a
+// project's member list.
+func memberListWhere(projectID uuid.UUID, filter projectdom.MemberFilter) (string, []any) {
+	args := []any{projectID.String()}
+	where := `pm.project_id = $1 AND pm.deleted_at IS NULL`
+	if filter.RoleID != nil {
+		args = append(args, filter.RoleID.String())
+		where += fmt.Sprintf(` AND EXISTS (
+			SELECT 1 FROM role_attachments ra
+			WHERE ra.project_id = pm.project_id AND ra.account_id = pm.account_id
+			  AND ra.role_id = $%d::uuid)`, len(args))
+	}
+	if filter.MemberType != "" {
+		args = append(args, filter.MemberType)
+		where += fmt.Sprintf(` AND (CASE ac.kind WHEN 'user' THEN 'human' ELSE ac.kind END) = $%d`, len(args))
+	}
+	if len(filter.AccountIDs) > 0 {
+		ids := make([]string, 0, len(filter.AccountIDs))
+		for _, id := range filter.AccountIDs {
+			ids = append(ids, id.String())
+		}
+		args = append(args, ids)
+		where += fmt.Sprintf(` AND (pm.account_id = ANY($%[1]d::uuid[]) OR pm.id = ANY($%[1]d::uuid[]))`, len(args))
+	}
+	for _, word := range strings.Fields(filter.Search) {
+		args = append(args, "%"+escapeLike(word)+"%")
+		n := len(args)
+		where += fmt.Sprintf(` AND (LOWER(COALESCE(u.username, '')) LIKE LOWER($%[1]d) ESCAPE '\' OR LOWER(ac.name) LIKE LOWER($%[1]d) ESCAPE '\' OR LOWER(COALESCE(a.handle, '')) LIKE LOWER($%[1]d) ESCAPE '\')`, n)
+	}
+	return where, args
+}
+
+// CountMembers returns the number of active members of the project matching filter.
+func (r *ProjectRepository) CountMembers(ctx context.Context, projectID uuid.UUID, filter projectdom.MemberFilter) (int64, error) {
+	where, args := memberListWhere(projectID, filter)
+	var n int64
+	if err := r.db.GetContext(ctx, &n, `SELECT COUNT(*) FROM `+projectMemberFrom+` WHERE `+where, args...); err != nil {
+		return 0, fmt.Errorf("project repo: count members: %w", err)
+	}
+	return n, nil
+}
+
+// ListMembers returns up to limit members ordered by name after the
+// member named by cursorAfter, and whether more follow. Filtering happens in
+// the query, before the page is cut.
+func (r *ProjectRepository) ListMembers(ctx context.Context, projectID uuid.UUID, limit int, cursorAfter *string, filter projectdom.MemberFilter) ([]*projectdom.ProjectMember, bool, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	where, args := memberListWhere(projectID, filter)
+	if cursorAfter != nil {
+		key, cursorID, err := projectdom.DecodeMemberCursor(*cursorAfter)
+		if err != nil {
+			return nil, false, err
+		}
+		args = append(args, key, cursorID.String())
+		where += fmt.Sprintf(` AND (`+memberNameSortKey+`, pm.id) > (LOWER($%d::text), $%d::uuid)`, len(args)-1, len(args))
+	}
+	args = append(args, limit+1)
+
+	var rows []projectMemberReadRow
+	if err := r.db.SelectContext(ctx, &rows, `
+		SELECT `+projectMemberCols+`
+		FROM `+projectMemberFrom+`
+		WHERE `+where+fmt.Sprintf(`
+		ORDER BY `+memberNameSortKey+`, pm.id
+		LIMIT $%d`, len(args)), args...); err != nil {
+		return nil, false, fmt.Errorf("project repo: list members after: %w", err)
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	members := make([]*projectdom.ProjectMember, 0, len(rows))
+	for i := range rows {
+		members = append(members, toMemberEntity(&rows[i]))
+	}
+	if !filter.SkipRoles {
+		if err := r.loadMemberRoles(ctx, projectID, members); err != nil {
+			return nil, false, err
+		}
+	}
+	return members, hasMore, nil
+}
+
+// loadMemberRoles fills in Roles on members of one project: for each member,
+// the roles attached to its principal inside that project, sorted by name.
+func (r *ProjectRepository) loadMemberRoles(ctx context.Context, projectID uuid.UUID, members []*projectdom.ProjectMember) error {
+	if len(members) == 0 {
+		return nil
+	}
+	accounts := make([]string, 0, len(members))
+	for _, m := range members {
+		accounts = append(accounts, m.AccountID.String())
+	}
+	var rows []struct {
+		AccountID string `db:"account_id"`
+		RoleID    string `db:"role_id"`
+		Name      string `db:"name"`
+	}
+	if err := r.db.SelectContext(ctx, &rows, `
+		SELECT ra.account_id::text AS account_id, r.id::text AS role_id, r.name
+		FROM role_attachments ra JOIN roles r ON r.id = ra.role_id
+		WHERE ra.project_id = $1::uuid AND ra.account_id = ANY($2::uuid[])
+		ORDER BY r.name, r.id`, projectID.String(), accounts); err != nil {
+		return fmt.Errorf("project repo: load member roles: %w", err)
+	}
+	byAccount := make(map[string][]roledom.Summary, len(rows))
+	for _, row := range rows {
+		rid, err := uuid.Parse(row.RoleID)
+		if err != nil {
+			return fmt.Errorf("project repo: load member roles: bad role id %q: %w", row.RoleID, err)
+		}
+		byAccount[row.AccountID] = append(byAccount[row.AccountID], roledom.Summary{ID: rid, Name: row.Name})
+	}
+	for _, m := range members {
+		m.Roles = byAccount[m.AccountID.String()]
+		if m.Roles == nil {
+			m.Roles = []roledom.Summary{}
+		}
+	}
+	return nil
+}
+
+// memberWithRoles loads the roles of a single member read.
+func (r *ProjectRepository) memberWithRoles(ctx context.Context, m *projectdom.ProjectMember) (*projectdom.ProjectMember, error) {
+	if err := r.loadMemberRoles(ctx, m.ProjectID, []*projectdom.ProjectMember{m}); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // CountDistinctAgentsByProjects returns the number of distinct agents with
 // an active membership across all of projectIDs, in a single query — the
-// cross-project equivalent of calling ListMembers once per project and
+// cross-project equivalent of calling ListAllMembers once per project and
 // deduping agent_id in application code.
 func (r *ProjectRepository) CountDistinctAgentsByProjects(ctx context.Context, projectIDs []uuid.UUID) (int64, error) {
 	if len(projectIDs) == 0 {
@@ -416,9 +486,10 @@ func (r *ProjectRepository) CountDistinctAgentsByProjects(ctx context.Context, p
 
 	var count int64
 	query := `
-		SELECT COUNT(DISTINCT agent_id)
-		FROM project_members
-		WHERE deleted_at IS NULL AND agent_id IS NOT NULL AND ` + b.whereClauses[0]
+		SELECT COUNT(DISTINCT pm.account_id)
+		FROM project_members pm
+		JOIN accounts ac ON ac.id = pm.account_id AND ac.kind = 'agent'
+		WHERE pm.deleted_at IS NULL AND pm.` + b.whereClauses[0]
 	if err := r.db.GetContext(ctx, &count, query, b.args...); err != nil {
 		return 0, fmt.Errorf("project repo: count distinct agents: %w", err)
 	}
@@ -430,11 +501,8 @@ func (r *ProjectRepository) FindMember(ctx context.Context, projectID, userID uu
 	var row projectMemberReadRow
 	err := r.db.GetContext(ctx, &row, `
 		SELECT `+projectMemberCols+`
-		FROM project_members pm
-		LEFT JOIN users u ON u.id = pm.user_id AND u.deleted_at IS NULL
-		JOIN project_roles pr ON pr.id = pm.project_role_id
-		LEFT JOIN agents a ON a.id = pm.agent_id AND a.deleted_at IS NULL
-		WHERE pm.project_id = $1 AND pm.user_id = $2 AND pm.deleted_at IS NULL`,
+		FROM `+projectMemberFrom+`
+		WHERE pm.project_id = $1 AND pm.account_id = $2 AND pm.deleted_at IS NULL`,
 		projectID.String(), userID.String())
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, projectdom.ErrMemberNotFound
@@ -442,7 +510,7 @@ func (r *ProjectRepository) FindMember(ctx context.Context, projectID, userID uu
 	if err != nil {
 		return nil, fmt.Errorf("project repo: find member: %w", err)
 	}
-	return toMemberEntity(&row), nil
+	return r.memberWithRoles(ctx, toMemberEntity(&row))
 }
 
 // FindMemberByAgent returns a single active member record for the given project + agent combo.
@@ -450,11 +518,8 @@ func (r *ProjectRepository) FindMemberByAgent(ctx context.Context, projectID, ag
 	var row projectMemberReadRow
 	err := r.db.GetContext(ctx, &row, `
 		SELECT `+projectMemberCols+`
-		FROM project_members pm
-		LEFT JOIN users u ON u.id = pm.user_id AND u.deleted_at IS NULL
-		JOIN project_roles pr ON pr.id = pm.project_role_id
-		LEFT JOIN agents a ON a.id = pm.agent_id AND a.deleted_at IS NULL
-		WHERE pm.project_id = $1 AND pm.agent_id = $2 AND pm.member_type = 'agent' AND pm.deleted_at IS NULL`,
+		FROM `+projectMemberFrom+`
+		WHERE pm.project_id = $1 AND pm.account_id = $2 AND pm.deleted_at IS NULL`,
 		projectID.String(), agentID.String())
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, projectdom.ErrMemberNotFound
@@ -462,7 +527,7 @@ func (r *ProjectRepository) FindMemberByAgent(ctx context.Context, projectID, ag
 	if err != nil {
 		return nil, fmt.Errorf("project repo: find member by agent: %w", err)
 	}
-	return toMemberEntity(&row), nil
+	return r.memberWithRoles(ctx, toMemberEntity(&row))
 }
 
 // FindMemberByUserProject returns the active member record for a (user_id, project_id)
@@ -489,10 +554,7 @@ func (r *ProjectRepository) FindMemberByID(ctx context.Context, memberID uuid.UU
 	var row projectMemberReadRow
 	err := r.db.GetContext(ctx, &row, `
 		SELECT `+projectMemberCols+`
-		FROM project_members pm
-		LEFT JOIN users u ON u.id = pm.user_id AND u.deleted_at IS NULL
-		JOIN project_roles pr ON pr.id = pm.project_role_id
-		LEFT JOIN agents a ON a.id = pm.agent_id AND a.deleted_at IS NULL
+		FROM `+projectMemberFrom+`
 		WHERE pm.id = $1 AND pm.deleted_at IS NULL`, memberID.String())
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, projectdom.ErrMemberNotFound
@@ -500,113 +562,124 @@ func (r *ProjectRepository) FindMemberByID(ctx context.Context, memberID uuid.UU
 	if err != nil {
 		return nil, fmt.Errorf("project repo: find member by id: %w", err)
 	}
-	return toMemberEntity(&row), nil
+	return r.memberWithRoles(ctx, toMemberEntity(&row))
 }
 
-// AddMember inserts a project_members row, or restores a previously soft-deleted one.
-func (r *ProjectRepository) AddMember(ctx context.Context, m *projectdom.ProjectMember) error {
-	// First try to restore a previously soft-deleted membership for this
-	// project+user pair, updating its role and description (preserving
-	// original created_at).
-	restore, err := r.db.ExecContext(ctx, `
-		UPDATE project_members
-		SET project_role_id = $1, description = $4, deleted_at = NULL
-		WHERE project_id = $2 AND user_id = $3 AND deleted_at IS NOT NULL`,
-		m.ProjectRoleID.String(), m.ProjectID.String(), m.UserID.String(), m.Description,
-	)
-	if err != nil {
-		return fmt.Errorf("project repo: restore member: %w", err)
-	}
-	if n, _ := restore.RowsAffected(); n > 0 {
-		return nil
-	}
-
-	// No soft-deleted row to restore; insert a fresh membership.
-	result, err := r.db.ExecContext(ctx, `
-		INSERT INTO project_members (id, project_id, user_id, project_role_id, member_type, description, created_at, deleted_at)
-		VALUES ($1, $2, $3, $4, 'human', $5, NOW(), NULL)
-		ON CONFLICT (project_id, user_id) WHERE deleted_at IS NULL DO NOTHING`,
-		m.ID.String(), m.ProjectID.String(), m.UserID.String(), m.ProjectRoleID.String(), m.Description,
-	)
-	if err != nil {
-		return fmt.Errorf("project repo: add member: %w", err)
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return projectdom.ErrMemberAlreadyAdded
-	}
-	return nil
+// AddMember inserts a project_members row, or restores a previously
+// soft-deleted one, and attaches roleIDs to the member inside the project, all
+// in one transaction. Whatever role attachments the principal still has in
+// the project are dropped first, so the member starts with exactly roleIDs.
+func (r *ProjectRepository) AddMember(ctx context.Context, m *projectdom.ProjectMember, roleIDs []uuid.UUID, createdBy *uuid.UUID) error {
+	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		// First try to restore a previously soft-deleted membership for this
+		// project+user pair, updating its description (preserving original
+		// created_at).
+		restore, err := tx.ExecContext(ctx, `
+			UPDATE project_members
+			SET description = $3, deleted_at = NULL
+			WHERE project_id = $1 AND account_id = $2 AND deleted_at IS NOT NULL`,
+			m.ProjectID.String(), m.AccountID.String(), m.Description,
+		)
+		if err != nil {
+			return fmt.Errorf("project repo: restore member: %w", err)
+		}
+		restored, _ := restore.RowsAffected()
+		if restored == 0 {
+			// No soft-deleted row to restore; insert a fresh membership.
+			result, err := tx.ExecContext(ctx, `
+				INSERT INTO project_members (id, project_id, account_id, description, created_at, deleted_at)
+				VALUES ($1, $2, $3, $4, NOW(), NULL)
+				ON CONFLICT (project_id, account_id) WHERE deleted_at IS NULL DO NOTHING`,
+				m.ID.String(), m.ProjectID.String(), m.AccountID.String(), m.Description,
+			)
+			if err != nil {
+				return fmt.Errorf("project repo: add member: %w", err)
+			}
+			if n, _ := result.RowsAffected(); n == 0 {
+				return projectdom.ErrMemberAlreadyAdded
+			}
+		}
+		return replaceProjectAttachmentsTx(ctx, tx, m.AccountID, m.ProjectID, roleIDs, createdBy)
+	})
 }
 
-// AddAgentMember inserts a project_members row for an AI agent.
-func (r *ProjectRepository) AddAgentMember(ctx context.Context, memberID, projectID, agentID, roleID uuid.UUID) error {
-	result, err := r.db.ExecContext(ctx, `
-		INSERT INTO project_members (id, project_id, agent_id, project_role_id, member_type, user_id, created_at, deleted_at)
-		VALUES ($1, $2, $3, $4, 'agent', NULL, NOW(), NULL)
-		ON CONFLICT (project_id, agent_id) WHERE deleted_at IS NULL AND member_type = 'agent' DO NOTHING`,
-		memberID.String(), projectID.String(), agentID.String(), roleID.String(),
-	)
-	if err != nil {
-		return fmt.Errorf("project repo: add agent member: %w", err)
+// AddAgentMember inserts a project_members row for an AI agent and attaches
+// roleIDs to the agent inside the project, in one transaction.
+func (r *ProjectRepository) AddAgentMember(ctx context.Context, memberID, projectID, agentID uuid.UUID, roleIDs []uuid.UUID, createdBy *uuid.UUID) error {
+	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO project_members (id, project_id, account_id, created_at, deleted_at)
+			VALUES ($1, $2, $3, NOW(), NULL)
+			ON CONFLICT (project_id, account_id) WHERE deleted_at IS NULL DO NOTHING`,
+			memberID.String(), projectID.String(), agentID.String(),
+		)
+		if err != nil {
+			return fmt.Errorf("project repo: add agent member: %w", err)
+		}
+		if n, _ := result.RowsAffected(); n == 0 {
+			return projectdom.ErrMemberAlreadyAdded
+		}
+		return replaceProjectAttachmentsTx(ctx, tx, agentID, projectID, roleIDs, createdBy)
+	})
+}
+
+// replaceProjectAttachmentsTx makes the principal's attachments inside the
+// project exactly roleIDs. It is used right after a membership row was
+// created, when any attachment the principal still has there is stale (the
+// principal was not an active member, so it granted nothing).
+func replaceProjectAttachmentsTx(ctx context.Context, tx *sqlx.Tx, accountID, projectID uuid.UUID, roleIDs []uuid.UUID, createdBy *uuid.UUID) error {
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM role_attachments
+		WHERE project_id = $1::uuid AND account_id = $2::uuid`,
+		projectID.String(), accountID.String()); err != nil {
+		return fmt.Errorf("project repo: clear stale attachments: %w", err)
 	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return projectdom.ErrMemberAlreadyAdded
-	}
-	return nil
+	_, err := attachRolesTx(ctx, tx, accountID, &projectID, roleIDs, createdBy)
+	return err
 }
 
 // RemoveAgentMember soft-deletes the membership row for the given agent.
 func (r *ProjectRepository) RemoveAgentMember(ctx context.Context, projectID, agentID uuid.UUID) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, `
-		UPDATE project_members SET deleted_at = $1
-		WHERE project_id = $2 AND agent_id = $3 AND member_type = 'agent'`, now, projectID.String(), agentID.String())
+	var n int64
+	err := r.db.QueryRowContext(ctx, removeMembersSQL(`project_id = $2 AND account_id = $3`),
+		now, projectID.String(), agentID.String()).Scan(&n)
 	if err != nil {
 		return fmt.Errorf("project repo: remove agent member: %w", err)
 	}
 	return nil
 }
 
-// UpdateMemberRole changes the role of an existing active project member.
-func (r *ProjectRepository) UpdateMemberRole(ctx context.Context, projectID, userID, roleID uuid.UUID) error {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE project_members SET project_role_id = $1 WHERE project_id = $2 AND user_id = $3 AND deleted_at IS NULL`,
-		roleID.String(), projectID.String(), userID.String(),
-	)
-	if err != nil {
-		return fmt.Errorf("project repo: update member role: %w", err)
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return projectdom.ErrMemberNotFound
-	}
-	return nil
+// removeMembersSQL soft-deletes the project_members rows matching where
+// (with $1 = deleted_at) and, in the same statement, deletes the removed
+// principals' role_attachments scoped to that project, so a removed member
+// keeps no IAM role there (re-adding them starts from nothing). It returns
+// the number of membership rows removed.
+func removeMembersSQL(where string) string {
+	return `
+		WITH removed AS (
+			UPDATE project_members SET deleted_at = $1
+			WHERE ` + where + ` AND deleted_at IS NULL
+			RETURNING project_id, account_id
+		), detached AS (
+			DELETE FROM role_attachments ra
+			USING removed m
+			WHERE ra.project_id = m.project_id AND ra.account_id = m.account_id
+			RETURNING 1
+		)
+		SELECT count(*) FROM removed`
 }
 
 // RemoveMember soft-deletes the membership row for the given project + user.
 func (r *ProjectRepository) RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE project_members SET deleted_at = $1 WHERE project_id = $2 AND user_id = $3 AND deleted_at IS NULL`,
-		now, projectID.String(), userID.String(),
-	)
+	var n int64
+	err := r.db.QueryRowContext(ctx, removeMembersSQL(`project_id = $2 AND account_id = $3`),
+		now, projectID.String(), userID.String()).Scan(&n)
 	if err != nil {
 		return fmt.Errorf("project repo: remove member: %w", err)
 	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return projectdom.ErrMemberNotFound
-	}
-	return nil
-}
-
-// UpdateMemberRoleByMemberID changes the role of an existing active project member by member ID.
-func (r *ProjectRepository) UpdateMemberRoleByMemberID(ctx context.Context, memberID, roleID uuid.UUID) error {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE project_members SET project_role_id = $1 WHERE id = $2 AND deleted_at IS NULL`,
-		roleID.String(), memberID.String(),
-	)
-	if err != nil {
-		return fmt.Errorf("project repo: update member role: %w", err)
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
+	if n == 0 {
 		return projectdom.ErrMemberNotFound
 	}
 	return nil
@@ -631,14 +704,12 @@ func (r *ProjectRepository) UpdateMemberDescription(ctx context.Context, memberI
 // RemoveMemberByMemberID soft-deletes the membership row for the given member ID.
 func (r *ProjectRepository) RemoveMemberByMemberID(ctx context.Context, memberID uuid.UUID) error {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE project_members SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL`,
-		now, memberID.String(),
-	)
+	var n int64
+	err := r.db.QueryRowContext(ctx, removeMembersSQL(`id = $2`), now, memberID.String()).Scan(&n)
 	if err != nil {
 		return fmt.Errorf("project repo: remove member: %w", err)
 	}
-	if n, _ := result.RowsAffected(); n == 0 {
+	if n == 0 {
 		return projectdom.ErrMemberNotFound
 	}
 	return nil
@@ -668,7 +739,6 @@ func toProjectEntity(rec *projectRecord) (*projectdom.Project, error) {
 		Name:            rec.Name,
 		Description:     rec.Description,
 		TaskIDPrefix:    rec.TaskIDPrefix,
-		IsPublic:        rec.IsPublic,
 		Settings:        settings,
 		AvatarKey:       rec.AvatarKey,
 		AvatarThumbKey:  rec.AvatarThumbKey,
@@ -696,71 +766,21 @@ func fromProjectEntity(p *projectdom.Project) (*projectRecord, error) {
 		Name:         p.Name,
 		Description:  p.Description,
 		TaskIDPrefix: p.TaskIDPrefix,
-		IsPublic:     p.IsPublic,
 		Settings:     settings,
 		CreatedBy:    createdBy,
 		CreatedAt:    p.CreatedAt,
 	}, nil
 }
 
-func toProjectRoleEntity(rec *projectRoleRecord) (*projectdom.ProjectRole, error) {
-	id, err := uuid.Parse(rec.ID)
-	if err != nil {
-		return nil, fmt.Errorf("project role repo: parse id: %w", err)
-	}
-	perms := map[string]any{}
-	if len(rec.Permissions) > 0 {
-		if err := json.Unmarshal(rec.Permissions, &perms); err != nil {
-			return nil, fmt.Errorf("project role repo: unmarshal permissions: %w", err)
-		}
-	}
-	var projectID *uuid.UUID
-	if rec.ProjectID != nil {
-		if uid, err := uuid.Parse(*rec.ProjectID); err == nil {
-			projectID = &uid
-		}
-	}
-	return &projectdom.ProjectRole{
-		ID:          id,
-		ProjectID:   projectID,
-		RoleName:    rec.RoleName,
-		Permissions: perms,
-		CreatedAt:   rec.CreatedAt,
-		UpdatedAt:   rec.UpdatedAt,
-	}, nil
-}
-
-func fromProjectRoleEntity(r *projectdom.ProjectRole) (*projectRoleRecord, error) {
-	perms, err := json.Marshal(r.Permissions)
-	if err != nil {
-		return nil, fmt.Errorf("project role repo: marshal permissions: %w", err)
-	}
-	var projectID *string
-	if r.ProjectID != nil {
-		s := r.ProjectID.String()
-		projectID = &s
-	}
-	return &projectRoleRecord{
-		ID:          r.ID.String(),
-		ProjectID:   projectID,
-		RoleName:    r.RoleName,
-		Permissions: perms,
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
-	}, nil
-}
-
 func toMemberEntity(row *projectMemberReadRow) *projectdom.ProjectMember {
 	id, _ := uuid.Parse(row.ID)
 	projectID, _ := uuid.Parse(row.ProjectID)
-	roleID, _ := uuid.Parse(row.ProjectRoleID)
 	m := &projectdom.ProjectMember{
 		ID:                  id,
 		ProjectID:           projectID,
-		ProjectRoleID:       roleID,
+		Roles:               []roledom.Summary{},
 		Username:            row.Username,
 		FullName:            row.FullName,
-		RoleName:            row.RoleName,
 		CreatedAt:           row.CreatedAt,
 		DeletedAt:           row.DeletedAt,
 		MemberType:          row.MemberType,
@@ -773,9 +793,11 @@ func toMemberEntity(row *projectMemberReadRow) *projectdom.ProjectMember {
 		AgentType:           row.AgentType,
 		AgentLLMProvider:    row.AgentLLMProvider,
 		AgentACPProvider:    row.AgentACPProvider,
+		AgentCLIProvider:    row.AgentCLIProvider,
 		AgentDescription:    row.AgentDescription,
 		Description:         row.Description,
 	}
+	m.AccountID, _ = uuid.Parse(row.AccountID)
 	if row.UserID != nil {
 		userID, _ := uuid.Parse(*row.UserID)
 		m.UserID = userID

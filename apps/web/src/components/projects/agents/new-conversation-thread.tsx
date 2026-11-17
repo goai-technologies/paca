@@ -34,6 +34,7 @@ import {
 import { ConversationErrorBox } from "./conversation-error-box";
 import {
 	chatSessionAccessDeniedKey,
+	chatSessionApiErrorMessage,
 	extractTextOnlyContent,
 } from "./conversation-to-thread-messages";
 
@@ -100,7 +101,7 @@ export function NewConversationThread({
 	// composer needs its own guard too.
 	const { hasProjectPermission } = useProjectPermissions(projectId ?? "");
 	const canStartConversation =
-		!projectId || hasProjectPermission("conversations.write");
+		!projectId || hasProjectPermission("conversations:write");
 	const { dialog: agentBusyDialog, send: sendWithBusyPrompt } =
 		useAgentBusyPrompt();
 
@@ -176,6 +177,13 @@ export function NewConversationThread({
 			const key = chatSessionAccessDeniedKey(err);
 			if (key) {
 				setSendError(t(key));
+				return;
+			}
+			// Any other client error the API explained: show its message instead
+			// of dropping it as an unhandled rejection the person never sees.
+			const apiMessage = chatSessionApiErrorMessage(err);
+			if (apiMessage) {
+				setSendError(apiMessage);
 				return;
 			}
 			throw err;

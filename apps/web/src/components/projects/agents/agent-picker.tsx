@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import {
 	createContext,
 	useCallback,
@@ -12,25 +12,35 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { EnvironmentCreateDialog } from "@/components/projects/environments/environment-create-dialog";
+import {
+	PinnedRow,
+	useFolderPath,
+} from "@/components/projects/environments/environment-folder-select";
 import { FolderCreateDialog } from "@/components/projects/environments/folder-create-dialog";
+import { SearchableList } from "@/components/projects/interactions/task-detail/property-field/searchable-list";
+import { RemoteSelect } from "@/components/shared/remote-select";
 import { Button } from "@/components/ui/button";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectSeparator,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
+import { useAgentSearch } from "@/hooks/use-agent-search";
+import {
+	useEnvironmentFolderSearch,
+	useEnvironmentSearch,
+} from "@/hooks/use-environment-search";
 import { useJevEnabled } from "@/hooks/use-jev-enabled";
 import { usePermissions } from "@/hooks/use-permissions";
+import { agentQueryOptions } from "@/lib/agent-api";
+import { useAgentDirectory } from "@/lib/agent-directory";
 import {
-	agentQueryOptions,
-	agentsQueryOptions,
-	chattableAgentsQueryOptions,
-} from "@/lib/agent-api";
-import type { Environment, EnvironmentFolder } from "@/lib/environment-api";
-import { environmentsQueryOptions } from "@/lib/environment-api";
+	type Environment,
+	environmentFolderQueryOptions,
+	environmentFoldersInfiniteQueryOptions,
+	environmentQueryOptions,
+	environmentsInfiniteQueryOptions,
+} from "@/lib/environment-api";
 
 // ── Agent picker ──────────────────────────────────────────────────────────────
 //
@@ -42,8 +52,23 @@ import { environmentsQueryOptions } from "@/lib/environment-api";
 // Conversations page's inline "new conversation" thread — same UX, same code.
 
 export interface AgentPickerState {
+	/** The options currently listed: the synthetic Auto entry (when offered)
+	 *  followed by the loaded page(s) of agents matching the search. */
 	agents: { id: string; name: string }[];
 	agentsLoading: boolean;
+	/** Name to show for the selected agent when it isn't among `agents` (e.g.
+	 *  the list is filtered by a search), resolved by id. */
+	selectedName?: string;
+	/** Server-side search and paging of the option list; without it the list
+	 *  is static. */
+	search?: {
+		query: string;
+		onQueryChange: (query: string) => void;
+		hasMore: boolean;
+		isLoadingMore: boolean;
+		isError?: boolean;
+		onLoadMore: () => void;
+	};
 	agentId: string;
 	onAgentChange: (id: string) => void;
 	/** Once a conversation has started, the agent is fixed for its lifetime —
@@ -81,31 +106,23 @@ export function useAgentPicker(
 ) {
 	const { t } = useTranslation("projects");
 	const jevEnabled = useJevEnabled(projectId);
-	const { data: allAgents = [], isLoading: agentsLoading } = useQuery({
-		...agentsQueryOptions(projectId),
-		enabled: options?.enabled ?? true,
-	});
-	// A restricted agent the caller has no grant for is visible on the
-	// Agents page (so people know it exists and who to ask) but not
-	// selectable here — starting a chat with it would just fail with
-	// AGENT_ACCESS_RESTRICTED, so it's left off the composer's own list
-	// instead of offering a choice guaranteed to error.
-	const realAgents = useMemo(
-		() =>
-			allAgents.filter(
-				(a) => a.access_mode !== "restricted" || a.access_granted,
-			),
-		[allAgents],
-	);
+	const search = useAgentSearch(projectId, options?.enabled ?? true);
+	const getAgent = useAgentDirectory(projectId);
+	// The server only lists agents the caller may use, so every one is a choice.
+	const realAgents = search.agents;
+	const agentsLoading = search.isLoading;
+	// Auto-selection and the Auto option reflect the project's agents as a
+	// whole, so they only apply while the list isn't narrowed by a search.
+	const browsing = search.query.trim() === "";
 	// "Auto" is prepended as a synthetic first option — only when Jev is
 	// configured AND there's at least one real agent to resolve it to
 	// (otherwise it'd be a dead end: picking it just 404s at send time).
 	const agents = useMemo(
 		() =>
-			jevEnabled && realAgents.length > 0
+			jevEnabled && realAgents.length > 0 && browsing
 				? [{ id: AUTO_AGENT_ID, name: t("aiChat.autoAgent") }, ...realAgents]
 				: realAgents,
-		[realAgents, jevEnabled, t],
+		[realAgents, jevEnabled, browsing, t],
 	);
 	const [agentId, setAgentId] = useState("");
 
@@ -113,19 +130,30 @@ export function useAgentPicker(
 	// pre-Auto behavior — auto-select the project's only agent instead of
 	// forcing an explicit choice before the composer will send.
 	useEffect(() => {
-		if (agentId) return;
+		if (agentId || !browsing) return;
 		if (jevEnabled && realAgents.length > 0) {
 			setAgentId(AUTO_AGENT_ID);
-		} else if (realAgents.length === 1 && realAgents[0]) {
+		} else if (realAgents.length === 1 && !search.hasMore && realAgents[0]) {
 			setAgentId(realAgents[0].id);
 		}
-	}, [realAgents, agentId, jevEnabled]);
+	}, [realAgents, agentId, jevEnabled, browsing, search.hasMore]);
 
 	const disabled = options?.disabled;
+	const selectedName =
+		agentId === AUTO_AGENT_ID ? t("aiChat.autoAgent") : getAgent(agentId)?.name;
 	const pickerState = useMemo<AgentPickerState>(
 		() => ({
 			agents,
 			agentsLoading,
+			selectedName,
+			search: {
+				query: search.query,
+				onQueryChange: search.onQueryChange,
+				hasMore: search.hasMore,
+				isLoadingMore: search.isLoadingMore,
+				isError: search.isError,
+				onLoadMore: search.onLoadMore,
+			},
 			agentId,
 			onAgentChange: setAgentId,
 			disabled,
@@ -135,7 +163,20 @@ export function useAgentPicker(
 				search: { create: true },
 			},
 		}),
-		[agents, agentsLoading, agentId, disabled, projectId],
+		[
+			agents,
+			agentsLoading,
+			selectedName,
+			search.query,
+			search.onQueryChange,
+			search.hasMore,
+			search.isLoadingMore,
+			search.isError,
+			search.onLoadMore,
+			agentId,
+			disabled,
+			projectId,
+		],
 	);
 
 	return { agentId, setAgentId, agents, agentsLoading, pickerState };
@@ -154,34 +195,46 @@ export function useGlobalAgentPicker(options?: {
 	// own graceful nil-project fallback on the backend.
 	const jevEnabled = useJevEnabled(undefined);
 	const { hasPermission } = usePermissions();
-	const { data: realAgents = [], isLoading: agentsLoading } = useQuery({
-		...chattableAgentsQueryOptions,
-		enabled: options?.enabled ?? true,
-	});
+	const search = useAgentSearch(null, options?.enabled ?? true);
+	const getAgent = useAgentDirectory(null);
+	const realAgents = search.agents;
+	const agentsLoading = search.isLoading;
+	const browsing = search.query.trim() === "";
 	const agents = useMemo(
 		() =>
-			jevEnabled && realAgents.length > 0
+			jevEnabled && realAgents.length > 0 && browsing
 				? [{ id: AUTO_AGENT_ID, name: t("aiChat.autoAgent") }, ...realAgents]
 				: realAgents,
-		[realAgents, jevEnabled, t],
+		[realAgents, jevEnabled, browsing, t],
 	);
 	const [agentId, setAgentId] = useState("");
 
 	useEffect(() => {
-		if (agentId) return;
+		if (agentId || !browsing) return;
 		if (jevEnabled && realAgents.length > 0) {
 			setAgentId(AUTO_AGENT_ID);
-		} else if (realAgents.length === 1 && realAgents[0]) {
+		} else if (realAgents.length === 1 && !search.hasMore && realAgents[0]) {
 			setAgentId(realAgents[0].id);
 		}
-	}, [realAgents, agentId, jevEnabled]);
+	}, [realAgents, agentId, jevEnabled, browsing, search.hasMore]);
 
 	const disabled = options?.disabled;
-	const canCreate = hasPermission("agents.write");
+	const canCreate = hasPermission("agents:write");
+	const selectedName =
+		agentId === AUTO_AGENT_ID ? t("aiChat.autoAgent") : getAgent(agentId)?.name;
 	const pickerState = useMemo<AgentPickerState>(
 		() => ({
 			agents,
 			agentsLoading,
+			selectedName,
+			search: {
+				query: search.query,
+				onQueryChange: search.onQueryChange,
+				hasMore: search.hasMore,
+				isLoadingMore: search.isLoadingMore,
+				isError: search.isError,
+				onLoadMore: search.onLoadMore,
+			},
 			agentId,
 			onAgentChange: setAgentId,
 			disabled,
@@ -189,16 +242,34 @@ export function useGlobalAgentPicker(options?: {
 				? { to: "/admin/agents", search: { create: true } }
 				: null,
 		}),
-		[agents, agentsLoading, agentId, disabled, canCreate],
+		[
+			agents,
+			agentsLoading,
+			selectedName,
+			search.query,
+			search.onQueryChange,
+			search.hasMore,
+			search.isLoadingMore,
+			search.isError,
+			search.onLoadMore,
+			agentId,
+			disabled,
+			canCreate,
+		],
 	);
 
 	return { agentId, setAgentId, agents, agentsLoading, pickerState };
 }
 
 export function AgentPickerInline() {
-	const { t } = useTranslation("projects");
 	const picker = useContext(AgentPickerContext);
 	if (!picker) return null;
+	return <AgentPickerPopover picker={picker} />;
+}
+
+function AgentPickerPopover({ picker }: { picker: AgentPickerState }) {
+	const { t } = useTranslation("projects");
+	const [open, setOpen] = useState(false);
 	const {
 		agents,
 		agentsLoading,
@@ -206,12 +277,16 @@ export function AgentPickerInline() {
 		onAgentChange,
 		disabled,
 		emptyStateLink,
+		search,
+		selectedName,
 	} = picker;
 
 	if (agentsLoading) {
 		return <div className="h-7 w-32 animate-pulse rounded-full bg-muted" />;
 	}
-	if (agents.length === 0) {
+	// An empty list while searching just means no match — only an empty,
+	// unsearched list means the project has no agents at all.
+	if (agents.length === 0 && !search?.query.trim()) {
 		if (!emptyStateLink) {
 			return (
 				<span className="text-xs text-muted-foreground px-2">
@@ -233,27 +308,42 @@ export function AgentPickerInline() {
 		);
 	}
 
+	const triggerLabel =
+		agents.find((a) => a.id === agentId)?.name ?? selectedName;
+
 	return (
-		<Select
-			value={agentId}
-			onValueChange={(v) => v && onAgentChange(v)}
-			items={agents.map((a) => ({ value: a.id, label: a.name }))}
-			disabled={disabled}
-		>
-			<SelectTrigger
-				size="sm"
-				className="h-7 rounded-full border-none bg-transparent pl-2.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-100"
+		<Popover open={open} onOpenChange={setOpen}>
+			<PopoverTrigger
+				type="button"
+				disabled={disabled}
+				className="flex h-7 items-center gap-1 rounded-full border-none bg-transparent pl-2.5 pr-1.5 text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-100"
 			>
-				<SelectValue placeholder={t("aiChat.selectAgentPlaceholder")} />
-			</SelectTrigger>
-			<SelectContent align="start">
-				{agents.map((agent) => (
-					<SelectItem key={agent.id} value={agent.id}>
-						{agent.name}
-					</SelectItem>
-				))}
-			</SelectContent>
-		</Select>
+				<span className="max-w-40 truncate">
+					{triggerLabel ?? t("aiChat.selectAgentPlaceholder")}
+				</span>
+				<ChevronDown className="size-3.5 shrink-0 opacity-60" />
+			</PopoverTrigger>
+			<PopoverContent
+				align="start"
+				className="w-64 p-1 rounded-xl border border-border/40 shadow-lg"
+			>
+				<SearchableList
+					remote={search}
+					items={agents.map((a) => ({
+						key: a.id,
+						label: a.name,
+						selected: a.id === agentId,
+						onSelect: () => {
+							onAgentChange(a.id);
+							setOpen(false);
+						},
+						content: (
+							<span className="flex-1 truncate text-left">{a.name}</span>
+						),
+					}))}
+				/>
+			</PopoverContent>
+		</Popover>
 	);
 }
 
@@ -271,17 +361,17 @@ export function AgentPickerInline() {
 // environment_id/folder_id when they're actually set. See
 // docs/ai-agent/environment-management.md's Frontend section.
 
-const NO_ENVIRONMENT = "__none__";
-const CREATE_NEW_ENVIRONMENT = "__create_environment__";
-const CREATE_NEW_FOLDER = "__create_folder__";
-
 export interface EnvironmentPickerState {
 	projectId: string;
-	environments: Environment[];
+	/** Whether the project has any environment at all; the picker stays
+	 *  hidden when it has none. The options themselves are searched and paged
+	 *  on the server inside the popover. */
+	hasEnvironments: boolean;
 	environmentsLoading: boolean;
 	environmentId: string;
 	onEnvironmentChange: (id: string) => void;
-	folders: EnvironmentFolder[];
+	/** The selected environment, resolved by id. */
+	environment?: Environment;
 	folderId: string;
 	onFolderChange: (id: string) => void;
 	/** Applies to both the environment and folder pickers (e.g. a
@@ -312,28 +402,27 @@ export function useEnvironmentPicker(
 	options?: { disabled?: boolean; enabled?: boolean },
 ) {
 	const queryEnabled = (options?.enabled ?? true) && !!projectId;
-	const { data: allEnvironments = [], isLoading: environmentsLoading } =
-		useQuery({
-			...environmentsQueryOptions(projectId),
-			enabled: queryEnabled,
-		});
-	// Same reasoning as useAgentPicker's own filter: a restricted
-	// environment the caller has no grant for would just fail to attach
-	// with ENVIRONMENT_ACCESS_RESTRICTED, so it's left off this list
-	// rather than offered as a choice guaranteed to error.
-	const environments = useMemo(
-		() =>
-			allEnvironments.filter(
-				(e) => e.access_mode !== "restricted" || e.access_granted,
-			),
-		[allEnvironments],
-	);
+	// First page only — to know whether the project has any environment. The
+	// picker's popover searches and pages the full list itself.
+	const { data: firstPage, isLoading: environmentsLoading } = useInfiniteQuery({
+		...environmentsInfiniteQueryOptions(projectId),
+		enabled: queryEnabled,
+	});
+	const hasEnvironments = (firstPage?.pages[0]?.items.length ?? 0) > 0;
 	// Fetched only to read default_environment_id — this agent is typically
 	// already warm in the agent picker's own cache once chosen, so this is
 	// usually an instant cache hit rather than a new request.
 	const { data: agent } = useQuery({
 		...agentQueryOptions(projectId, agentId),
 		enabled: queryEnabled && !!agentId,
+	});
+
+	// The agent's default environment, resolved by id — null/missing when it
+	// was deleted after being set, so a dangling id is never selected.
+	const { data: defaultEnvironment } = useQuery({
+		...environmentQueryOptions(projectId, agent?.default_environment_id ?? ""),
+		enabled: queryEnabled && !!agent?.default_environment_id,
+		retry: false,
 	});
 
 	const [environmentId, setEnvironmentIdState] = useState("");
@@ -359,17 +448,37 @@ export function useEnvironmentPicker(
 	// startChatSession with nothing in the picker's own list to show for
 	// it.
 	useEffect(() => {
-		if (
-			!environmentId &&
-			agent?.default_environment_id &&
-			environments.some((e) => e.id === agent.default_environment_id)
-		) {
+		if (!environmentId && agent?.default_environment_id && defaultEnvironment) {
 			setEnvironmentIdState(agent.default_environment_id);
 		}
-	}, [agent?.default_environment_id, environments, environmentId]);
+	}, [agent?.default_environment_id, defaultEnvironment, environmentId]);
 
-	const selectedEnvironment = environments.find((e) => e.id === environmentId);
-	const folders = selectedEnvironment?.folders ?? [];
+	const { data: environment } = useQuery({
+		...environmentQueryOptions(projectId, environmentId),
+		enabled: queryEnabled && !!environmentId,
+	});
+	// First page of the selected environment's folders — enough to tell
+	// whether it has exactly one (auto-selected below).
+	const { data: folderPages } = useInfiniteQuery({
+		...environmentFoldersInfiniteQueryOptions(projectId, environmentId),
+		enabled: queryEnabled && !!environmentId,
+	});
+	const onlyFolder =
+		folderPages?.pages[0]?.total_count === 1
+			? folderPages.pages[0].items[0]
+			: undefined;
+	const { data: defaultFolder } = useQuery({
+		...environmentFolderQueryOptions(
+			projectId,
+			environmentId,
+			agent?.default_folder_id ?? "",
+		),
+		enabled:
+			queryEnabled &&
+			!!environmentId &&
+			environmentId === agent?.default_environment_id &&
+			!!agent?.default_folder_id,
+	});
 
 	// The agent's own default folder — only applies once environmentId has
 	// resolved to the agent's own default_environment_id (never a
@@ -385,7 +494,7 @@ export function useEnvironmentPicker(
 			environmentId &&
 			environmentId === agent?.default_environment_id &&
 			agent?.default_folder_id &&
-			folders.some((f) => f.id === agent.default_folder_id)
+			defaultFolder
 		) {
 			setFolderId(agent.default_folder_id);
 		}
@@ -393,7 +502,7 @@ export function useEnvironmentPicker(
 		agent?.default_environment_id,
 		agent?.default_folder_id,
 		environmentId,
-		folders,
+		defaultFolder,
 		folderId,
 	]);
 
@@ -402,10 +511,10 @@ export function useEnvironmentPicker(
 	// after the default-folder effect above so an agent's own default
 	// (when still valid) always wins over this weaker heuristic.
 	useEffect(() => {
-		if (!folderId && folders.length === 1 && folders[0]) {
-			setFolderId(folders[0].id);
+		if (!folderId && onlyFolder) {
+			setFolderId(onlyFolder.id);
 		}
-	}, [folders, folderId]);
+	}, [onlyFolder, folderId]);
 
 	const onEnvironmentChange = useCallback((id: string) => {
 		setEnvironmentIdState(id);
@@ -436,11 +545,11 @@ export function useEnvironmentPicker(
 	const pickerState = useMemo<EnvironmentPickerState>(
 		() => ({
 			projectId,
-			environments,
+			hasEnvironments,
 			environmentsLoading,
 			environmentId,
 			onEnvironmentChange,
-			folders,
+			environment,
 			folderId,
 			onFolderChange: setFolderId,
 			disabled,
@@ -449,11 +558,11 @@ export function useEnvironmentPicker(
 		}),
 		[
 			projectId,
-			environments,
+			hasEnvironments,
 			environmentsLoading,
 			environmentId,
 			onEnvironmentChange,
-			folders,
+			environment,
 			folderId,
 			disabled,
 			environmentDisabled,
@@ -461,8 +570,11 @@ export function useEnvironmentPicker(
 		],
 	);
 
-	return { environmentId, folderId, environments, pickerState };
+	return { environmentId, folderId, pickerState };
 }
+
+const PILL_TRIGGER =
+	"flex h-7 items-center gap-1 rounded-full border-none bg-transparent pl-2.5 pr-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-100";
 
 // EnvironmentPickerInline is the environment-only half — the folder half
 // lives in FolderPickerInline below. Both render side by side with
@@ -471,73 +583,85 @@ export function useEnvironmentPicker(
 // components rather than one combined picker so FolderPickerInline can
 // stay hidden until a real environment is actually selected.
 export function EnvironmentPickerInline() {
-	const { t } = useTranslation("projects");
 	const picker = useContext(EnvironmentPickerContext);
-	const [createOpen, setCreateOpen] = useState(false);
 	if (!picker) return null;
+	return <EnvironmentPickerBody picker={picker} />;
+}
+
+function EnvironmentPickerBody({ picker }: { picker: EnvironmentPickerState }) {
+	const { t } = useTranslation("projects");
+	const [open, setOpen] = useState(false);
+	const [createOpen, setCreateOpen] = useState(false);
 	const {
 		projectId,
-		environments,
+		hasEnvironments,
 		environmentsLoading,
 		environmentId,
 		onEnvironmentChange,
+		environment,
 		disabled,
 		environmentDisabled,
 		hidden,
 	} = picker;
+	const isDisabled = !!(disabled || environmentDisabled);
+	const search = useEnvironmentSearch(projectId, open && !isDisabled);
 
 	// Hidden outright for an ACP-type agent (see EnvironmentPickerState.hidden),
 	// or when this project hasn't created any static environments yet — either
 	// way, stay invisible rather than showing an empty/meaningless picker.
-	if (hidden || environmentsLoading || environments.length === 0) {
+	if (hidden || environmentsLoading || !hasEnvironments) {
 		return null;
 	}
 
 	return (
 		<>
-			<Select
-				value={environmentId || NO_ENVIRONMENT}
-				onValueChange={(v) => {
-					if (!v) return;
-					if (v === CREATE_NEW_ENVIRONMENT) {
-						setCreateOpen(true);
-						return;
-					}
-					onEnvironmentChange(v === NO_ENVIRONMENT ? "" : v);
-				}}
-				items={[
-					{ value: NO_ENVIRONMENT, label: t("environments.picker.temporary") },
-					...environments.map((env) => ({ value: env.id, label: env.name })),
-					{
-						value: CREATE_NEW_ENVIRONMENT,
-						label: t("environments.picker.createNew"),
-					},
-				]}
-				disabled={disabled || environmentDisabled}
+			<RemoteSelect
+				open={open}
+				onOpenChange={setOpen}
+				disabled={isDisabled}
+				triggerClassName={PILL_TRIGGER}
+				label={
+					environmentId ? environment?.name : t("environments.picker.temporary")
+				}
+				placeholder={t("environments.picker.temporary")}
 			>
-				<SelectTrigger
-					size="sm"
-					className="h-7 rounded-full border-none bg-transparent pl-2.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-100"
-				>
-					<SelectValue placeholder={t("environments.picker.temporary")} />
-				</SelectTrigger>
-				<SelectContent align="start">
-					<SelectItem value={NO_ENVIRONMENT}>
-						{t("environments.picker.temporary")}
-					</SelectItem>
-					<SelectSeparator />
-					{environments.map((env) => (
-						<SelectItem key={env.id} value={env.id}>
-							{env.name}
-						</SelectItem>
-					))}
-					<SelectSeparator />
-					<SelectItem value={CREATE_NEW_ENVIRONMENT}>
-						<Plus className="size-3.5" />
-						{t("environments.picker.createNew")}
-					</SelectItem>
-				</SelectContent>
-			</Select>
+				<SearchableList
+					remote={search}
+					pinned={
+						<>
+							<PinnedRow
+								onSelect={() => {
+									onEnvironmentChange("");
+									setOpen(false);
+								}}
+							>
+								{t("environments.picker.temporary")}
+							</PinnedRow>
+							<PinnedRow
+								onSelect={() => {
+									setOpen(false);
+									setCreateOpen(true);
+								}}
+							>
+								<Plus className="size-3.5" />
+								{t("environments.picker.createNew")}
+							</PinnedRow>
+						</>
+					}
+					items={search.environments.map((env) => ({
+						key: env.id,
+						label: env.name,
+						selected: env.id === environmentId,
+						onSelect: () => {
+							onEnvironmentChange(env.id);
+							setOpen(false);
+						},
+						content: (
+							<span className="flex-1 truncate text-left">{env.name}</span>
+						),
+					}))}
+				/>
+			</RemoteSelect>
 			<EnvironmentCreateDialog
 				projectId={projectId}
 				open={createOpen}
@@ -553,74 +677,73 @@ export function EnvironmentPickerInline() {
 // new-conversation-thread.tsx's ComposerStartRow). Only meaningful once a
 // real (non-temporary) environment is selected.
 export function FolderPickerInline() {
-	const { t } = useTranslation("projects");
 	const picker = useContext(EnvironmentPickerContext);
-	const [createOpen, setCreateOpen] = useState(false);
-	if (!picker) return null;
-	const {
-		projectId,
-		environments,
-		environmentId,
-		folders,
-		folderId,
-		onFolderChange,
-		disabled,
-		hidden,
-	} = picker;
+	if (!picker || picker.hidden || !picker.environmentId || !picker.environment)
+		return null;
+	return <FolderPickerBody picker={picker} environment={picker.environment} />;
+}
 
-	if (hidden || !environmentId) return null;
-	const selectedEnvironment = environments.find((e) => e.id === environmentId);
-	if (!selectedEnvironment) return null;
+function FolderPickerBody({
+	picker,
+	environment,
+}: {
+	picker: EnvironmentPickerState;
+	environment: Environment;
+}) {
+	const { t } = useTranslation("projects");
+	const [open, setOpen] = useState(false);
+	const [createOpen, setCreateOpen] = useState(false);
+	const { projectId, folderId, onFolderChange, disabled } = picker;
+	const search = useEnvironmentFolderSearch(
+		projectId,
+		environment.id,
+		open && !disabled,
+	);
+	const path = useFolderPath(projectId, environment.id, folderId);
 
 	return (
 		<>
-			<Select
-				value={folderId}
-				onValueChange={(v) => {
-					if (!v) return;
-					if (v === CREATE_NEW_FOLDER) {
-						setCreateOpen(true);
-						return;
-					}
-					onFolderChange(v);
-				}}
-				items={[
-					...folders.map((folder) => ({
-						value: folder.id,
-						label: folder.path,
-					})),
-					{
-						value: CREATE_NEW_FOLDER,
-						label: t("environments.picker.folderCreateNew"),
-					},
-				]}
+			<RemoteSelect
+				open={open}
+				onOpenChange={setOpen}
 				disabled={disabled}
+				triggerClassName={PILL_TRIGGER}
+				label={folderId ? path : undefined}
+				placeholder={t("environments.picker.folderPlaceholder")}
 			>
-				<SelectTrigger
-					size="sm"
-					className="h-7 rounded-full border-none bg-transparent pl-2.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-100"
-				>
-					<SelectValue
-						placeholder={t("environments.picker.folderPlaceholder")}
-					/>
-				</SelectTrigger>
-				<SelectContent align="start">
-					{folders.map((folder) => (
-						<SelectItem key={folder.id} value={folder.id}>
-							{folder.path}
-						</SelectItem>
-					))}
-					{folders.length > 0 && <SelectSeparator />}
-					<SelectItem value={CREATE_NEW_FOLDER}>
-						<Plus className="size-3.5" />
-						{t("environments.picker.folderCreateNew")}
-					</SelectItem>
-				</SelectContent>
-			</Select>
+				<SearchableList
+					remote={search}
+					pinned={
+						<PinnedRow
+							onSelect={() => {
+								setOpen(false);
+								setCreateOpen(true);
+							}}
+						>
+							<Plus className="size-3.5" />
+							{t("environments.picker.folderCreateNew")}
+						</PinnedRow>
+					}
+					items={search.folders.map((folder) => ({
+						key: folder.id,
+						label: folder.path,
+						selected: folder.id === folderId,
+						onSelect: () => {
+							onFolderChange(folder.id);
+							setOpen(false);
+						},
+						content: (
+							<span className="flex-1 truncate text-left font-mono text-xs">
+								{folder.path}
+							</span>
+						),
+					}))}
+				/>
+			</RemoteSelect>
 			<FolderCreateDialog
 				projectId={projectId}
-				environmentId={environmentId}
-				environmentStatus={selectedEnvironment.status}
+				environmentId={environment.id}
+				environmentStatus={environment.status}
 				open={createOpen}
 				onOpenChange={setCreateOpen}
 				onCreated={(folder) => onFolderChange(folder.id)}

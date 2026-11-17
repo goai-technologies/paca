@@ -26,7 +26,6 @@ type Settings struct {
 	// floating one, so there is no hardcoded default here.
 	AgentServerImage string
 
-	PacaAPIKey     string
 	PacaAPIURL     string
 	PacaGatewayURL string
 
@@ -182,7 +181,6 @@ func Load() (Settings, error) {
 		ValkeyURL:                       os.Getenv("VALKEY_URL"),
 		EncryptionKey:                   os.Getenv("ENCRYPTION_KEY"),
 		AgentServerImage:                os.Getenv("AGENT_SERVER_IMAGE"),
-		PacaAPIKey:                      os.Getenv("PACA_API_KEY"),
 		PacaAPIURL:                      os.Getenv("PACA_API_URL"),
 		PacaGatewayURL:                  os.Getenv("PACA_GATEWAY_URL"),
 		PortPoolStart:                   envInt("PORT_POOL_START", 10000),

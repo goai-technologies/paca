@@ -71,6 +71,22 @@ func (r *fakeSprintRepo) UpdateSprint(_ context.Context, s *sprintdom.Sprint) er
 	return nil
 }
 
+func (r *fakeSprintRepo) UpdateSprintAtomic(ctx context.Context, id uuid.UUID, decide func(*sprintdom.Sprint) error) (*sprintdom.Sprint, error) {
+	cur, err := r.FindSprintByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	cp := *cur
+	if err := decide(&cp); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := cp
+	r.sprints[id] = &st
+	return &cp, nil
+}
+
 func (r *fakeSprintRepo) DeleteSprint(_ context.Context, id uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -135,6 +151,10 @@ func (r *fakeTaskRepo) UpdateTask(_ context.Context, t *taskdom.Task) error {
 	r.tasks[t.ID] = &cp
 	return nil
 }
+func (r *fakeTaskRepo) UpdateTaskFields(ctx context.Context, t *taskdom.Task, _ []taskdom.TaskField, _ map[string]any) error {
+	return r.UpdateTask(ctx, t)
+}
+
 func (r *fakeTaskRepo) UpdateTaskAtomic(_ context.Context, id uuid.UUID, decide func(current *taskdom.Task) (*taskdom.Task, error)) (*taskdom.Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -733,3 +753,11 @@ func TestCompleteSprint_MoveToSprintWrongProject_ReturnsNotFound(t *testing.T) {
 		t.Error("source sprint must not be completed when the destination sprint check fails")
 	}
 }
+
+func (r *fakeTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
+	return nil, nil
+}
+
+func (r *fakeTaskRepo) ProjectIsLive(context.Context, uuid.UUID) (bool, error) { return true, nil }
+
+func (r *fakeTaskRepo) CountTasksOfType(context.Context, uuid.UUID) (int, error) { return 0, nil }

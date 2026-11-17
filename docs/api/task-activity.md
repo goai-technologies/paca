@@ -110,8 +110,8 @@ Tracked fields: `title`, `status_id`, `assignee_id`, `reporter_id`,
 ## API Endpoints
 
 All endpoints are under `/api/v1/projects/:projectId/tasks/:taskId`.
-Authentication is required. Project `tasks.read` permission is required for
-reading; `tasks.write` is required for posting/editing/deleting comments.
+Authentication is required. Project `tasks:read` permission is required for
+reading; `tasks:write` is required for posting/editing/deleting comments.
 
 ### List Activities
 
@@ -119,8 +119,11 @@ reading; `tasks.write` is required for posting/editing/deleting comments.
 GET /api/v1/projects/:projectId/tasks/:taskId/activities
 ```
 
-Returns all activities and comments for a task, sorted oldest → newest.
-Soft-deleted comments are excluded.
+Returns one page of a task's activities and comments, **newest first**.
+Soft-deleted comments are excluded. Query: `page_size` (1-100, default 30) and
+`cursor` (the previous page's `next_cursor`; omit for the newest page). The
+response carries `next_cursor` (null on the last page) — follow it to read older
+entries.
 
 **Response:**
 ```json
@@ -139,7 +142,8 @@ Soft-deleted comments are excluded.
         "created_at": "2026-04-01T10:00:00Z",
         "updated_at": "2026-04-01T10:00:00Z"
       }
-    ]
+    ],
+    "next_cursor": "opaque-or-null"
   }
 }
 ```
@@ -264,7 +268,7 @@ Service methods read it with `middleware.ActorIDFromContext(ctx)`.
 
 | Action              | Required permission      |
 |---------------------|--------------------------|
-| List activities     | `tasks.read` (project)   |
-| Post comment        | `tasks.write` (project)  |
-| Edit own comment    | `tasks.write` (project)  |
-| Delete own comment  | `tasks.write` (project)  |
+| List activities     | `tasks:read` (project)   |
+| Post comment        | `tasks:write` (project)  |
+| Edit own comment    | `tasks:write` (project)  |
+| Delete own comment  | `tasks:write` (project)  |

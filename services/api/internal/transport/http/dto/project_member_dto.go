@@ -9,24 +9,27 @@ import (
 // --- Project Member DTOs ----------------------------------------------------
 
 // AddProjectMemberRequest is the body for POST /v1/projects/:projectId/members.
-// Exactly one of UserID/AgentID must be set: UserID adds a human member;
-// AgentID invites an existing global agent into the project — the same
-// action, just for an agent instead of a human.
+// Exactly one of UserID/AgentID/ServiceAccountID must be set: UserID adds a
+// human member; AgentID invites an existing global agent and ServiceAccountID
+// an existing service account into the project — the same action, just for
+// another kind of account.
 type AddProjectMemberRequest struct {
-	UserID        uuid.UUID  `json:"user_id,omitempty"`
-	AgentID       *uuid.UUID `json:"agent_id,omitempty"`
-	ProjectRoleID uuid.UUID  `json:"project_role_id" binding:"required"`
+	UserID           uuid.UUID  `json:"user_id,omitempty"`
+	AgentID          *uuid.UUID `json:"agent_id,omitempty"`
+	ServiceAccountID *uuid.UUID `json:"service_account_id,omitempty"`
+	// RoleIDs are the roles the new member holds in the project: platform
+	// roles and the project's own roles. At least one is required.
+	RoleIDs []uuid.UUID `json:"role_ids"`
 	// Description is the human member's Jev-facing description — see
 	// projectdom.ProjectMember.Description. Ignored when inviting an agent,
 	// whose description lives on the agent itself.
 	Description string `json:"description,omitempty"`
 }
 
-// UpdateProjectMemberRoleRequest is the body for PATCH /v1/projects/:projectId/members/:memberId.
-// At least one of ProjectRoleID/Description must be set; either can be
-// changed independently of the other.
-type UpdateProjectMemberRoleRequest struct {
-	ProjectRoleID *uuid.UUID `json:"project_role_id"`
+// UpdateProjectMemberRequest is the body for PATCH /v1/projects/:projectId/members/:memberId.
+// It edits the member's description; a member's roles are replaced with
+// PUT /v1/projects/:projectId/members/:memberId/roles.
+type UpdateProjectMemberRequest struct {
 	// Description is only meaningful for a human member — see
 	// projectdom.ProjectMember.Description.
 	Description *string `json:"description"`
@@ -34,17 +37,20 @@ type UpdateProjectMemberRoleRequest struct {
 
 // ProjectMemberResponse is the public representation of a project membership.
 type ProjectMemberResponse struct {
-	ID            uuid.UUID  `json:"id"`
-	ProjectID     uuid.UUID  `json:"project_id"`
-	UserID        uuid.UUID  `json:"user_id"`
-	ProjectRoleID uuid.UUID  `json:"project_role_id"`
-	Username      string     `json:"username"`
-	FullName      string     `json:"full_name"`
-	RoleName      string     `json:"role_name"`
-	MemberType    string     `json:"member_type"`
-	AgentID       *uuid.UUID `json:"agent_id,omitempty"`
-	AgentName     string     `json:"agent_name,omitempty"`
-	AgentHandle   string     `json:"agent_handle,omitempty"`
+	ID        uuid.UUID `json:"id"`
+	ProjectID uuid.UUID `json:"project_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Username  string    `json:"username"`
+	FullName  string    `json:"full_name"`
+	// Roles are the roles the member holds in the project, sorted by name.
+	Roles      []RoleSummaryResponse `json:"roles"`
+	MemberType string                `json:"member_type"`
+	AgentID    *uuid.UUID            `json:"agent_id,omitempty"`
+	// ServiceAccountID is the member's account when MemberType is
+	// "service_account".
+	ServiceAccountID *uuid.UUID `json:"service_account_id,omitempty"`
+	AgentName        string     `json:"agent_name,omitempty"`
+	AgentHandle      string     `json:"agent_handle,omitempty"`
 	// AvatarURL/AvatarThumbURL are presigned GET URLs for whichever of
 	// user/agent backs this member, populated by the handler (not this
 	// mapper) via attachmentdom.AvatarService — nil when no avatar has been
@@ -57,6 +63,7 @@ type ProjectMemberResponse struct {
 	AgentType        string  `json:"agent_type,omitempty"`
 	AgentLLMProvider string  `json:"agent_llm_provider,omitempty"`
 	AgentACPProvider *string `json:"agent_acp_provider,omitempty"`
+	AgentCLIProvider *string `json:"agent_cli_provider,omitempty"`
 	// Description is only meaningful for a human member — see
 	// projectdom.ProjectMember.Description.
 	Description string `json:"description"`
@@ -65,20 +72,24 @@ type ProjectMemberResponse struct {
 // ProjectMemberFromEntity maps a domain ProjectMember to a ProjectMemberResponse DTO.
 func ProjectMemberFromEntity(m *projectdom.ProjectMember) ProjectMemberResponse {
 	resp := ProjectMemberResponse{
-		ID:            m.ID,
-		ProjectID:     m.ProjectID,
-		UserID:        m.UserID,
-		ProjectRoleID: m.ProjectRoleID,
-		RoleName:      m.RoleName,
-		MemberType:    m.MemberType,
-		AgentID:       m.AgentID,
-		AgentName:     m.AgentName,
-		AgentHandle:   m.AgentHandle,
+		ID:          m.ID,
+		ProjectID:   m.ProjectID,
+		UserID:      m.UserID,
+		Roles:       RoleSummariesFromEntities(m.Roles),
+		MemberType:  m.MemberType,
+		AgentID:     m.AgentID,
+		AgentName:   m.AgentName,
+		AgentHandle: m.AgentHandle,
 
 		AgentType:        m.AgentType,
 		AgentLLMProvider: m.AgentLLMProvider,
 		AgentACPProvider: m.AgentACPProvider,
+		AgentCLIProvider: m.AgentCLIProvider,
 		Description:      m.Description,
+	}
+	if m.MemberType == "service_account" {
+		id := m.AccountID
+		resp.ServiceAccountID = &id
 	}
 	if m.IsAgent() {
 		// For agent members, populate username/full_name from agent fields so

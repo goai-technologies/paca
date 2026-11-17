@@ -29,12 +29,6 @@ export class PacaAPIAnnotationClient {
 			"Content-Type": "application/json",
 			"X-API-Key": this.config.apiKey,
 		};
-		if (this.config.agentId) {
-			headers["X-Agent-ID"] = this.config.agentId;
-		}
-		if (this.config.agentId && this.config.actorUserId) {
-			headers["X-Actor-User-ID"] = this.config.actorUserId;
-		}
 
 		const response = await fetch(url, { method, headers });
 

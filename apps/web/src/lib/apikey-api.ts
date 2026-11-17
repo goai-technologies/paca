@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions } from "@tanstack/react-query";
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
 
@@ -21,11 +21,22 @@ export interface CreateAPIKeyResponse extends APIKey {
 	key: string;
 }
 
-export async function listAPIKeys(): Promise<APIKey[]> {
-	const { data } =
-		await apiClient.instance.get<SuccessEnvelope<APIKey[]>>(
-			"/users/me/api-keys",
-		);
+export const API_KEYS_PAGE_SIZE = 30;
+
+/** One page of an account's active API keys, newest first. */
+export interface APIKeyPage {
+	items: APIKey[];
+	page_size: number;
+	next_cursor: string | null;
+	/** All of the account's active keys, not just this page. */
+	total_count: number;
+}
+
+export async function listAPIKeys(cursor?: string): Promise<APIKeyPage> {
+	const { data } = await apiClient.instance.get<SuccessEnvelope<APIKeyPage>>(
+		"/users/me/api-keys",
+		{ params: { page_size: API_KEYS_PAGE_SIZE, cursor } },
+	);
 	return data.data;
 }
 
@@ -42,7 +53,10 @@ export async function revokeAPIKey(id: string): Promise<void> {
 	await apiClient.instance.delete(`/users/me/api-keys/${id}`);
 }
 
-export const apiKeysQueryOptions = queryOptions({
+export const apiKeysInfiniteQueryOptions = infiniteQueryOptions({
 	queryKey: ["api-keys"],
-	queryFn: listAPIKeys,
+	queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+		listAPIKeys(pageParam),
+	initialPageParam: undefined as string | undefined,
+	getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 });

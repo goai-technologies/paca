@@ -17,7 +17,7 @@ import (
 func apiKeyUserLogin(t *testing.T, env *e2eEnv, username, password string) (*http.Client, string) {
 	t.Helper()
 	seedUser(t, env, username, password, "API Key User")
-	assignGlobalRolesByName(t, env, username, "USER")
+	assignPlatformRole(t, env, username, "USER")
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar, Timeout: 30 * time.Second}
 	resp := login(env.ctx, t, client, env.base, username, password)
@@ -67,7 +67,8 @@ func TestE2EAPIKey_CRUD(t *testing.T) {
 		assertStatus(t, resp, http.StatusOK)
 		var env2 envelope
 		decodeJSON(t, resp, &env2)
-		items, _ := env2.Data.([]any)
+		page, _ := env2.Data.(map[string]any)
+		items, _ := page["items"].([]any)
 		if len(items) != 0 {
 			t.Errorf("expected 0 API keys initially, got %d", len(items))
 		}
@@ -105,7 +106,8 @@ func TestE2EAPIKey_CRUD(t *testing.T) {
 		assertStatus(t, resp, http.StatusOK)
 		var env2 envelope
 		decodeJSON(t, resp, &env2)
-		items, _ := env2.Data.([]any)
+		page, _ := env2.Data.(map[string]any)
+		items, _ := page["items"].([]any)
 		if len(items) != 1 {
 			t.Errorf("expected 1 API key after create, got %d", len(items))
 		}
@@ -135,7 +137,8 @@ func TestE2EAPIKey_CRUD(t *testing.T) {
 		assertStatus(t, resp, http.StatusOK)
 		var env2 envelope
 		decodeJSON(t, resp, &env2)
-		items, _ := env2.Data.([]any)
+		page, _ := env2.Data.(map[string]any)
+		items, _ := page["items"].([]any)
 		if len(items) != 0 {
 			t.Errorf("expected 0 API keys after revoke, got %d", len(items))
 		}
@@ -275,7 +278,8 @@ func TestE2EAPIKey_Authorization(t *testing.T) {
 		assertStatus(t, resp, http.StatusOK)
 		var env2 envelope
 		decodeJSON(t, resp, &env2)
-		items, _ := env2.Data.([]any)
+		page, _ := env2.Data.(map[string]any)
+		items, _ := page["items"].([]any)
 		if len(items) != 0 {
 			t.Errorf("other user should see 0 keys, got %d", len(items))
 		}
@@ -304,7 +308,8 @@ func TestE2EAPIKey_MultipleKeys(t *testing.T) {
 
 	var env2 envelope
 	decodeJSON(t, resp, &env2)
-	items, _ := env2.Data.([]any)
+	page, _ := env2.Data.(map[string]any)
+	items, _ := page["items"].([]any)
 	if len(items) != len(names) {
 		t.Errorf("expected %d keys, got %d", len(names), len(items))
 	}

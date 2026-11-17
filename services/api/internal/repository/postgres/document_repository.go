@@ -198,8 +198,8 @@ func snapshotFromRecord(r docSnapshotRecord) *docdom.DocSnapshot {
 
 const docFolderCols = `id, project_id, parent_id, name, position, created_by, created_at, updated_at`
 
-// ListFolders returns all folders for a project.
-func (r *DocumentRepository) ListFolders(_ context.Context, projectID uuid.UUID) ([]*docdom.DocFolder, error) {
+// ListAllFolders returns all folders for a project.
+func (r *DocumentRepository) ListAllFolders(_ context.Context, projectID uuid.UUID) ([]*docdom.DocFolder, error) {
 	var records []docFolderRecord
 	if err := r.db.Select(&records, `SELECT `+docFolderCols+` FROM doc_folders WHERE project_id = $1 ORDER BY position ASC, name ASC`, projectID.String()); err != nil {
 		return nil, err
@@ -209,6 +209,78 @@ func (r *DocumentRepository) ListFolders(_ context.Context, projectID uuid.UUID)
 		out = append(out, folderFromRecord(rec))
 	}
 	return out, nil
+}
+
+// ListFolders returns one cursor-paginated level of the folder tree,
+// ordered position, name, id.
+func (r *DocumentRepository) ListFolders(ctx context.Context, projectID uuid.UUID, parentID *uuid.UUID, cursorAfter *string, limit int) ([]*docdom.DocFolder, bool, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	args := []any{projectID.String()}
+	where := `project_id = $1`
+	if parentID == nil {
+		where += ` AND parent_id IS NULL`
+	} else {
+		args = append(args, parentID.String())
+		where += fmt.Sprintf(` AND parent_id = $%d`, len(args))
+	}
+	if cursorAfter != nil {
+		cur, err := docdom.DecodeTreeCursor(*cursorAfter)
+		if err != nil {
+			return nil, false, err
+		}
+		args = append(args, cur.Position, cur.Name, cur.ID)
+		where += fmt.Sprintf(` AND (position, name, id) > ($%d, $%d, $%d)`, len(args)-2, len(args)-1, len(args))
+	}
+	args = append(args, limit+1)
+	var records []docFolderRecord
+	if err := r.db.SelectContext(ctx, &records, `SELECT `+docFolderCols+` FROM doc_folders WHERE `+where+
+		fmt.Sprintf(` ORDER BY position ASC, name ASC, id ASC LIMIT $%d`, len(args)), args...); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(records) > limit
+	if hasMore {
+		records = records[:limit]
+	}
+	out := make([]*docdom.DocFolder, 0, len(records))
+	for _, rec := range records {
+		out = append(out, folderFromRecord(rec))
+	}
+	return out, hasMore, nil
+}
+
+// FolderPath returns the folders from the root down to folderID, inclusive.
+func (r *DocumentRepository) FolderPath(ctx context.Context, projectID, folderID uuid.UUID) ([]*docdom.DocFolder, error) {
+	var records []docFolderRecord
+	if err := r.db.SelectContext(ctx, &records, `
+		WITH RECURSIVE chain AS (
+			SELECT `+docFolderCols+`, 1 AS depth FROM doc_folders WHERE id = $1 AND project_id = $2
+			UNION ALL
+			SELECT `+qualifiedDocFolderCols("f")+`, c.depth + 1
+			FROM doc_folders f JOIN chain c ON f.id = c.parent_id
+			WHERE f.project_id = $2
+		)
+		SELECT `+docFolderCols+` FROM chain ORDER BY depth DESC`, folderID.String(), projectID.String()); err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, docdom.ErrFolderNotFound
+	}
+	out := make([]*docdom.DocFolder, 0, len(records))
+	for _, rec := range records {
+		out = append(out, folderFromRecord(rec))
+	}
+	return out, nil
+}
+
+// qualifiedDocFolderCols prefixes docFolderCols with a table alias.
+func qualifiedDocFolderCols(alias string) string {
+	cols := strings.Split(docFolderCols, ",")
+	for i, c := range cols {
+		cols[i] = alias + "." + strings.TrimSpace(c)
+	}
+	return strings.Join(cols, ", ")
 }
 
 // FindFolderByID returns a single folder.
@@ -234,15 +306,59 @@ func (r *DocumentRepository) CreateFolder(ctx context.Context, f *docdom.DocFold
 	return err
 }
 
-// UpdateFolder persists mutable changes to a folder.
-func (r *DocumentRepository) UpdateFolder(ctx context.Context, f *docdom.DocFolder) error {
-	rec := folderToRecord(f)
-	_, err := r.db.ExecContext(ctx, `
-		UPDATE doc_folders SET project_id=$1, parent_id=$2, name=$3, position=$4, created_by=$5, updated_at=$6
-		WHERE id=$7`,
-		rec.ProjectID, rec.ParentID, rec.Name, rec.Position, rec.CreatedBy, rec.UpdatedAt, rec.ID,
-	)
-	return err
+// UpdateFolderAtomic implements docdom.DocFolderRepository — see its doc
+// comment. A per-project advisory lock serializes folder updates so two
+// concurrent moves can't each pass a cycle check against the other's old
+// parent; the row lock then guards the read-modify-write itself.
+func (r *DocumentRepository) UpdateFolderAtomic(ctx context.Context, id uuid.UUID, decide func(current *docdom.DocFolder, find func(id uuid.UUID) (*docdom.DocFolder, error)) error) (*docdom.DocFolder, error) {
+	var result *docdom.DocFolder
+	err := WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		var projectID string
+		if err := tx.GetContext(ctx, &projectID, `SELECT project_id FROM doc_folders WHERE id = $1`, id.String()); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return docdom.ErrFolderNotFound
+			}
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('doc_folders:' || $1::text, 0))`, projectID); err != nil {
+			return err
+		}
+		var rec docFolderRecord
+		if err := tx.GetContext(ctx, &rec, `SELECT `+docFolderCols+` FROM doc_folders WHERE id = $1 FOR UPDATE`, id.String()); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return docdom.ErrFolderNotFound
+			}
+			return err
+		}
+		current := folderFromRecord(rec)
+		find := func(fid uuid.UUID) (*docdom.DocFolder, error) {
+			var fr docFolderRecord
+			if err := tx.GetContext(ctx, &fr, `SELECT `+docFolderCols+` FROM doc_folders WHERE id = $1`, fid.String()); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, docdom.ErrFolderNotFound
+				}
+				return nil, err
+			}
+			return folderFromRecord(fr), nil
+		}
+		if err := decide(current, find); err != nil {
+			return err
+		}
+		out := folderToRecord(current)
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE doc_folders SET parent_id=$1, name=$2, position=$3, updated_at=$4
+			WHERE id=$5`,
+			out.ParentID, out.Name, out.Position, out.UpdatedAt, out.ID,
+		); err != nil {
+			return err
+		}
+		result = current
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // DeleteFolder permanently deletes a folder.
@@ -257,55 +373,119 @@ func (r *DocumentRepository) DeleteFolder(ctx context.Context, id uuid.UUID) err
 
 const documentCols = `id, project_id, folder_id, title, content, position, created_by, updated_by, created_at, updated_at, deleted_at`
 
-// ListDocuments returns non-deleted documents for a project, optionally
-// filtered to a folder and/or a case-insensitive title search, and
-// optionally keyset-paginated — see docdom.Repository.ListDocuments's doc
-// comment for the limit/cursor/hasMore contract and why pagination mode
-// sorts title ASC, id ASC instead of the tree's position ASC, title ASC.
-func (r *DocumentRepository) ListDocuments(ctx context.Context, projectID uuid.UUID, folderID *uuid.UUID, search *string, cursor *string, limit *int) ([]*docdom.Document, bool, error) {
-	query := `SELECT ` + documentCols + ` FROM documents WHERE project_id = $1 AND deleted_at IS NULL`
-	args := []any{projectID.String()}
-	if folderID != nil {
-		args = append(args, folderID.String())
-		query += fmt.Sprintf(" AND folder_id = $%d", len(args))
-	}
-	if search != nil {
-		if q := strings.TrimSpace(*search); q != "" {
-			args = append(args, "%"+escapeLikePattern(q)+"%")
-			query += fmt.Sprintf(" AND title ILIKE $%d", len(args))
-		}
-	}
+// documentTreeCols is documentCols without the (potentially large) body.
+const documentTreeCols = `id, project_id, folder_id, title, position, created_by, updated_by, created_at, updated_at, deleted_at`
 
-	paginating := limit != nil
-	if paginating {
-		if cursor != nil {
-			if cur, ok := docdom.DecodeDocumentCursor(*cursor); ok {
-				args = append(args, cur.Title, cur.ID)
-				query += fmt.Sprintf(" AND (title, id) > ($%d, $%d)", len(args)-1, len(args))
-			}
-		}
-		query += " ORDER BY title ASC, id ASC"
-		args = append(args, *limit+1)
-		query += fmt.Sprintf(" LIMIT $%d", len(args))
-	} else {
-		query += " ORDER BY position ASC, title ASC"
+// ListDocuments returns one cursor-paginated page of a project's documents in
+// manual order (position, title, id), without their bodies. filter narrows by
+// folder and title. The caller's IAM scope narrows the query itself, ahead of
+// the cursor and LIMIT, so every page is a full page of allowed documents.
+func (r *DocumentRepository) ListDocuments(ctx context.Context, projectID uuid.UUID, filter docdom.DocumentFilter, cursorAfter *string, limit int) ([]*docdom.Document, bool, error) {
+	if limit <= 0 {
+		limit = 50
 	}
+	query := `SELECT ` + documentTreeCols + ` FROM documents WHERE project_id = $1 AND deleted_at IS NULL`
+	args := []any{projectID.String()}
+	switch {
+	case filter.FolderID != nil:
+		args = append(args, filter.FolderID.String())
+		query += fmt.Sprintf(` AND folder_id = $%d`, len(args))
+	case filter.RootOnly:
+		query += ` AND folder_id IS NULL`
+	}
+	sink := &argList{args: args}
+	clause, none, err := scopeSQL(ctx, "doc", docScopeColumns, sink)
+	if err != nil {
+		return nil, false, err
+	}
+	if none {
+		return []*docdom.Document{}, false, nil
+	}
+	if clause != "" {
+		query += " AND " + clause
+	}
+	args = sink.args
+	if q := strings.TrimSpace(filter.Search); q != "" {
+		args = append(args, "%"+escapeLikePattern(q)+"%")
+		query += fmt.Sprintf(" AND title ILIKE $%d", len(args))
+	}
+	if cursorAfter != nil {
+		cur, err := docdom.DecodeTreeCursor(*cursorAfter)
+		if err != nil {
+			return nil, false, err
+		}
+		args = append(args, cur.Position, cur.Name, cur.ID)
+		query += fmt.Sprintf(` AND (position, title, id) > ($%d, $%d, $%d)`, len(args)-2, len(args)-1, len(args))
+	}
+	args = append(args, limit+1)
+	query += fmt.Sprintf(` ORDER BY position ASC, title ASC, id ASC LIMIT $%d`, len(args))
 
 	var records []documentRecord
 	if err := r.db.SelectContext(ctx, &records, query, args...); err != nil {
 		return nil, false, err
 	}
-
-	hasMore := false
-	if paginating && len(records) > *limit {
-		hasMore = true
-		records = records[:*limit]
+	hasMore := len(records) > limit
+	if hasMore {
+		records = records[:limit]
 	}
 	out := make([]*docdom.Document, 0, len(records))
 	for _, rec := range records {
 		out = append(out, documentFromRecord(rec))
 	}
 	return out, hasMore, nil
+}
+
+// ListAllDocuments returns every non-deleted document of a project with its
+// body, in manual order — for whole-project jobs (export), not the API.
+func (r *DocumentRepository) ListAllDocuments(ctx context.Context, projectID uuid.UUID) ([]*docdom.Document, error) {
+	var records []documentRecord
+	if err := r.db.SelectContext(ctx, &records,
+		`SELECT `+documentCols+` FROM documents WHERE project_id = $1 AND deleted_at IS NULL ORDER BY position ASC, title ASC, id ASC`,
+		projectID.String()); err != nil {
+		return nil, err
+	}
+	out := make([]*docdom.Document, 0, len(records))
+	for _, rec := range records {
+		out = append(out, documentFromRecord(rec))
+	}
+	return out, nil
+}
+
+// SearchDocuments matches query (literally, case-insensitively) against the
+// title or any inline "text" node inside the BlockNote JSON content. The
+// jsonpath walk restricts body matching to visible text so structural keys
+// like "type":"paragraph" never match.
+func (r *DocumentRepository) SearchDocuments(ctx context.Context, projectID uuid.UUID, query string, limit int) ([]*docdom.Document, error) {
+	pattern := "%" + escapeLikePattern(strings.TrimSpace(query)) + "%"
+	sink := &argList{args: []any{projectID.String(), pattern}}
+	clause, none, err := scopeSQL(ctx, "doc", docScopeColumns, sink)
+	if err != nil {
+		return nil, err
+	}
+	if none {
+		return []*docdom.Document{}, nil
+	}
+	scopeAnd := ""
+	if clause != "" {
+		scopeAnd = " AND " + clause
+	}
+	limitP := sink.addArg(limit)
+	var records []documentRecord
+	err = r.db.SelectContext(ctx, &records, `SELECT `+documentCols+` FROM documents
+		WHERE project_id = $1 AND deleted_at IS NULL
+		  AND (title ILIKE $2 OR EXISTS (
+		        SELECT 1 FROM jsonb_path_query(COALESCE(content, 'null'::jsonb), 'lax $.**.text') AS t
+		        WHERE jsonb_typeof(t) = 'string' AND (t #>> '{}') ILIKE $2))`+scopeAnd+`
+		ORDER BY updated_at DESC, id ASC
+		LIMIT `+limitP, sink.args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*docdom.Document, 0, len(records))
+	for _, rec := range records {
+		out = append(out, documentFromRecord(rec))
+	}
+	return out, nil
 }
 
 // FindDocumentByID returns a single non-deleted document.
@@ -320,6 +500,22 @@ func (r *DocumentRepository) FindDocumentByID(_ context.Context, id uuid.UUID) (
 	return documentFromRecord(rec), nil
 }
 
+// FindDocumentTitleByID returns only the title of a non-deleted document — a
+// cheaper read than FindDocumentByID (which pulls the full row, including the
+// content) for callers that need just the title, e.g. building a notification
+// event payload. Returns ErrDocNotFound when the document doesn't exist or is
+// deleted.
+func (r *DocumentRepository) FindDocumentTitleByID(_ context.Context, id uuid.UUID) (string, error) {
+	var title string
+	if err := r.db.Get(&title, `SELECT title FROM documents WHERE id = $1 AND deleted_at IS NULL`, id.String()); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", docdom.ErrDocNotFound
+		}
+		return "", err
+	}
+	return title, nil
+}
+
 // CreateDocument persists a new document.
 func (r *DocumentRepository) CreateDocument(ctx context.Context, d *docdom.Document) error {
 	rec := documentToRecord(d)
@@ -332,17 +528,37 @@ func (r *DocumentRepository) CreateDocument(ctx context.Context, d *docdom.Docum
 	return err
 }
 
-// UpdateDocument persists mutable changes to a document.
-func (r *DocumentRepository) UpdateDocument(ctx context.Context, d *docdom.Document) error {
-	rec := documentToRecord(d)
-	_, err := r.db.ExecContext(ctx, `
-		UPDATE documents SET project_id=$1, folder_id=$2, title=$3, content=$4, position=$5,
-		  created_by=$6, updated_by=$7, updated_at=$8, deleted_at=$9
-		WHERE id=$10`,
-		rec.ProjectID, rec.FolderID, rec.Title, rec.Content, rec.Position,
-		rec.CreatedBy, rec.UpdatedBy, rec.UpdatedAt, rec.DeletedAt, rec.ID,
-	)
-	return err
+// UpdateDocumentAtomic implements docdom.DocumentRepository — see its doc
+// comment.
+func (r *DocumentRepository) UpdateDocumentAtomic(ctx context.Context, id uuid.UUID, decide func(current *docdom.Document) error) (*docdom.Document, error) {
+	var result *docdom.Document
+	err := WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		var rec documentRecord
+		if err := tx.GetContext(ctx, &rec, `SELECT `+documentCols+` FROM documents WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, id.String()); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return docdom.ErrDocNotFound
+			}
+			return err
+		}
+		current := documentFromRecord(rec)
+		if err := decide(current); err != nil {
+			return err
+		}
+		out := documentToRecord(current)
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE documents SET folder_id=$1, title=$2, content=$3, position=$4, updated_by=$5, updated_at=$6
+			WHERE id=$7 AND deleted_at IS NULL`,
+			out.FolderID, out.Title, out.Content, out.Position, out.UpdatedBy, out.UpdatedAt, out.ID,
+		); err != nil {
+			return err
+		}
+		result = current
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // DeleteDocument soft-deletes a document.
@@ -357,22 +573,50 @@ func (r *DocumentRepository) DeleteDocument(ctx context.Context, id uuid.UUID) e
 
 const snapshotJoinSQL = `
 	SELECT ds.id, ds.document_id, ds.title, ds.content, ds.snapshot_number, ds.created_by, ds.created_at,
-	       u.full_name AS created_by_name
+	       acc.name AS created_by_name
 	FROM doc_snapshots ds
 	LEFT JOIN project_members pm ON pm.id = ds.created_by
-	LEFT JOIN users u ON u.id = pm.user_id`
+	LEFT JOIN accounts acc ON acc.id = pm.account_id`
 
-// ListSnapshots returns all snapshots for a document, newest first.
-func (r *DocumentRepository) ListSnapshots(_ context.Context, documentID uuid.UUID) ([]*docdom.DocSnapshot, error) {
+// snapshotListJoinSQL is snapshotJoinSQL without the body column, for lists.
+const snapshotListJoinSQL = `
+	SELECT ds.id, ds.document_id, ds.title, ds.snapshot_number, ds.created_by, ds.created_at,
+	       acc.name AS created_by_name
+	FROM doc_snapshots ds
+	LEFT JOIN project_members pm ON pm.id = ds.created_by
+	LEFT JOIN accounts acc ON acc.id = pm.account_id`
+
+// ListSnapshots returns one page of a document's snapshots, newest first and
+// without their bodies, keyset-paginated on snapshot_number.
+func (r *DocumentRepository) ListSnapshots(ctx context.Context, documentID uuid.UUID, cursorAfter *string, limit int) ([]*docdom.DocSnapshot, bool, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	where := `ds.document_id = $1`
+	args := []any{documentID.String()}
+	if cursorAfter != nil {
+		n, err := docdom.DecodeSnapshotCursor(*cursorAfter)
+		if err != nil {
+			return nil, false, err
+		}
+		args = append(args, n)
+		where += fmt.Sprintf(` AND ds.snapshot_number < $%d`, len(args))
+	}
+	args = append(args, limit+1)
 	var records []docSnapshotRecord
-	if err := r.db.Select(&records, snapshotJoinSQL+` WHERE ds.document_id = $1 ORDER BY ds.snapshot_number DESC`, documentID.String()); err != nil {
-		return nil, err
+	if err := r.db.SelectContext(ctx, &records, snapshotListJoinSQL+` WHERE `+where+
+		fmt.Sprintf(` ORDER BY ds.snapshot_number DESC LIMIT $%d`, len(args)), args...); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(records) > limit
+	if hasMore {
+		records = records[:limit]
 	}
 	out := make([]*docdom.DocSnapshot, 0, len(records))
 	for _, rec := range records {
 		out = append(out, snapshotFromRecord(rec))
 	}
-	return out, nil
+	return out, hasMore, nil
 }
 
 // FindSnapshotByID returns a single snapshot.

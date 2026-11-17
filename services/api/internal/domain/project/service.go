@@ -13,7 +13,6 @@ type CreateProjectInput struct {
 	Name         string
 	Description  string
 	TaskIDPrefix string
-	IsPublic     bool
 	Settings     map[string]any
 	CreatedBy    *uuid.UUID
 }
@@ -23,7 +22,6 @@ type UpdateProjectInput struct {
 	Name         string
 	Description  string
 	TaskIDPrefix string
-	IsPublic     *bool
 	Settings     map[string]any
 }
 
@@ -32,7 +30,6 @@ type UpdateProjectInput struct {
 type Service interface {
 	ProjectService
 	MemberService
-	RoleService
 }
 
 // ProjectService defines project CRUD use cases.
@@ -41,8 +38,6 @@ type ProjectService interface {
 	// ListAccessible returns only the projects the given user is a member of.
 	ListAccessible(ctx context.Context, userID uuid.UUID, page, pageSize int) ([]*Project, int64, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*Project, error)
-	// IsProjectPublic returns true when the project exists and is_public is set.
-	IsProjectPublic(ctx context.Context, id uuid.UUID) (bool, error)
 	Create(ctx context.Context, in CreateProjectInput) (*Project, error)
 	Update(ctx context.Context, id uuid.UUID, in UpdateProjectInput) (*Project, error)
 	Delete(ctx context.Context, id uuid.UUID) error

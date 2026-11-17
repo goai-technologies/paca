@@ -70,10 +70,10 @@ describe("PacaAPITaskExtendedClient", () => {
 		expect(fetchMock.mock.calls[0][1].headers["X-API-Key"]).toBe("key123");
 	});
 
-	it("includes X-Agent-ID when agentId is set", async () => {
+	it("never sends X-Agent-ID, even when agentId is set", async () => {
 		const client = new PacaAPITaskExtendedClient(CONFIG_WITH_AGENT);
 		await client.listTaskActivities("p1", "t1");
-		expect(fetchMock.mock.calls[0][1].headers["X-Agent-ID"]).toBe("agent-1");
+		expect(fetchMock.mock.calls[0][1].headers["X-Agent-ID"]).toBeUndefined();
 	});
 
 	it("throws on non-OK response", async () => {
@@ -104,24 +104,31 @@ describe("PacaAPITaskExtendedClient", () => {
 	describe("listTaskActivities", () => {
 		it("calls GET /api/v1/projects/:id/tasks/:taskId/activities", async () => {
 			const client = new PacaAPITaskExtendedClient(CONFIG);
-			fetchMock.mockResolvedValue(okEnvelope([{ id: "act1" }]));
+			fetchMock.mockResolvedValue(
+				okEnvelope({ items: [{ id: "act1" }], next_cursor: null }),
+			);
 			const result = await client.listTaskActivities("p1", "t1");
-			expect(fetchMock.mock.calls[0][0]).toContain("/tasks/t1/activities");
+			expect(fetchMock.mock.calls[0][0]).toContain(
+				"/tasks/t1/activities?page_size=100",
+			);
 			expect(result).toEqual([{ id: "act1" }]);
 		});
 
-		it("extracts .items from object response", async () => {
+		it("pages the newest-first timeline and returns it oldest first", async () => {
 			const client = new PacaAPITaskExtendedClient(CONFIG);
-			fetchMock.mockResolvedValue(okEnvelope({ items: [{ id: "act1" }] }));
+			fetchMock
+				.mockResolvedValueOnce(
+					okEnvelope({
+						items: [{ id: "c" }, { id: "b" }],
+						next_cursor: "older",
+					}),
+				)
+				.mockResolvedValueOnce(
+					okEnvelope({ items: [{ id: "a" }], next_cursor: null }),
+				);
 			const result = await client.listTaskActivities("p1", "t1");
-			expect(result).toEqual([{ id: "act1" }]);
-		});
-
-		it("extracts .activities from object response", async () => {
-			const client = new PacaAPITaskExtendedClient(CONFIG);
-			fetchMock.mockResolvedValue(okEnvelope({ activities: [{ id: "act1" }] }));
-			const result = await client.listTaskActivities("p1", "t1");
-			expect(result).toEqual([{ id: "act1" }]);
+			expect(fetchMock.mock.calls[1][0]).toContain("cursor=older");
+			expect(result.map((a: { id: string }) => a.id)).toEqual(["a", "b", "c"]);
 		});
 	});
 
@@ -253,18 +260,13 @@ describe("PacaAPITaskExtendedClient", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("listProjectMembers", () => {
-		it("calls GET /api/v1/projects/:id/members", async () => {
+		it("calls GET /api/v1/projects/:id/members and collects the pages", async () => {
 			const client = new PacaAPITaskExtendedClient(CONFIG);
-			fetchMock.mockResolvedValue(okEnvelope([{ id: "m1" }]));
+			fetchMock.mockResolvedValue(
+				okEnvelope({ items: [{ id: "m1" }], next_cursor: null }),
+			);
 			const result = await client.listProjectMembers("p1");
-			expect(fetchMock.mock.calls[0][0]).toContain("/members");
-			expect(result).toEqual([{ id: "m1" }]);
-		});
-
-		it("extracts .members from object response", async () => {
-			const client = new PacaAPITaskExtendedClient(CONFIG);
-			fetchMock.mockResolvedValue(okEnvelope({ members: [{ id: "m1" }] }));
-			const result = await client.listProjectMembers("p1");
+			expect(fetchMock.mock.calls[0][0]).toContain("/members?page_size=100");
 			expect(result).toEqual([{ id: "m1" }]);
 		});
 	});

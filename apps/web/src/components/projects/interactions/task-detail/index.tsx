@@ -8,6 +8,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { AlertCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { isCommitmentType } from "@/lib/commitment-api";
 import {
 	createTask,
 	epicTasksInfiniteQueryOptions,
@@ -16,6 +17,7 @@ import {
 	taskQueryOptions,
 	updateTask,
 } from "@/lib/interaction-api";
+import { useMemberDirectory } from "@/lib/member-directory";
 import { ExtensionPoint } from "@/lib/plugins/extension-point";
 import {
 	customFieldsQueryOptions,
@@ -31,6 +33,7 @@ import { getPriority } from "../priority";
 import type { EpicsPagination } from "../view-utils";
 import { TaskActivityPane as ActivityPane } from "./activity-pane";
 import { AttachmentsSection } from "./attachments-section";
+import { CommitmentWorkSection } from "./commitment-work-section";
 import { DescriptionSection } from "./description-section";
 import { mapApiFieldToUi } from "./helpers";
 import { PropertiesPanel } from "./properties-panel";
@@ -56,7 +59,6 @@ export function TaskDetailModal({
 	onOpenChange,
 	statuses,
 	taskTypes,
-	members = [],
 	projectName,
 	interactionName,
 	projectId,
@@ -118,8 +120,8 @@ export function TaskDetailModal({
 	const status = statuses.find((s) => s.id === task?.status_id);
 	const taskType = taskTypes.find((t) => t.id === task?.task_type_id);
 	const priority = getPriority(task?.importance ?? 0);
-	const assignees = members.filter((m) => task?.assignee_ids?.includes(m.id));
-	const reporter = members.find((m) => m.id === task?.reporter_id);
+	const getMember = useMemberDirectory(projectId ?? "");
+	const reporter = getMember(task?.reporter_id);
 
 	// ── Task role detection ────────────────────────────────────────────────────
 	const isEpic = isEpicType(taskType);
@@ -204,10 +206,18 @@ export function TaskDetailModal({
 						filtered.assignee_ids = a;
 					}
 				} else if (key === "custom_fields") {
-					const a = newValue as Record<string, unknown> | undefined;
-					const b = oldValue as Record<string, unknown> | undefined;
-					if (JSON.stringify(a) !== JSON.stringify(b)) {
-						filtered.custom_fields = a;
+					// The API merges custom_fields by key, so send only the keys
+					// whose value actually changed.
+					const a = (newValue ?? {}) as Record<string, unknown>;
+					const b = (oldValue ?? {}) as Record<string, unknown>;
+					const changedKeys = Object.keys(a).filter(
+						(k) =>
+							JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null),
+					);
+					if (changedKeys.length > 0) {
+						filtered.custom_fields = Object.fromEntries(
+							changedKeys.map((k) => [k, a[k]]),
+						);
 					}
 				} else if (key === "description") {
 					const normalizedNewValue = newValue ?? null;
@@ -249,6 +259,11 @@ export function TaskDetailModal({
 					return key.includes("tasks") || key.includes("backlog-tasks");
 				},
 			});
+			// A commitment's title, status or project shows in every ticket's
+			// Commitment picker.
+			if (isCommitmentType(taskType)) {
+				qc.invalidateQueries({ queryKey: ["commitments", "catalog"] });
+			}
 		},
 	});
 
@@ -277,7 +292,14 @@ export function TaskDetailModal({
 	useEffect(() => {
 		if (!open || mode === "page") return;
 		const handler = (e: KeyboardEvent) => {
-			if (e.key === "Escape") onOpenChange(false);
+			if (e.key !== "Escape") return;
+			// Escape inside a picker popover closes only that popover.
+			if (
+				e.target instanceof Element &&
+				e.target.closest('[data-slot="popover-content"]')
+			)
+				return;
+			onOpenChange(false);
 		};
 		document.addEventListener("keydown", handler);
 		return () => document.removeEventListener("keydown", handler);
@@ -411,11 +433,9 @@ export function TaskDetailModal({
 								status={status}
 								taskType={taskType}
 								priority={priority}
-								assignees={assignees}
 								reporter={reporter}
 								statuses={statuses}
 								taskTypes={taskTypes}
-								members={members}
 								sprints={sprints}
 								projectId={projectId}
 								initialCustomFields={customFieldDefs}
@@ -444,7 +464,6 @@ export function TaskDetailModal({
 							subtasks={subtasks}
 							statuses={statuses}
 							taskTypes={taskTypes}
-							members={members}
 							canEdit={canEdit}
 							task={task}
 							taskIdPrefix={taskIdPrefix}
@@ -478,6 +497,11 @@ export function TaskDetailModal({
 								});
 							}}
 						/>
+
+						{/* Work attached to this commitment, from every project */}
+						{isCommitmentType(taskType) && (
+							<CommitmentWorkSection commitmentId={task.id} />
+						)}
 
 						{/* Linked tasks */}
 						{projectId && (

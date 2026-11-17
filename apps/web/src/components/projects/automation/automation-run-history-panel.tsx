@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import {
 	type AutomationRun,
 	automationRunStepsQueryOptions,
@@ -19,6 +20,13 @@ interface AutomationRunHistoryPanelProps {
 	projectId: string;
 	automationId: string;
 	runs: AutomationRun[];
+	/** Paging state for the run list: older runs load on scroll or click. */
+	pagination: {
+		hasMore: boolean;
+		isLoadingMore: boolean;
+		isError?: boolean;
+		onLoadMore: () => void;
+	};
 	nodeLabel: (nodeId: string) => string;
 }
 
@@ -38,6 +46,7 @@ export function AutomationRunHistoryPanel({
 	projectId,
 	automationId,
 	runs,
+	pagination,
 	nodeLabel,
 }: AutomationRunHistoryPanelProps) {
 	const { t } = useTranslation("projects");
@@ -101,6 +110,12 @@ export function AutomationRunHistoryPanel({
 					</div>
 				);
 			})}
+			<LoadMoreSentinel
+				hasMore={pagination.hasMore}
+				isLoadingMore={pagination.isLoadingMore}
+				isError={pagination.isError}
+				onLoadMore={pagination.onLoadMore}
+			/>
 		</div>
 	);
 }

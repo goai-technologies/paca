@@ -11,9 +11,9 @@ import (
 // projectID verify the automation (or its node/edge ancestor) actually
 // belongs to that project before mutating anything.
 type Service interface {
-	// ListAutomations — see Repository.ListAutomations's doc comment for the
-	// limit/cursor/hasMore pagination contract.
-	ListAutomations(ctx context.Context, projectID uuid.UUID, status *Status, search *string, cursor *string, limit *int) (automations []*Automation, hasMore bool, err error)
+	// ListAutomations returns one cursor-paginated page — see
+	// Repository.ListAutomations.
+	ListAutomations(ctx context.Context, projectID uuid.UUID, status *Status, search *string, cursor *string, limit int) (automations []*Automation, hasMore bool, err error)
 	GetAutomation(ctx context.Context, projectID, automationID uuid.UUID) (*Graph, error)
 	CreateAutomation(ctx context.Context, in CreateAutomationInput) (*Automation, error)
 	UpdateAutomation(ctx context.Context, projectID, automationID uuid.UUID, in UpdateAutomationInput) (*Automation, error)
@@ -29,8 +29,9 @@ type Service interface {
 	AddEdge(ctx context.Context, projectID, automationID uuid.UUID, in AddEdgeInput) (*Edge, error)
 	RemoveEdge(ctx context.Context, projectID, automationID, edgeID uuid.UUID) error
 
-	// ListRuns returns the most recent runs for an automation, newest first.
-	ListRuns(ctx context.Context, projectID, automationID uuid.UUID, limit int) ([]*Run, error)
+	// ListRuns returns one cursor-paginated page of an automation's runs,
+	// newest first.
+	ListRuns(ctx context.Context, projectID, automationID uuid.UUID, cursorAfter *string, limit int) ([]*Run, bool, error)
 	// ListRunSteps returns the per-node execution trace for one run.
 	ListRunSteps(ctx context.Context, projectID, automationID, runID uuid.UUID) ([]*RunStep, error)
 

@@ -15,14 +15,15 @@ type Repository interface {
 	// by status and/or a case-insensitive name search, always ordered
 	// created_at DESC, id DESC.
 	//
-	// limit nil means "no pagination" — every matching automation is
-	// returned and hasMore is always false (cursor ignored), matching the
-	// existing behavior every current caller relies on. limit non-nil
-	// switches to keyset pagination: fetches one extra row to compute
-	// hasMore, returns at most *limit. cursor, if non-nil, resumes after the
-	// automation EncodeAutomationCursor produced for the last row of the
-	// previous page.
-	ListAutomations(ctx context.Context, projectID uuid.UUID, status *Status, search *string, cursor *string, limit *int) (automations []*Automation, hasMore bool, err error)
+	// limit is the page size (<= 0 uses the default). Keyset pagination: fetches
+	// one extra row to compute hasMore and returns at most limit. cursor, if
+	// non-nil, resumes after the automation EncodeAutomationCursor produced for
+	// the last row of the previous page.
+	ListAutomations(ctx context.Context, projectID uuid.UUID, status *Status, search *string, cursor *string, limit int) (automations []*Automation, hasMore bool, err error)
+	// ListAllAutomations returns every non-deleted automation of a project,
+	// optionally restricted to one status, for whole-project jobs such as the
+	// dependency map. It is not exposed over the API.
+	ListAllAutomations(ctx context.Context, projectID uuid.UUID, status *Status) ([]*Automation, error)
 	// UpdateAutomation persists changes to name, description, and/or status.
 	UpdateAutomation(ctx context.Context, a *Automation) error
 	// DeleteAutomation soft-deletes an automation (cascades nodes/edges via FK).
@@ -68,7 +69,10 @@ type Repository interface {
 	CreateRun(ctx context.Context, r *Run) error
 	UpdateRun(ctx context.Context, r *Run) error
 	FindRunByID(ctx context.Context, id uuid.UUID) (*Run, error)
-	ListRunsByAutomation(ctx context.Context, automationID uuid.UUID, limit int) ([]*Run, error)
+	// ListRunsByAutomation returns up to limit of an automation's runs, newest
+	// first, after the run cursorAfter names (nil = the newest), plus whether
+	// older runs remain.
+	ListRunsByAutomation(ctx context.Context, automationID uuid.UUID, cursorAfter *string, limit int) ([]*Run, bool, error)
 	CreateRunStep(ctx context.Context, s *RunStep) error
 	ListRunStepsByRun(ctx context.Context, runID uuid.UUID) ([]*RunStep, error)
 

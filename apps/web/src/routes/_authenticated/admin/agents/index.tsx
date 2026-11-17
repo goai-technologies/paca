@@ -1,23 +1,25 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { Bot, Plus } from "lucide-react";
-import { useState } from "react";
+import { Bot, Plus, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { AgentCard } from "@/components/projects/agents/agent-card";
 import {
 	AcpSetupDialog,
 	CreateAgentDialog,
 } from "@/components/projects/agents/create-agent-dialog";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import { usePermissions } from "@/hooks/use-permissions";
 import { myPermissionsQueryOptions } from "@/lib/admin-api";
 import {
 	type AcpBridgeToken,
 	type Agent,
-	globalAgentsQueryOptions,
+	globalAgentsInfiniteQueryOptions,
 	llmModelsQueryOptions,
 } from "@/lib/agent-api";
 import { isForbiddenError } from "@/lib/api-error";
@@ -33,8 +35,8 @@ export const Route = createFileRoute("/_authenticated/admin/agents/")({
 			.catch(() => [] as string[]);
 
 		const canAccess =
-			hasPermission(permissions, "agents.read") ||
-			hasPermission(permissions, "agents.write");
+			hasPermission(permissions, "agents:read") ||
+			hasPermission(permissions, "agents:write");
 
 		if (!canAccess) {
 			throw redirect({ to: "/home" });
@@ -63,15 +65,31 @@ function GlobalAgentsPage() {
 	const search = Route.useSearch();
 	const navigate = Route.useNavigate();
 	const { hasPermission, isLoading: isPermissionsLoading } = usePermissions();
-	const canWrite = hasPermission("agents.write");
-	const canRead = hasPermission("agents.read");
+	const canWrite = hasPermission("agents:write");
+	const canRead = hasPermission("agents:read");
 
+	// Search runs on the server (debounced) and agents page in by cursor.
+	const [agentSearch, setAgentSearch] = useState("");
+	const [debouncedAgentSearch, setDebouncedAgentSearch] = useState("");
+	const applyAgentSearch = useDebouncedCallback(setDebouncedAgentSearch, 300);
 	const {
-		data: agents = [],
+		data: agentPages,
 		isLoading: isDataLoading,
 		isError,
 		error,
-	} = useQuery({ ...globalAgentsQueryOptions, enabled: canRead });
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+		isFetchNextPageError,
+	} = useInfiniteQuery({
+		...globalAgentsInfiniteQueryOptions(debouncedAgentSearch),
+		enabled: canRead,
+		placeholderData: keepPreviousData,
+	});
+	const agents = useMemo(
+		() => agentPages?.pages.flatMap((p) => p.items) ?? [],
+		[agentPages],
+	);
 	// While permissions are still loading, `canRead` defaults to false same
 	// as a confirmed denial — guard on isPermissionsLoading so the page
 	// shows the skeleton instead of flashing NoPermissionState first.
@@ -149,7 +167,7 @@ function GlobalAgentsPage() {
 							<Skeleton key={i} className="h-36 rounded-xl" />
 						))}
 					</div>
-				) : agents.length === 0 ? (
+				) : agents.length === 0 && !debouncedAgentSearch.trim() ? (
 					<div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
 						<div className="flex size-16 items-center justify-center rounded-2xl bg-muted/50">
 							<Bot className="size-8 text-muted-foreground/50" />
@@ -168,11 +186,33 @@ function GlobalAgentsPage() {
 						)}
 					</div>
 				) : (
-					<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-						{agents.map((agent) => (
-							<AgentCard key={agent.id} agent={agent} canWrite={canWrite} />
-						))}
-					</div>
+					<>
+						<div className="relative mb-4 max-w-sm">
+							<Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+							<Input
+								type="search"
+								value={agentSearch}
+								onChange={(e) => {
+									setAgentSearch(e.target.value);
+									applyAgentSearch(e.target.value);
+								}}
+								placeholder={t("agents.searchPlaceholder")}
+								aria-label={t("agents.searchPlaceholder")}
+								className="pl-8"
+							/>
+						</div>
+						<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+							{agents.map((agent) => (
+								<AgentCard key={agent.id} agent={agent} canWrite={canWrite} />
+							))}
+						</div>
+						<LoadMoreSentinel
+							hasMore={!!hasNextPage}
+							isLoadingMore={isFetchingNextPage}
+							isError={isFetchNextPageError}
+							onLoadMore={() => void fetchNextPage()}
+						/>
+					</>
 				)}
 			</div>
 

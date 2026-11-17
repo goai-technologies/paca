@@ -4,11 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-
-	globalroledom "github.com/Paca-AI/api/internal/domain/globalrole"
 )
 
 // createTaskViaAPI is a helper to create a task via the API
@@ -391,22 +388,11 @@ func TestE2ETaskLinkManagement_Authorization(t *testing.T) {
 	readonlyUsername := "readonly-user-" + uuid.NewString()
 	seedUser(t, env, readonlyUsername, "readonlypass", "Read Only User")
 	readonlyRoleName := "READONLY_" + uuid.NewString()
-	if err := env.roleRepo.Create(env.ctx, &globalroledom.GlobalRole{
-		ID:   uuid.New(),
-		Name: readonlyRoleName,
-		Permissions: map[string]any{
-			"projects.read": true,
-			"tasks.read":    true,
-		},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("create readonly role: %v", err)
-	}
-	assignGlobalRolesByName(t, env, readonlyUsername, readonlyRoleName)
+	createPlatformRole(t, env, readonlyRoleName, "projects:read")
+	assignPlatformRole(t, env, readonlyUsername, readonlyRoleName)
 
 	writeClient, writeToken := taskMemberLogin(t, env, writeUser, "tasklinkwrite1")
-	seedTaskMemberUser(t, env, readUser, "tasklinkread1")
+	seedUser(t, env, readUser, "tasklinkread1", "Task Link Reader")
 	readClient, readToken := taskMemberLogin(t, env, readUser, "tasklinkread1")
 	readonlyClient, readonlyToken := taskMemberLogin(t, env, readonlyUsername, "readonlypass")
 
@@ -414,6 +400,15 @@ func TestE2ETaskLinkManagement_Authorization(t *testing.T) {
 	projID := createProjectForTasksViaAPI(t, env, writeClient, writeToken)
 	taskID1 := createTaskViaAPI(t, env, writeClient, writeToken, projID, "Task Write 1")
 	taskID2 := createTaskViaAPI(t, env, writeClient, writeToken, projID, "Task Write 2")
+
+	// The read user reads through a project role. A workspace-wide
+	// projects:read opens the project itself, never what is inside it.
+	readerRoleID := createProjectRoleViaAPI(t, env, writeClient, writeToken, projID, "task-reader", "projects:read", "tasks:read")
+	readerUser, err := env.userRepo.FindByUsername(env.ctx, readUser)
+	if err != nil {
+		t.Fatalf("find read user: %v", err)
+	}
+	addMemberViaAPI(t, env, writeClient, writeToken, projID, readerUser.ID.String(), readerRoleID)
 
 	var linkID string
 

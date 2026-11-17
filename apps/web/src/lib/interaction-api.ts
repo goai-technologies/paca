@@ -2,6 +2,8 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
+import { getMemberDirectory } from "./member-directory";
+import type { ProjectMember } from "./project-api";
 
 // ── Shapes ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +34,14 @@ export interface Task {
 	status_id?: string | null;
 	sprint_id?: string | null;
 	parent_task_id?: string | null;
+	// The commitment this ticket belongs to (a Commitment-typed task in the
+	// Commitments project, possibly in another project). Children inherit
+	// their top-level ticket's value — see lib/commitment-api.ts.
+	commitment_task_id?: string | null;
+	// On a commitment only: the project the commitment is for. The API
+	// accepts it only on a Commitment-typed task in the Commitments project;
+	// absent when none is chosen.
+	home_project_id?: string | null;
 	description?: unknown[] | null;
 	importance: number;
 	story_points?: number | null;
@@ -49,6 +59,10 @@ export interface Task {
 	// properties-panel.tsx, which shows an "Auto" toggle instead of the
 	// member picker when this is "auto".
 	assignment_mode: "manual" | "auto";
+	/** The people behind assignee_ids / reporter_id. The list endpoints embed
+	 *  them (include=assignees,reporter); everywhere else they are absent. */
+	assignees?: ProjectMember[];
+	reporter?: ProjectMember | null;
 }
 
 export interface TaskListResult {
@@ -556,8 +570,34 @@ export interface ListTasksOptions {
 	tags?: string[];
 }
 
+/** The people (assignees, reporter) the task list embeds in each task. Every
+ *  list the UI renders asks for them, so rows can show names and avatars
+ *  without a members request. */
+const TASK_INCLUDE = "assignees,reporter";
+
+/** Hands the people embedded in a page of tasks to the member directory, so
+ *  id → member lookups elsewhere on the screen resolve without a request. */
+function seedTaskPeople(tasks: Task[]): void {
+	const byProject = new Map<string, ProjectMember[]>();
+	for (const t of tasks) {
+		const people = [
+			...(t.assignees ?? []),
+			...(t.reporter ? [t.reporter] : []),
+		];
+		if (people.length === 0) continue;
+		const list = byProject.get(t.project_id);
+		if (list) list.push(...people);
+		else byProject.set(t.project_id, people);
+	}
+	for (const [projectId, people] of byProject) {
+		getMemberDirectory(projectId).seed(people);
+	}
+}
+
 function buildTaskQueryParams(opts: ListTasksOptions = {}) {
-	const params: Record<string, string | number | boolean> = {};
+	const params: Record<string, string | number | boolean> = {
+		include: TASK_INCLUDE,
+	};
 	params.page_size = opts.pageSize ?? 20;
 	if (opts.cursor) params.cursor = opts.cursor;
 	if (opts.sprintId === null) params.sprint_id = "null";
@@ -621,7 +661,24 @@ export async function listAllTasks(
 	const { data } = await apiClient.instance.get<
 		SuccessEnvelope<TaskListResult>
 	>(`/projects/${projectId}/tasks`, { params });
+	seedTaskPeople(data.data.items);
 	return data.data;
+}
+
+/** Number of tasks matching the given filters, via the dedicated count
+ *  endpoint — no task rows are fetched. */
+export async function countTasks(
+	projectId: string,
+	opts: ListTasksOptions = {},
+): Promise<number> {
+	const { data } = await apiClient.instance.get<
+		SuccessEnvelope<{ total_count: number }>
+	>(`/projects/${projectId}/tasks/count`, {
+		params: (({ page_size: _p, cursor: _c, include: _i, ...rest }) => rest)(
+			buildTaskQueryParams(opts),
+		),
+	});
+	return data.data.total_count;
 }
 
 export async function listSprintTasks(
@@ -650,8 +707,10 @@ export async function listAssignedTasks(
 		params: {
 			cursor: opts.cursor,
 			page_size: opts.pageSize ?? ASSIGNED_TASKS_PAGE_SIZE,
+			include: TASK_INCLUDE,
 		},
 	});
+	seedTaskPeople(data.data.items);
 	return data.data;
 }
 
@@ -675,6 +734,8 @@ export async function createTask(
 		task_type_id?: string | null;
 		assignee_ids?: string[];
 		parent_task_id?: string | null;
+		commitment_task_id?: string | null;
+		home_project_id?: string | null;
 	},
 ): Promise<Task> {
 	const { data } = await apiClient.instance.post<SuccessEnvelope<Task>>(
@@ -705,6 +766,8 @@ export async function updateTask(
 		assignee_ids: string[];
 		reporter_id: string | null;
 		parent_task_id: string | null;
+		commitment_task_id: string | null;
+		home_project_id: string | null;
 		description: unknown[] | null;
 		importance: number;
 		story_points?: number | null;
@@ -743,8 +806,10 @@ export async function listSubtasks(
 			parent_task_id: parentTaskId,
 			cursor: opts.cursor,
 			page_size: opts.pageSize ?? SUBTASKS_PAGE_SIZE,
+			include: TASK_INCLUDE,
 		},
 	});
+	seedTaskPeople(data.data.items);
 	return data.data;
 }
 
@@ -819,10 +884,24 @@ export const viewTaskPositionsQueryOptions = (
 		staleTime: 15_000,
 	});
 
-export const sprintTasksQueryOptions = (projectId: string, sprintId: string) =>
+/** Count of a sprint's tasks, optionally restricted to the given statuses,
+ *  from the count endpoint (no task rows are loaded). */
+export const sprintTaskCountQueryOptions = (
+	projectId: string,
+	sprintId: string,
+	statusIds?: string[],
+) =>
 	queryOptions({
-		queryKey: ["projects", projectId, "sprints", sprintId, "tasks"],
-		queryFn: () => listSprintTasks(projectId, sprintId),
+		queryKey: [
+			"projects",
+			projectId,
+			"sprints",
+			sprintId,
+			"tasks",
+			"count",
+			statusIds ?? null,
+		],
+		queryFn: () => countTasks(projectId, { sprintId, statusIds }),
 		staleTime: 15_000,
 	});
 
@@ -943,18 +1022,24 @@ export interface Activity {
 	updated_at: string;
 }
 
-interface ActivityListResult {
-	items: Activity[];
-}
+export const ACTIVITY_PAGE_SIZE = 30;
 
+/** One page of a task's activity, newest first; pass the previous page's
+ *  next_cursor to get the next, older page. */
 export async function listTaskActivities(
 	projectId: string,
 	taskId: string,
-): Promise<Activity[]> {
+	cursor?: string,
+): Promise<{ items: Activity[]; next_cursor?: string | null }> {
 	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<ActivityListResult>
-	>(`/projects/${projectId}/tasks/${taskId}/activities`);
-	return data.data.items;
+		SuccessEnvelope<{ items: Activity[]; next_cursor?: string | null }>
+	>(`/projects/${projectId}/tasks/${taskId}/activities`, {
+		params: {
+			page_size: ACTIVITY_PAGE_SIZE,
+			...(cursor ? { cursor } : {}),
+		},
+	});
+	return data.data;
 }
 
 export async function addComment(
@@ -991,14 +1076,6 @@ export async function deleteComment(
 		`/projects/${projectId}/tasks/${taskId}/activities/comments/${commentId}`,
 	);
 }
-
-export const taskActivitiesQueryOptions = (projectId: string, taskId: string) =>
-	queryOptions({
-		queryKey: ["projects", projectId, "tasks", taskId, "activities"],
-		queryFn: () => listTaskActivities(projectId, taskId),
-		staleTime: 15_000,
-		enabled: !!projectId && !!taskId,
-	});
 
 // ── Task Links ────────────────────────────────────────────────────────────────
 

@@ -63,7 +63,7 @@ tabs):
 
 Project-scoped targets are only active when inside a project and are
 permission-filtered with the same rules the sidebar already applies
-(`ANON_HIDDEN_SEGMENTS`, `sprints.read`) — see `runGotoAction` in
+(`ANON_HIDDEN_SEGMENTS`, `sprints:read`) — see `runGotoAction` in
 `lib/shortcuts/provider.tsx`.
 
 ### Interaction page — views (backlog, sprint, timeline)
@@ -97,7 +97,7 @@ Notes:
   `moveTaskToColumnDef` and List's `moveTaskToGroupDef` reuse the same
   `buildColumnDropUpdate` helper the drag handlers call, so keyboard and
   mouse stay in sync by construction.
-- All edit shortcuts respect `canEdit`; read-only and anonymous users keep
+- All edit shortcuts respect `canEdit`; read-only users keep
   navigation and `Mod+O` only.
 - Roadmap view has no columns, so move-left/right are inactive there.
 - Hovering is tracked via `mouseenter`/`mouseleave` on the card/row root — see

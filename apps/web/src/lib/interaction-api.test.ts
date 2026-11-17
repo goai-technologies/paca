@@ -19,6 +19,7 @@ vi.mock("./api-client", () => ({
 }));
 
 import {
+	countTasks,
 	createTask,
 	deleteTask,
 	getTask,
@@ -31,6 +32,7 @@ import {
 	type Task,
 	updateTask,
 } from "./interaction-api";
+import { getMemberDirectory } from "./member-directory";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -237,6 +239,42 @@ describe("interaction-api", () => {
 		});
 	});
 
+	describe("embedded people", () => {
+		it("listAllTasks asks for assignees and reporter and seeds the member directory with them", async () => {
+			const alice = { id: "m-alice", username: "alice", full_name: "Alice" };
+			const bob = { id: "m-bob", username: "bob", full_name: "Bob" };
+			mockGet.mockResolvedValue(
+				ok({
+					items: [
+						makeTask({
+							project_id: "p-seed",
+							assignees: [alice],
+							reporter: bob,
+						} as Partial<Task>),
+					],
+					page_size: 20,
+					next_cursor: null,
+				}),
+			);
+
+			await listAllTasks("p-seed");
+
+			expect(mockGet.mock.calls[0][1].params.include).toBe(
+				"assignees,reporter",
+			);
+			const dir = getMemberDirectory("p-seed");
+			expect(dir.get("m-alice")?.username).toBe("alice");
+			expect(dir.get("m-bob")?.username).toBe("bob");
+		});
+
+		it("countTasks does not ask for people it will not use", async () => {
+			mockGet.mockResolvedValue(ok({ total_count: 3 }));
+			await countTasks("p1", { sprintId: "s1" });
+			expect(mockGet.mock.calls[0][0]).toBe("/projects/p1/tasks/count");
+			expect(mockGet.mock.calls[0][1].params).toEqual({ sprint_id: "s1" });
+		});
+	});
+
 	describe("listSubtasks", () => {
 		it("fetches the first page with the default page size and returns the full TaskListResult", async () => {
 			const task = makeTask({ parent_task_id: TASK_ID });
@@ -260,6 +298,7 @@ describe("interaction-api", () => {
 					parent_task_id: TASK_ID,
 					cursor: undefined,
 					page_size: SUBTASKS_PAGE_SIZE,
+					include: "assignees,reporter",
 				},
 			});
 		});
@@ -276,6 +315,7 @@ describe("interaction-api", () => {
 					parent_task_id: TASK_ID,
 					cursor: "cursor-1",
 					page_size: SUBTASKS_PAGE_SIZE,
+					include: "assignees,reporter",
 				},
 			});
 		});

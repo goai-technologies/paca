@@ -25,8 +25,7 @@
 			"description": "Aún puedes crear nuevos usuarios con el botón de arriba."
 		},
 		"table": {
-			"columnUsername": "Nombre de usuario",
-			"columnFullName": "Nombre completo",
+			"columnUser": "Usuario",
 			"columnRole": "Rol",
 			"columnCreated": "Creado",
 			"pwdResetBadge": "restablecer contraseña",
@@ -35,7 +34,9 @@
 			"resetPasswordAction": "Restablecer contraseña",
 			"editAction": "Editar usuario",
 			"changeRoleAction": "Cambiar rol",
-			"deleteAction": "Eliminar usuario"
+			"deleteAction": "Eliminar usuario",
+			"pwdResetHint": "Este usuario debe establecer una nueva contraseña en su próximo inicio de sesión",
+			"columnActions": "Acciones"
 		},
 		"formDialog": {
 			"createdTitle": "Usuario creado",
@@ -127,6 +128,20 @@
 				"internalError": "Algo salió mal. Inténtalo de nuevo.",
 				"generic": "Algo salió mal."
 			}
+		},
+		"filters": {
+			"searchPlaceholder": "Buscar por nombre, usuario o correo…",
+			"searchLabel": "Buscar usuarios",
+			"roleLabel": "Filtrar por rol",
+			"allRoles": "Todos los roles",
+			"clearSearch": "Borrar búsqueda",
+			"resultsCount": "Resultados: {{count}}",
+			"clearAll": "Borrar filtros"
+		},
+		"noMatch": {
+			"title": "Ningún usuario coincide",
+			"description": "Prueba con otra búsqueda o filtro de rol.",
+			"clear": "Borrar filtros"
 		}
 	},
 	"globalRoles": {
@@ -156,14 +171,16 @@
 		},
 		"table": {
 			"columnName": "Nombre",
-			"columnPermissions": "Permisos",
+			"columnDescription": "Descripción",
 			"columnDefault": "Predeterminado",
 			"noPermissionsAssigned": "Sin permisos asignados",
 			"default": "Predeterminado",
 			"setDefaultAction": "Establecer como rol predeterminado",
 			"editAction": "Editar rol",
 			"deleteAction": "Eliminar rol",
-			"deleteDefaultDisabled": "El rol predeterminado no se puede eliminar. Primero establece otro rol como predeterminado."
+			"deleteDefaultDisabled": "El rol predeterminado no se puede eliminar. Primero establece otro rol como predeterminado.",
+			"builtIn": "Rol integrado",
+			"noDescription": "Sin descripción"
 		},
 		"formDialog": {
 			"editTitle": "Editar rol",
@@ -178,16 +195,7 @@
 			"cancel": "Cancelar",
 			"saving": "Guardando…",
 			"saveChanges": "Guardar cambios",
-			"createRole": "Crear rol",
-			"errors": {
-				"roleNameRequired": "El nombre del rol es obligatorio.",
-				"nameTaken": "Ya existe un rol con este nombre.",
-				"nameInvalid": "El nombre del rol solo puede contener letras mayúsculas, números y guiones bajos.",
-				"roleNotFound": "Este rol ya no existe. Puede que ya haya sido eliminado.",
-				"forbidden": "No tienes permiso para realizar esta acción.",
-				"internalError": "Algo salió mal en el servidor. Inténtalo de nuevo.",
-				"generic": "Algo salió mal."
-			}
+			"createRole": "Crear rol"
 		},
 		"deleteDialog": {
 			"title": "Eliminar rol",
@@ -199,7 +207,6 @@
 			"confirmButton": "Eliminar rol",
 			"errors": {
 				"roleNotFound": "Este rol ya no existe.",
-				"hasUsersWarning": "Este rol no se puede eliminar porque todavía está asignado a uno o más usuarios.",
 				"isDefault": "El rol predeterminado no se puede eliminar. Primero establece otro rol como predeterminado.",
 				"forbidden": "No tienes permiso para eliminar este rol.",
 				"internalError": "Algo salió mal. Inténtalo de nuevo.",
@@ -270,14 +277,40 @@
 			"settingsSsoWrite": {
 				"label": "Gestionar proveedores SSO",
 				"description": "Configurar los proveedores de identidad con los que los usuarios inician sesión. Permite iniciar sesión como otros usuarios, así que trátalo como acceso total de administrador."
+			},
+			"agentsRead": {
+				"label": "Ver agentes",
+				"description": "Ver los agentes de IA del espacio de trabajo"
+			},
+			"agentsWrite": {
+				"label": "Gestionar agentes",
+				"description": "Crear, editar y eliminar los agentes de IA del espacio de trabajo"
+			},
+			"pluginsRead": {
+				"label": "Ver plugins",
+				"description": "Ver los plugins instalados"
+			},
+			"pluginsWrite": {
+				"label": "Gestionar plugins",
+				"description": "Instalar, actualizar, activar y eliminar plugins"
+			},
+			"serviceAccountsRead": {
+				"label": "Leer cuentas de servicio",
+				"description": "Ver cuentas de servicio y sus claves de API"
+			},
+			"serviceAccountsWrite": {
+				"label": "Gestionar cuentas de servicio",
+				"description": "Crear, editar y eliminar cuentas de servicio y emitir o revocar sus claves de API"
 			}
 		},
 		"permissionGroups": {
 			"globalRoles": "Roles globales",
 			"users": "Usuarios",
+			"agents": "Agentes de IA",
 			"projects": "Proyectos",
 			"plugins": "Plugins",
-			"settings": "Configuración"
+			"settings": "Configuración",
+			"serviceAccounts": "Cuentas de servicio"
 		},
 		"defaultDialog": {
 			"title": "Establecer rol predeterminado",
@@ -325,6 +358,7 @@
 		"empty": "Aún no hay notas de versión disponibles."
 	},
 	"agents": {
+		"searchPlaceholder": "Buscar agentes por nombre o identificador…",
 		"header": {
 			"title": "Agentes globales",
 			"description": "Administra agentes de IA que chatean en la página de inicio y en las páginas de administración, y que pueden ser invitados a cualquier proyecto.",
@@ -439,6 +473,159 @@
 				"saveFailed": "No se pudo guardar el proveedor. Inténtalo de nuevo.",
 				"loadFailed": "No se pudieron cargar los proveedores SSO.",
 				"deleteFailed": "No se pudo eliminar el proveedor. Inténtalo de nuevo."
+			}
+		}
+	},
+	"serviceAccounts": {
+		"searchPlaceholder": "Buscar por nombre o descripción…",
+		"header": {
+			"title": "Cuentas de servicio",
+			"description": "Cuentas no humanas con sus propias claves de API y roles, para integraciones, CI y automatización.",
+			"newAccount": "Nueva cuenta de servicio"
+		},
+		"empty": {
+			"title": "Aún no hay cuentas de servicio",
+			"description": "Crea una para dar a una integración su propia identidad y clave de API.",
+			"create": "Crear cuenta de servicio"
+		},
+		"errors": {
+			"loadFailed": "No se pudieron cargar las cuentas de servicio",
+			"tryAgain": "Actualiza la página e inténtalo de nuevo."
+		},
+		"noPermission": {
+			"title": "No tienes permiso para ver las cuentas de servicio",
+			"description": "Pide acceso a un administrador del espacio de trabajo."
+		},
+		"table": {
+			"columnAccount": "Cuenta",
+			"columnActions": "Acciones",
+			"noDescription": "Sin descripción",
+			"changeRoleAction": "Cambiar roles",
+			"editAction": "Editar cuenta de servicio",
+			"deleteAction": "Eliminar cuenta de servicio",
+			"columnRole": "Roles"
+		},
+		"formDialog": {
+			"createTitle": "Nueva cuenta de servicio",
+			"editTitle": "Editar cuenta de servicio",
+			"createDescription": "Empieza sin permisos. Crea claves de API para ella y luego concédele roles.",
+			"editDescription": "Cambia el nombre, la descripción o el avatar. Las claves de API y los roles se gestionan por separado.",
+			"nameLabel": "Nombre",
+			"namePlaceholder": "p. ej. Bot de despliegue de CI",
+			"descriptionLabel": "Descripción",
+			"descriptionPlaceholder": "¿Para qué se usa esta cuenta?",
+			"cancel": "Cancelar",
+			"create": "Crear",
+			"creating": "Creando…",
+			"save": "Guardar",
+			"saving": "Guardando…",
+			"avatar": {
+				"change": "Cambiar avatar",
+				"remove": "Quitar avatar",
+				"uploading": "Subiendo…",
+				"errors": {
+					"invalidType": "Usa una imagen PNG, JPEG, WebP o GIF.",
+					"tooLarge": "La imagen debe pesar 5 MB o menos.",
+					"uploadFailed": "No se pudo subir el avatar. Inténtalo de nuevo.",
+					"removeFailed": "No se pudo quitar el avatar. Inténtalo de nuevo."
+				}
+			},
+			"errors": {
+				"nameInvalid": "El nombre debe tener entre 1 y 100 caracteres.",
+				"descriptionTooLong": "La descripción es demasiado larga (máximo 1000 caracteres).",
+				"notFound": "Esta cuenta de servicio ya no existe.",
+				"generic": "Algo salió mal. Inténtalo de nuevo."
+			}
+		},
+		"deleteDialog": {
+			"title": "Eliminar cuenta de servicio",
+			"description": "¿Eliminar «{{name}}»? Sus claves de API dejan de funcionar de inmediato y se quitan sus roles y pertenencias a proyectos. No se puede deshacer.",
+			"cancel": "Cancelar",
+			"confirm": "Eliminar",
+			"deleting": "Eliminando…",
+			"error": "No se pudo eliminar la cuenta de servicio. Inténtalo de nuevo."
+		},
+		"keys": {
+			"nameLabel": "Nombre de la clave",
+			"namePlaceholder": "p. ej. GitHub Actions",
+			"expiryLabel": "Caduca",
+			"expiryOptional": "(opcional)",
+			"create": "Crear clave",
+			"creating": "Creando…",
+			"empty": "Aún no hay claves de API.",
+			"revokeAria": "Revocar la clave {{name}}",
+			"reveal": {
+				"title": "Copia tu nueva clave de API",
+				"description": "Esta es la única vez que se muestra la clave completa. Guárdala en un lugar seguro; si la pierdes, crea una nueva.",
+				"copyAria": "Copiar clave",
+				"copied": "Copiada al portapapeles",
+				"done": "Listo"
+			},
+			"errors": {
+				"nameRequired": "Ponle un nombre a la clave.",
+				"nameTooLong": "El nombre de la clave es demasiado largo (máximo 100 caracteres).",
+				"createFailed": "No se pudo crear la clave. Inicia sesión con tu cuenta (no con una clave de API) e inténtalo de nuevo.",
+				"revokeFailed": "No se pudo revocar la clave. Inténtalo de nuevo.",
+				"copyFailed": "No se pudo copiar al portapapeles. Selecciona la clave y cópiala manualmente."
+			},
+			"revoke": {
+				"title": "Revocar clave de API",
+				"description": "¿Revocar «{{name}}»? Todo lo que la use dejará de funcionar de inmediato. No se puede deshacer.",
+				"cancel": "Cancelar",
+				"confirm": "Revocar clave",
+				"revoking": "Revocando…"
+			},
+			"count": "Claves de API: {{count}}",
+			"newKey": "Nueva clave",
+			"createFirst": "Crear la primera clave",
+			"createDialog": {
+				"title": "Crear clave de API",
+				"description": "La clave se autentica como esta cuenta. Se muestra una sola vez, justo después de crearla.",
+				"cancel": "Cancelar"
+			},
+			"row": {
+				"created": "Creada el {{date}}",
+				"expires": "Caduca el {{date}}",
+				"noExpiry": "Sin caducidad",
+				"lastUsed": "Último uso {{date}}",
+				"neverUsed": "Nunca usada"
+			}
+		},
+		"roleDialog": {
+			"title": "Cambiar roles",
+			"description": "Elige los roles del espacio de trabajo de {{name}}. Podrá hacer exactamente lo que esos roles permitan.",
+			"assign": "Guardar roles",
+			"assigning": "Guardando…",
+			"fullAccessWarning": "Este rol concede todos los permisos. Cualquiera que tenga la clave de API de esta cuenta tendría acceso total."
+		},
+		"detail": {
+			"notFound": {
+				"title": "Cuenta de servicio no encontrada",
+				"description": "Puede que se haya eliminado."
+			},
+			"roles": {
+				"description": "Lo que esta cuenta puede hacer en el espacio de trabajo. Una cuenta nueva no tiene ninguno.",
+				"none": "Sin roles: esta cuenta aún no puede hacer nada.",
+				"change": "Cambiar roles",
+				"noneHint": "Concede un rol para que pueda hacer algo.",
+				"readOnly": "Puedes ver los roles de esta cuenta, pero no cambiarlos."
+			},
+			"badge": "Cuenta de servicio",
+			"tabs": {
+				"overview": "Resumen",
+				"apiKeys": "Claves de API",
+				"roles": "Roles"
+			},
+			"overview": {
+				"descriptionHint": "Se muestra en la lista de cuentas y al invitarla a un proyecto.",
+				"saveChanges": "Guardar cambios",
+				"saved": "Guardado",
+				"saveFailed": "No se pudieron guardar los cambios. Inténtalo de nuevo.",
+				"idLabel": "ID",
+				"createdLabel": "Creada",
+				"updatedLabel": "Actualizada",
+				"deleteTitle": "Eliminar esta cuenta de servicio",
+				"deleteHint": "Sus claves de API dejan de funcionar y se quitan sus roles y pertenencias a proyectos."
 			}
 		}
 	}

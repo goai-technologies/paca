@@ -15,6 +15,7 @@ import type {
 	UpdateAutomationNodeInput,
 } from "../types/index.js";
 import { formatApiRequestError } from "../utils/index.js";
+import { fetchAllPages, withPaging } from "./paginate.js";
 
 /**
  * API client for automation-graph endpoints.
@@ -36,9 +37,6 @@ export class PacaAPIAutomationClient {
 			"Content-Type": "application/json",
 			"X-API-Key": this.config.apiKey,
 		};
-		if (this.config.agentId) {
-			headers["X-Agent-ID"] = this.config.agentId;
-		}
 
 		const options: RequestInit = {
 			method,
@@ -103,13 +101,14 @@ export class PacaAPIAutomationClient {
 		status?: AutomationStatus,
 	): Promise<Automation[]> {
 		const queryString = status ? `?status=${status}` : "";
-		const response = await this.get(
-			`/api/v1/projects/${projectId}/automations${queryString}`,
+		return fetchAllPages((cursor) =>
+			this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/automations${queryString}`,
+					cursor,
+				),
+			),
 		);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.data || [];
 	}
 
 	async getAutomation(
@@ -239,13 +238,17 @@ export class PacaAPIAutomationClient {
 		projectId: string,
 		automationId: string,
 	): Promise<AutomationRun[]> {
-		const response = await this.get(
-			`/api/v1/projects/${projectId}/automations/${automationId}/runs`,
+		// Newest first; a long history is capped rather than paged without end.
+		return fetchAllPages(
+			(cursor) =>
+				this.get(
+					withPaging(
+						`/api/v1/projects/${projectId}/automations/${automationId}/runs`,
+						cursor,
+					),
+				),
+			500,
 		);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.data || [];
 	}
 
 	async listAutomationRunSteps(

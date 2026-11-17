@@ -31,6 +31,7 @@ export interface ListViewProps {
 	statuses: TaskStatus[];
 	taskTypes: TaskType[];
 	members?: ProjectMember[];
+	reporters?: ProjectMember[];
 	customFields?: CustomFieldDefinition[];
 	epics?: Task[];
 	/** Load-more state for the epic picker, shared by every group/row/card. */
@@ -80,6 +81,7 @@ export function ListView({
 	statuses,
 	taskTypes,
 	members = [],
+	reporters,
 	customFields = [],
 	epics = [],
 	epicsPagination,
@@ -112,8 +114,8 @@ export function ListView({
 		!viewConfig?.column_by || viewConfig.column_by === "status";
 
 	const viewCtx = useMemo(
-		() => ({ statuses, taskTypes, members, customFields, sprints }),
-		[statuses, taskTypes, members, customFields, sprints],
+		() => ({ statuses, taskTypes, members, reporters, customFields, sprints }),
+		[statuses, taskTypes, members, reporters, customFields, sprints],
 	);
 
 	const groupDefs = useMemo(
@@ -234,6 +236,7 @@ export function ListView({
 						statuses={statuses}
 						taskTypes={taskTypes}
 						members={members}
+						reporters={reporters}
 						customFields={customFields}
 						epics={epics}
 						epicsPagination={epicsPagination}

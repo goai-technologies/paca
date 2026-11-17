@@ -26,13 +26,14 @@ import {
 } from "@/components/ui/context-menu";
 import { KbdChord } from "@/components/ui/kbd";
 import { useJevEnabled } from "@/hooks/use-jev-enabled";
+import { useMemberSearch } from "@/hooks/use-member-search";
 import type { Task } from "@/lib/interaction-api";
 import {
 	findEpicType,
-	type ProjectMember,
 	type TaskStatus,
 	type TaskType,
 } from "@/lib/project-api";
+import { createLoadMoreScrollHandler } from "@/lib/scroll-pagination";
 import { isMacPlatform, SHORTCUT_DISPLAY } from "@/lib/shortcuts/keymap";
 
 import {
@@ -66,7 +67,6 @@ interface TaskContextMenuProps {
 	task: Task;
 	statuses: TaskStatus[];
 	taskTypes: TaskType[];
-	members: ProjectMember[];
 	epics: Task[];
 	/** Load-more state for the epic submenu — omitted when the caller
 	 * doesn't paginate epics (e.g. fewer than one page's worth). */
@@ -90,7 +90,6 @@ export function TaskContextMenu({
 	task,
 	statuses,
 	taskTypes,
-	members,
 	epics,
 	epicsPagination,
 	canEdit,
@@ -111,6 +110,11 @@ export function TaskContextMenu({
 		? `${taskIdPrefix}-${task.task_number}`
 		: `#${task.task_number}`;
 
+	const [assigneeSubOpen, setAssigneeSubOpen] = useState(false);
+	const memberSearch = useMemberSearch(
+		task.project_id,
+		canEdit && assigneeSubOpen,
+	);
 	const [epicSubOpen, setEpicSubOpen] = useState(false);
 	const epicTypeId = findEpicType(taskTypes)?.id;
 	const {
@@ -195,12 +199,15 @@ export function TaskContextMenu({
 					</ContextMenuSub>
 				)}
 
-				{canEdit && members.length > 0 && (
-					<ContextMenuSub>
+				{canEdit && (
+					<ContextMenuSub
+						open={assigneeSubOpen}
+						onOpenChange={setAssigneeSubOpen}
+					>
 						<ContextMenuSubTrigger>
 							{t("board.taskContextMenu.assignee")}
 						</ContextMenuSubTrigger>
-						<ContextMenuSubContent className="w-48">
+						<ContextMenuSubContent className="w-56 p-1.5">
 							{jevEnabled && (
 								<ContextMenuItem
 									onClick={() =>
@@ -239,35 +246,77 @@ export function TaskContextMenu({
 									<Check className="size-3.5 text-primary shrink-0" />
 								)}
 							</ContextMenuItem>
-							{members.map((m) => {
-								const isSelected =
-									!isAutoAssign && (task.assignee_ids?.includes(m.id) ?? false);
-								return (
-									<ContextMenuItem
-										key={m.id}
-										onClick={() => {
-											const current = isAutoAssign
-												? []
-												: (task.assignee_ids ?? []);
-											onUpdate?.(task.id, {
-												...(isAutoAssign
-													? { assignment_mode: "manual" as const }
-													: {}),
-												assignee_ids: isSelected
-													? current.filter((id) => id !== m.id)
-													: [...current, m.id],
-											});
-										}}
-									>
-										<span className="flex-1 truncate">
-											{m.full_name || m.username}
-										</span>
-										{isSelected && (
-											<Check className="size-3.5 text-primary shrink-0" />
-										)}
-									</ContextMenuItem>
-								);
-							})}
+							<div className="relative px-1 pt-1 pb-1.5">
+								<Search className="pointer-events-none absolute left-3.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
+								<input
+									type="text"
+									value={memberSearch.query}
+									onClick={(e) => e.stopPropagation()}
+									onKeyDown={(e) => {
+										// Let Escape still close the menu; swallow everything
+										// else so typing doesn't trigger the menu's own arrow-key
+										// navigation / type-ahead item selection.
+										if (e.key !== "Escape") e.stopPropagation();
+									}}
+									onChange={(e) => memberSearch.onQueryChange(e.target.value)}
+									placeholder={t("taskDetail.searchableList.searchPlaceholder")}
+									aria-label={t("taskDetail.searchableList.searchPlaceholder")}
+									className="w-full rounded-lg border border-border/30 bg-muted/25 py-1.5 pr-2 pl-8 text-sm placeholder:text-muted-foreground/50 transition-all duration-150 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/20"
+								/>
+							</div>
+							<div
+								className="max-h-64 overflow-y-auto"
+								onScroll={createLoadMoreScrollHandler({
+									hasMore: memberSearch.hasMore,
+									isLoadingMore: memberSearch.isLoadingMore,
+									onLoadMore: memberSearch.onLoadMore,
+								})}
+							>
+								{memberSearch.members.map((m) => {
+									const isSelected =
+										!isAutoAssign &&
+										(task.assignee_ids?.includes(m.id) ?? false);
+									return (
+										<ContextMenuItem
+											key={m.id}
+											onClick={() => {
+												const current = isAutoAssign
+													? []
+													: (task.assignee_ids ?? []);
+												onUpdate?.(task.id, {
+													...(isAutoAssign
+														? { assignment_mode: "manual" as const }
+														: {}),
+													assignee_ids: isSelected
+														? current.filter((id) => id !== m.id)
+														: [...current, m.id],
+												});
+											}}
+										>
+											<span className="flex-1 truncate">
+												{m.full_name || m.username}
+											</span>
+											{isSelected && (
+												<Check className="size-3.5 text-primary shrink-0" />
+											)}
+										</ContextMenuItem>
+									);
+								})}
+								{memberSearch.isLoading ? (
+									<div className="flex items-center justify-center py-4">
+										<Loader2 className="size-4 animate-spin text-muted-foreground/50" />
+									</div>
+								) : memberSearch.members.length === 0 ? (
+									<p className="px-3 py-4 text-center text-xs text-muted-foreground/50">
+										{t("taskDetail.searchableList.noResults")}
+									</p>
+								) : null}
+								{memberSearch.isLoadingMore && (
+									<div className="flex items-center justify-center py-2 text-xs text-muted-foreground/50">
+										<Loader2 className="size-3 animate-spin" />
+									</div>
+								)}
+							</div>
 						</ContextMenuSubContent>
 					</ContextMenuSub>
 				)}

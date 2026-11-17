@@ -14,6 +14,27 @@ export const ApiErrorCode = {
 	// Password / session gate errors.
 	PasswordChangeRequired: "AUTH_PASSWORD_CHANGE_REQUIRED",
 
+	// Role domain errors (platform and project roles alike).
+	RoleNotFound: "ROLE_NOT_FOUND",
+	RoleNameTaken: "ROLE_NAME_TAKEN",
+	RoleNameInvalid: "ROLE_NAME_INVALID",
+	RolePolicyInvalid: "ROLE_POLICY_INVALID",
+	RoleIsSystem: "ROLE_IS_SYSTEM",
+	RoleIsDefault: "ROLE_IS_DEFAULT",
+	RoleLastFullAccess: "ROLE_LAST_FULL_ACCESS",
+	RoleNotAttachable: "ROLE_NOT_ATTACHABLE",
+	RoleNoDefault: "ROLE_NO_DEFAULT",
+	RoleRequired: "ROLE_REQUIRED",
+
+	// Service account domain errors.
+	ServiceAccountNotFound: "SERVICE_ACCOUNT_NOT_FOUND",
+	ServiceAccountNameInvalid: "SERVICE_ACCOUNT_NAME_INVALID",
+	ServiceAccountDescriptionTooLong: "SERVICE_ACCOUNT_DESCRIPTION_TOO_LONG",
+
+	// API key errors.
+	APIKeyNameInvalid: "API_KEY_NAME_INVALID",
+	APIKeyNameTooLong: "API_KEY_NAME_TOO_LONG",
+
 	// User domain errors.
 	UserNotFound: "USER_NOT_FOUND",
 	UsernameTaken: "USER_USERNAME_TAKEN",
@@ -23,12 +44,6 @@ export const ApiErrorCode = {
 	Forbidden: "FORBIDDEN",
 
 	// Global role domain errors.
-	GlobalRoleNotFound: "GLOBAL_ROLE_NOT_FOUND",
-	GlobalRoleNameTaken: "GLOBAL_ROLE_NAME_TAKEN",
-	GlobalRoleNameInvalid: "GLOBAL_ROLE_NAME_INVALID",
-	GlobalRoleHasUsers: "GLOBAL_ROLE_HAS_ASSIGNED_USERS",
-	GlobalRoleIsDefault: "GLOBAL_ROLE_IS_DEFAULT",
-	GlobalRoleNoDefault: "GLOBAL_ROLE_NO_DEFAULT",
 
 	// SSO provider errors.
 	SSOProviderNotFound: "SSO_PROVIDER_NOT_FOUND",
@@ -41,10 +56,6 @@ export const ApiErrorCode = {
 	ProjectNameTaken: "PROJECT_NAME_TAKEN",
 	ProjectNameInvalid: "PROJECT_NAME_INVALID",
 	ProjectPrefixInvalid: "PROJECT_PREFIX_INVALID",
-	ProjectRoleNotFound: "PROJECT_ROLE_NOT_FOUND",
-	ProjectRoleNameTaken: "PROJECT_ROLE_NAME_TAKEN",
-	ProjectRoleNameInvalid: "PROJECT_ROLE_NAME_INVALID",
-	ProjectRoleHasMembers: "PROJECT_ROLE_HAS_MEMBERS",
 	ProjectMemberNotFound: "PROJECT_MEMBER_NOT_FOUND",
 	ProjectMemberAlreadyAdded: "PROJECT_MEMBER_ALREADY_ADDED",
 
@@ -54,6 +65,10 @@ export const ApiErrorCode = {
 	TaskTypeIsSystem: "TASK_TYPE_IS_SYSTEM",
 	TaskTypeNameReserved: "TASK_TYPE_NAME_RESERVED",
 	TaskTypeIsDefault: "TASK_TYPE_IS_DEFAULT",
+	// The Commitments project holds Commitment tasks only: no other type can
+	// be added there, and its Commitment type cannot be renamed or removed.
+	// See TaskTypeFormDialog and DeleteTaskTypeDialog.
+	CommitmentsProjectOnlyCommitments: "COMMITMENTS_PROJECT_ONLY_COMMITMENTS",
 
 	// Task status domain errors.
 	TaskStatusNotFound: "TASK_STATUS_NOT_FOUND",
@@ -134,6 +149,10 @@ export const ApiErrorCode = {
 	// agent-detail.tsx's OverviewTab.
 	AgentDefaultEnvironmentInvalid: "AGENT_DEFAULT_ENVIRONMENT_INVALID",
 	AgentDefaultFolderInvalid: "AGENT_DEFAULT_FOLDER_INVALID",
+	// A provider_cli agent has no usable default environment, so a chat turn
+	// can't start: see conversation-to-thread-messages.ts.
+	AgentDefaultEnvironmentRequiredForCLIProvider:
+		"AGENT_DEFAULT_ENVIRONMENT_REQUIRED_FOR_CLI_PROVIDER",
 	// Sent from AddSkill when the skill name collides with one of Paca's own
 	// internal scaffolding names, or is malformed ("."/".."/contains a path
 	// separator) — see agent-detail.tsx's AddSkillDialog.
@@ -177,7 +196,6 @@ export const ApiErrorCode = {
 	// Sent instead of dispatching a chat turn when the agent itself is
 	// access_mode=restricted and the caller holds no grant for it. See
 	// conversation-to-thread-messages.ts's chatSessionAccessDeniedKey.
-	AgentAccessRestricted: "AGENT_ACCESS_RESTRICTED",
 	// Environment domain errors (static environments — see
 	// docs/ai-agent/environment-management.md).
 	// Sent instead of dispatching a chat turn when the environment the
@@ -187,8 +205,14 @@ export const ApiErrorCode = {
 	// separate code/remedy ("ask for environment access", not agent
 	// access). See conversation-to-thread-messages.ts's
 	// chatSessionAccessDeniedKey.
-	EnvironmentAccessRestricted: "ENVIRONMENT_ACCESS_RESTRICTED",
 	EnvironmentNameInvalid: "ENVIRONMENT_NAME_INVALID",
+	// Project export errors — see export-api.ts and ExportSettings.tsx.
+	ProjectExportNotFound: "PROJECT_EXPORT_NOT_FOUND",
+	// Sent from POST /exports when one is already queued/running.
+	ProjectExportInProgress: "PROJECT_EXPORT_IN_PROGRESS",
+	ProjectExportNotReady: "PROJECT_EXPORT_NOT_READY",
+	ProjectExportExpired: "PROJECT_EXPORT_EXPIRED",
+
 	// Sent from start/stop/restart when the environment is already
 	// mid-transition — see environment-detail.tsx's header actions and
 	// RestartEnvironmentDialog, and environment-connect.tsx's

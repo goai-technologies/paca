@@ -1,0 +1,12 @@
+-- 000065_drop_project_is_public.sql
+-- Public projects are gone: every project route needs a signed-in caller whose
+-- roles allow the action (docs/architecture/authorization.md). The flag was
+-- only ever read to let anonymous visitors in, so it is dropped with its data.
+--
+-- IRREVERSIBLE, and a behaviour change on upgrade: a project that was public
+-- becomes members-only and its anonymous visitors start getting 401. To list
+-- the affected projects before upgrading:
+--   SELECT id, name FROM projects WHERE is_public AND deleted_at IS NULL;
+-- Dropping the column also drops idx_projects_is_public (000003). The ALTER
+-- takes a brief ACCESS EXCLUSIVE lock on projects.
+ALTER TABLE projects DROP COLUMN IF EXISTS is_public;

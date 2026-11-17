@@ -57,9 +57,13 @@ func TestDeleteFolder_SucceedsWithPendingTriggerStillReferencingIt(t *testing.T)
 		folderID, environmentID); err != nil {
 		t.Fatalf("insert environment folder: %v", err)
 	}
+	if _, err := env.db.ExecContext(env.ctx,
+		`INSERT INTO accounts (id, kind, name) VALUES ($1, 'agent', 'FK Test Agent')`, agentID); err != nil {
+		t.Fatalf("insert agent account: %v", err)
+	}
 	if _, err := env.db.ExecContext(env.ctx, `
-		INSERT INTO agents (id, project_id, name, handle, llm_provider, llm_model, llm_api_key_secret, default_environment_id)
-		VALUES ($1, $2, 'FK Test Agent', 'fk-test-agent', 'anthropic', 'claude', 'unused', $3)`,
+		INSERT INTO agents (id, project_id, handle, llm_provider, llm_model, llm_api_key_secret, default_environment_id)
+		VALUES ($1, $2, 'fk-test-agent', 'anthropic', 'claude', 'unused', $3)`,
 		agentID, projectID, environmentID); err != nil {
 		t.Fatalf("insert agent: %v", err)
 	}

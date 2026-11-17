@@ -75,23 +75,25 @@ func execMigrationTx(db *sql.DB, sqlText string) error {
 	return tx.Commit()
 }
 
-// seedBaseProject inserts one throwaway user/project/project_role/
-// project_member chain — the minimum a fresh testcontainers Postgres needs
-// before any ported test's own agent/agent_conversations seeding (copied
-// near-verbatim from each source livecheck program) can run, since a real
-// dev DB always already had at least one project (see e.g.
-// cmd/agent-runner/livecheck's seedThrowawayRows: "is there at least one
-// project in this DB?"), but a freshly-migrated container never does.
+// seedBaseProject inserts one throwaway user/project/project_member chain —
+// the minimum a fresh testcontainers Postgres needs before any ported test's
+// own agent/agent_conversations seeding (copied near-verbatim from each source
+// livecheck program) can run, since a real dev DB always already had at least
+// one project (see e.g. cmd/agent-runner/livecheck's seedThrowawayRows: "is
+// there at least one project in this DB?"), but a freshly-migrated container
+// never does.
 func seedBaseProject(t *testing.T, db *sqlx.DB) (projectID, memberID, userID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
 
 	userID = uuid.New()
 	suffix := userID.String()[:8]
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO users (id, username, password_hash, role_id)
-		SELECT $1, $2, '', id FROM global_roles WHERE name = 'USER'
-	`, userID, "e2e-user-"+suffix); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO accounts (id, kind, name) VALUES ($1, 'user', $2)`,
+		userID, "e2e-user-"+suffix); err != nil {
+		t.Fatalf("seed base account: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO users (id, username, password_hash) VALUES ($1, $2, '')`,
+		userID, "e2e-user-"+suffix); err != nil {
 		t.Fatalf("seed base user: %v", err)
 	}
 
@@ -102,21 +104,24 @@ func seedBaseProject(t *testing.T, db *sqlx.DB) (projectID, memberID, userID uui
 		t.Fatalf("seed base project: %v", err)
 	}
 
-	projectRoleID := uuid.New()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO project_roles (id, project_id, role_name, permissions) VALUES ($1, $2, 'MEMBER', '{}'::jsonb)
-	`, projectRoleID, projectID); err != nil {
-		t.Fatalf("seed base project role: %v", err)
-	}
-
 	memberID = uuid.New()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO project_members (id, project_id, user_id, project_role_id) VALUES ($1, $2, $3, $4)
-	`, memberID, projectID, userID, projectRoleID); err != nil {
+		INSERT INTO project_members (id, project_id, account_id) VALUES ($1, $2, $3)
+	`, memberID, projectID, userID); err != nil {
 		t.Fatalf("seed base project member: %v", err)
 	}
 
 	return projectID, memberID, userID
+}
+
+// seedAgentAccount inserts the accounts row an agents row hangs off (an
+// agent's display name lives on its account, not on the agents table).
+func seedAgentAccount(t *testing.T, db *sqlx.DB, agentID uuid.UUID, name string) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO accounts (id, kind, name) VALUES ($1, 'agent', $2)`, agentID, name); err != nil {
+		t.Fatalf("seed agent account: %v", err)
+	}
 }
 
 // portAllocSeq hands each docker.Manager a non-overlapping 100-wide host

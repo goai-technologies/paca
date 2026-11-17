@@ -12,7 +12,8 @@
 				"customFields": "自定义字段",
 				"jev": "Jev AI",
 				"dangerZone": "危险区域",
-				"plugins": "插件"
+				"plugins": "插件",
+				"export": "导出"
 			},
 			"pluginTab": {
 				"noPermission": {
@@ -101,7 +102,6 @@
 			"configure": "配置",
 			"delete": "删除",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This agent is restricted — ask a project admin to grant you access before you can chat with it.",
 			"acpStatusConnected": "在线",
 			"acpStatusDisconnected": "离线",
 			"deleteDialog": {
@@ -114,6 +114,7 @@
 			}
 		},
 		"page": {
+			"searchPlaceholder": "按名称或标识搜索智能体…",
 			"title": "AI 智能体",
 			"subtitle": "处理任务并与团队沟通的自主智能体",
 			"newAgent": "新建智能体",
@@ -172,7 +173,6 @@
 				"skills": "技能",
 				"envVars": "环境变量",
 				"globalRole": "全局角色",
-				"access": "Access",
 				"activity": "动态"
 			},
 			"globalRole": {
@@ -289,6 +289,11 @@
 					"urlLabel": "URL",
 					"cancel": "取消",
 					"addServer": "添加服务器"
+				},
+				"system": {
+					"title": "系统 MCP 服务器",
+					"description": "由 Paca 提供给所有智能体，无法编辑。",
+					"pacaDetail": "Paca 内置工具（项目、任务、文档）"
 				}
 			},
 			"envVars": {
@@ -336,16 +341,11 @@
 					"nameReserved": "该名称已被 Paca 自身的内部脚手架保留，请选择其他名称。",
 					"nameInvalid": "技能名称不能是“.”“..”，也不能包含斜杠。",
 					"addFailed": "添加技能失败，请重试。"
+				},
+				"system": {
+					"title": "系统技能",
+					"description": "随 Paca 内置并对所有智能体可用，无法编辑。"
 				}
-			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may chat with this agent. Everyone who can manage agents can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
 			},
 			"activity": {
 				"commented": "发表了评论",
@@ -370,6 +370,9 @@
 					"dateTo": "结束日期",
 					"clearAll": "清除筛选"
 				}
+			},
+			"system": {
+				"badge": "系统"
 			}
 		},
 		"conversationView": {
@@ -385,9 +388,8 @@
 			"connect": "连接",
 			"conversationEnded": "此对话已结束。",
 			"textOnlyMessage": "仅支持文本消息。",
-			"agentAccessRestricted": "此代理已被限制访问。请让项目管理员授予你访问权限后再与其聊天。",
-			"environmentAccessRestricted": "此对话的环境已被限制访问。请让项目管理员授予你访问权限后再与该代理聊天。",
 			"chatNoPermission": "你没有权限在此对话中发送消息。",
+			"cliProviderNeedsEnvironment": "此智能体使用 CLI 提供方，需要默认环境，但目前没有可用的默认环境。请联系项目管理员为该智能体设置默认环境。",
 			"failed": "对话失败",
 			"noOutput": "代理未生成任何输出。",
 			"loadingOlder": "加载中…",
@@ -483,7 +485,6 @@
 			"subtitle": "具名的长期运行沙盒，您的智能体可以在多次对话之间连接使用",
 			"newEnvironment": "新建环境",
 			"restricted": "Restricted",
-			"restrictedTooltip": "This environment is restricted — ask a project admin to grant you access before you can use it.",
 			"empty": {
 				"title": "暂无环境",
 				"description": "创建一个静态环境，让文件和后台进程在多次对话之间保持运行，而不是每次都使用一次性沙盒。",
@@ -526,8 +527,7 @@
 			"tabs": {
 				"overview": "概览",
 				"folders": "文件夹",
-				"portForwards": "端口转发",
-				"access": "Access"
+				"portForwards": "端口转发"
 			},
 			"busy": "该环境正在启动、停止或重启，请稍后重试。",
 			"actionFailed": "操作失败，请重试。",
@@ -643,15 +643,6 @@
 					"restartFailed": "重启环境失败，请重试。"
 				}
 			},
-			"access": {
-				"restrictLabel": "Restrict access",
-				"restrictDescription": "When on, only members granted access below may browse, SSH into, forward ports on, or open a terminal in this environment. Everyone who can manage environments can still see and configure it.",
-				"pickMember": "Select a member…",
-				"grantAccess": "Grant access",
-				"alreadyGranted": "This member already has access.",
-				"grantFailed": "Failed to grant access. Please try again.",
-				"empty": "No members have been granted access yet."
-			},
 			"sshKeys": {
 				"connectHint": "将 <bastion-host> 替换为此部署配置的 SSH 堡垒机地址。",
 				"connectUnavailable": "此部署尚未配置 SSH 访问。",
@@ -750,7 +741,6 @@
 			"deleteRole": "删除角色",
 			"errors": {
 				"notFound": "该角色已不存在。",
-				"hasMembers": "该角色仍被分配给一个或多个成员，无法删除。",
 				"forbidden": "您没有权限删除该角色。",
 				"internalError": "出现错误，请重试。",
 				"generic": "出现错误。"
@@ -764,23 +754,18 @@
 			"roleNameLabel": "角色名称",
 			"roleNamePlaceholder": "例如：PROJECT_REVIEWER",
 			"permissionsLabel": "权限",
-			"fullAccessBadge": "完全访问权限",
 			"fullAccessDescription": "此角色自动包含所有权限，包括将来添加的权限。切换下方任意权限都会将其转换为当前权限的固定集合。",
 			"enabledCount_one": "已启用 {{count}} 项",
 			"enabledCount_other": "已启用 {{count}} 项",
 			"cancel": "取消",
 			"saveChanges": "保存更改",
-			"createRole": "创建角色",
-			"errors": {
-				"nameTaken": "已存在同名角色。",
-				"nameInvalid": "角色名称只能使用大写字母、数字和下划线。",
-				"notFound": "该角色已不存在，可能已被删除。",
-				"forbidden": "您没有权限执行此操作。",
-				"internalError": "服务器出现错误，请重试。",
-				"generic": "出现错误。"
-			}
+			"createRole": "创建角色"
 		},
 		"permissions": {
+			"projectsRead": {
+				"label": "查看项目",
+				"description": "打开项目并查看其基本信息"
+			},
 			"projectsWrite": {
 				"label": "编辑项目",
 				"description": "更新项目名称、描述和设置"
@@ -795,7 +780,7 @@
 			},
 			"membersWrite": {
 				"label": "管理成员",
-				"description": "添加、移除和重新分配项目成员"
+				"description": "添加和移除项目成员（更改其角色需要“分配角色”权限）"
 			},
 			"rolesRead": {
 				"label": "查看角色",
@@ -804,6 +789,10 @@
 			"rolesWrite": {
 				"label": "管理角色",
 				"description": "创建、编辑和删除项目角色"
+			},
+			"rolesAssign": {
+				"label": "分配角色",
+				"description": "为此项目的成员和智能体授予任意角色，或撤销角色"
 			},
 			"settingsTaskTypesWrite": {
 				"label": "Manage Task Types",
@@ -900,6 +889,10 @@
 			"activitiesRead": {
 				"label": "查看动态日志",
 				"description": "查看此项目中记录的所有动态"
+			},
+			"projectExport": {
+				"label": "导出项目数据",
+				"description": "导出此项目的任务（含评论和活动）和文档"
 			}
 		},
 		"permissionGroups": {
@@ -939,9 +932,6 @@
 			"taskIdPrefixPlaceholder": "PROJ",
 			"descriptionLabel": "描述",
 			"descriptionPlaceholder": "描述一下这个项目是关于什么的…",
-			"publicProjectLabel": "公开项目",
-			"publicProjectHintPublic": "任何拥有链接的人都可以查看此项目。匿名用户拥有只读权限。",
-			"publicProjectHintPrivate": "仅团队成员可以访问此项目。",
 			"saveChanges": "保存更改",
 			"saved": "已保存 ✓",
 			"noPermission": "您没有权限编辑此项目。",
@@ -956,7 +946,6 @@
 			"title": "项目角色",
 			"description": "管理此项目成员的角色和权限。",
 			"newRole": "新建角色",
-			"noPermissionsAssigned": "未分配权限",
 			"editRole": "编辑角色",
 			"deleteRole": "删除角色",
 			"rolesDefined_one": "个已定义角色",
@@ -969,14 +958,15 @@
 			},
 			"table": {
 				"name": "名称",
-				"permissions": "权限",
+				"description": "描述",
 				"created": "创建时间"
 			},
-			"systemRolesNote": "系统角色是共享模板，无法编辑或删除。",
+			"systemRolesNote": "来自工作区的共享角色只能在工作区的角色设置中修改。",
 			"noPermission": {
 				"title": "You don't have permission to view roles",
 				"description": "Ask a project admin to grant you the project.roles.read permission."
-			}
+			},
+			"noDescription": "无描述"
 		},
 		"taskStatuses": {
 			"title": "任务状态",
@@ -1172,6 +1162,41 @@
 				"cancel": "取消",
 				"deletePermanently": "永久删除"
 			}
+		},
+		"export": {
+			"title": "导出",
+			"description": "下载项目数据。导出文件在后台生成，并保留 7 天。",
+			"recent": {
+				"title": "最近的导出",
+				"empty": "暂无导出记录。"
+			},
+			"status": {
+				"pending": "排队中",
+				"processing": "生成中…",
+				"completed": "已就绪",
+				"failed": "失败",
+				"expired": "已过期"
+			},
+			"rows": "任务数：{{count}}",
+			"availableUntil": "可下载至 {{date}}",
+			"download": "下载",
+			"failedMessage": "无法生成导出文件，请重试。",
+			"errors": {
+				"inProgress": "此项目已有正在进行的导出。",
+				"requestFailed": "无法开始导出，请重试。",
+				"downloadFailed": "无法下载导出文件，请重试。",
+				"expired": "此导出已过期，请重新申请。"
+			},
+			"noPermission": {
+				"title": "你没有导出此项目的权限",
+				"description": "请联系项目所有者或管理员授予导出权限。"
+			},
+			"archive": {
+				"title": "项目数据（ZIP）",
+				"description": "所有任务导出为 CSV，其评论和活动导出为单独的 CSV 文件，文档导出为 Markdown 文件。",
+				"button": "导出项目",
+				"inProgress": "正在导出…"
+			}
 		}
 	},
 	"taskStatuses": {
@@ -1226,29 +1251,43 @@
 			"noUsersAvailable": "没有可添加的用户。",
 			"loadingMore": "加载中…",
 			"roleLabel": "角色",
-			"rolePlaceholder": "选择一个角色…",
 			"cancel": "取消",
 			"addMember": "添加成员",
 			"errors": {
 				"addFailed": "添加成员失败，请重试。",
 				"alreadyAdded": "该用户或智能体已是该项目的成员。",
+				"roleForbidden": "你没有权限分配其中某个角色。",
 				"roleNotFound": "该角色已不存在，请选择其他角色。"
 			},
 			"modeUser": "用户",
 			"modeAgent": "AI 智能体",
 			"agentLabel": "智能体",
-			"noAgentsAvailable": "没有可邀请的全局智能体。"
+			"noAgentsAvailable": "没有可邀请的全局智能体。",
+			"modeServiceAccount": "服务账号",
+			"serviceAccountLabel": "服务账号",
+			"noServiceAccountsAvailable": "没有可添加的服务账号。",
+			"searchAgentsPlaceholder": "按名称或用户名搜索…",
+			"noAgentsMatch": "没有符合搜索条件的智能体。",
+			"searchServiceAccountsPlaceholder": "按名称或描述搜索…",
+			"noServiceAccountsMatch": "没有符合搜索条件的服务账号。"
 		},
 		"roleChip": {
 			"changeRole": "更改角色",
+			"dialogDescription": "为 {{name}} 选择角色。成员至少保留一个角色。",
+			"assign": "分配角色",
+			"assigning": "分配中…",
 			"errors": {
 				"memberNotFound": "该成员已不再属于该项目。",
+				"roleForbidden": "你没有权限分配或移除其中某个角色。",
 				"roleNotFound": "该角色已不存在。",
 				"changeFailed": "更改角色失败。"
 			}
 		},
 		"memberRow": {
-			"removeMember": "移除成员"
+			"removeMember": "移除成员",
+			"agentBadge": "代理",
+			"actions": "成员操作",
+			"serviceAccountBadge": "服务账号"
 		},
 		"removeDialog": {
 			"title": "移除成员",
@@ -1270,6 +1309,19 @@
 			"placeholder": "此人负责什么工作？",
 			"save": "保存",
 			"saveFailed": "保存描述失败。"
+		},
+		"filters": {
+			"searchPlaceholder": "按姓名或用户名搜索…",
+			"searchLabel": "搜索成员",
+			"roleLabel": "按角色筛选",
+			"allRoles": "全部",
+			"clearSearch": "清除搜索",
+			"showingOf": "显示 {{shown}} / {{total}}"
+		},
+		"noMatch": {
+			"title": "没有匹配的成员",
+			"description": "请尝试其他搜索词或角色筛选。",
+			"clear": "清除筛选"
 		}
 	},
 	"aiChat": {
@@ -1290,6 +1342,7 @@
 			"deleteFailed": "删除任务类型失败，请重试。",
 			"isDefault": "无法删除默认类型。请先将其他类型设为默认。",
 			"isSystem": "系统类型无法删除。",
+			"commitmentsProjectOnly": "无法删除承诺类型：此项目只能包含承诺。",
 			"cancel": "取消",
 			"deleteType": "删除类型"
 		},
@@ -1314,7 +1367,8 @@
 				"nameInvalid": "类型名称为空或无效。",
 				"nameReserved": "该名称已被内置类型保留。",
 				"saveFailed": "保存任务类型失败，请重试。",
-				"isSystem": "系统类型无法编辑。"
+				"isSystem": "系统类型无法编辑。",
+				"commitmentsProjectOnly": "此项目只能包含承诺：无法添加其他任务类型，也无法重命名承诺类型。"
 			}
 		}
 	},
@@ -1370,12 +1424,18 @@
 			"viewParent": "查看父任务",
 			"removeParent": "移除父任务",
 			"addFields": "添加字段",
-			"autoAssign": "自动"
+			"autoAssign": "自动",
+			"sprintGroup": {
+				"active": "进行中",
+				"planned": "即将开始",
+				"completed": "已完成"
+			}
 		},
 		"description": {
 			"title": "描述",
 			"writeWithAI": "用 AI 撰写",
 			"writeWithAIDialog": {
+				"searchAgents": "搜索智能体…",
 				"title": "用 AI 撰写",
 				"description": "选择一个智能体来撰写任务描述。",
 				"noAgents": "此项目尚未配置智能体。",
@@ -1453,6 +1513,7 @@
 			"searchPlaceholder": "按标题或编号搜索任务...",
 			"loadingTasks": "正在加载任务…",
 			"noTasksFound": "未找到任务",
+			"loadError": "无法加载任务。请重试。",
 			"linkTypes": {
 				"blocks": {
 					"label": "阻塞",
@@ -1554,6 +1615,32 @@
 			"descriptionChangeDiff": "描述更改差异",
 			"autoAssignSkippedLowConfidence": "无法确定地选出负责人（置信度 {{confidence}}%）— 任务仍未分配",
 			"autoAssignSkipped": "跳过了自动分配 — 任务仍未分配"
+		},
+		"searchableList": {
+			"searchPlaceholder": "搜索…",
+			"noResults": "没有匹配项"
+		},
+		"commitment": {
+			"label": "承诺",
+			"inherited": "继承",
+			"inheritedHint": "在顶层工单上设置；此工单继承该值。",
+			"searchPlaceholder": "搜索承诺…",
+			"open": "打开承诺",
+			"remove": "从承诺中移除",
+			"loading": "加载中…",
+			"empty": "没有进行中的承诺",
+			"workTitle": "此承诺中的工作",
+			"workEmpty": "此承诺下还没有关联的工单。",
+			"workError": "无法加载关联的工作。",
+			"hiddenProjects_other": "有 {{count}} 个你无权查看的项目未显示。",
+			"groupThisProject": "本项目",
+			"groupOtherProjects": "其他项目",
+			"projectLabel": "项目",
+			"projectHint": "此承诺面向哪个项目",
+			"projectSearchPlaceholder": "搜索项目…",
+			"projectClear": "清除项目",
+			"projectEmpty": "没有可选择的项目",
+			"projectUnknown": "未知项目"
 		}
 	},
 	"portForwardDetail": {
@@ -1755,6 +1842,7 @@
 			"error": "无法删除对话，请重试。"
 		},
 		"filters": {
+			"searchAgents": "搜索智能体…",
 			"title": "筛选",
 			"agent": "代理",
 			"status": "状态",
@@ -2459,5 +2547,12 @@
 			"comment": "评论了",
 			"fallback": "执行了 {{type}}："
 		}
+	},
+	"workstream": {
+		"label": "工作流",
+		"hint": "此项目的承诺默认显示在哪个看板。承诺自身的工作流字段优先。",
+		"delivery": "交付",
+		"platform": "PPE",
+		"internal": "内部"
 	}
 }

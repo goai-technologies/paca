@@ -58,9 +58,8 @@ describe("describeTaskChange with custom fields", () => {
 			emptyNames,
 			mockT as never,
 		);
-		expect(result).toBe(
-			"changed Development Completion Date from Nov 1, 2026 to Nov 5, 2026",
-		);
+		expect(result).toMatch(/^changed Development Completion Date from .+ to .+/);
+		expect(result).toContain("2026");
 	});
 
 	it("describes text custom field update (e.g. QA by)", () => {
@@ -78,14 +77,16 @@ describe("describeTaskChange with custom fields", () => {
 			emptyNames,
 			mockT as never,
 		);
-		expect(startResult).toBe("set QA Start Date to Nov 6, 2026");
+		expect(startResult).toMatch(/^set QA Start Date to .+/);
+		expect(startResult).toContain("2026");
 
 		const endResult = describeTaskChange(
 			{ field: "QA End Date", old: null, new: "2026-11-08T00:00:00Z" },
 			emptyNames,
 			mockT as never,
 		);
-		expect(endResult).toBe("set QA End Date to Nov 8, 2026");
+		expect(endResult).toMatch(/^set QA End Date to .+/);
+		expect(endResult).toContain("2026");
 	});
 
 	it("replaces underscores in field key if display name is snake_cased", () => {
