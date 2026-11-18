@@ -1149,9 +1149,17 @@ Creates a new task in a project. The `description` field is a **JSON array of Bl
   "status_id": "uuid-or-null",
   "task_type_id": "uuid-or-null",
   "assignee_ids": ["uuid"],
+  "created_by_user_id": "uuid-or-omitted",
   "tags": ["backend", "auth"]
 }
 ```
+
+Optional `created_by_user_id` is a PACA user/account UUID. When set, the
+`task.created` activity and create-time assignment notifications are attributed
+to that user instead of the authenticated principal (useful for shared API-key
+integrations). The id must name a **human** member of the project; otherwise
+the request fails with `PROJECT_MEMBER_NOT_FOUND` and no task is created.
+Omitting the field preserves prior behavior.
 
 Success response: `201 Created` — task object (see task response shape below).
 

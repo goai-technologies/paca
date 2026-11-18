@@ -90,10 +90,11 @@ func buildAgentKeyRouterWithBotID(taskRepo *fakeTaskRepo, apiKeyRepo *fakeAPIKey
 		Auth:         handler.NewAuthHandler(authService, testCookieCfg),
 		User:         handler.NewUserHandler(userService),
 		Project:      handler.NewProjectHandler(projectService, authorizer),
-		Task:         handler.NewTaskHandler(taskService, viewService, activityService),
-		Sprint:       handler.NewSprintHandler(sprintService, viewService),
-		View:         handler.NewViewHandler(viewService),
-		Log:          log,
+		Task: handler.NewTaskHandler(taskService, viewService, activityService,
+			handler.WithTaskAssignedProjectService(projectService)),
+		Sprint: handler.NewSprintHandler(sprintService, viewService),
+		View:   handler.NewViewHandler(viewService),
+		Log:    log,
 	})
 }
 

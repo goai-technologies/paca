@@ -788,11 +788,46 @@ func buildTaskTestRouterWithSprints(taskRepo *fakeTaskRepo, sprintRepo *fakeSpri
 		Auth:         handler.NewAuthHandler(authService, testCookieCfg),
 		User:         handler.NewUserHandler(userService),
 		Project:      handler.NewProjectHandler(projectService, newIAM(store)),
-		Task:         handler.NewTaskHandler(taskService, viewService, activityService),
-		Sprint:       handler.NewSprintHandler(sprintService, viewService),
-		View:         handler.NewViewHandler(viewService),
-		Log:          log,
+		Task: handler.NewTaskHandler(taskService, viewService, activityService,
+			handler.WithTaskAssignedProjectService(projectService)),
+		Sprint: handler.NewSprintHandler(sprintService, viewService),
+		View:   handler.NewViewHandler(viewService),
+		Log:    log,
 	})
+}
+
+// buildTaskTestRouterWithProjectRepo is like buildTaskTestRouter but also
+// returns the in-memory project repo so tests can seed members for
+// created_by_user_id validation.
+func buildTaskTestRouterWithProjectRepo(taskRepo *fakeTaskRepo, store *projectPermStore) (http.Handler, *fakeProjectRepo) {
+	tm := jwttoken.New(testSecret, 15*time.Minute, 168*time.Hour)
+	refreshStore := &fakeRefreshStore{}
+	userRepo := newFakeUserRepo()
+	authService := authsvc.New(userRepo, tm, refreshStore, 168*time.Hour, 24*time.Hour)
+	userService := usersvc.New(userRepo)
+	projectRepo := newFakeProjectRepo()
+	projectService := projectsvc.New(projectRepo, taskRepo, nil)
+	taskService := tasksvc.New(taskRepo)
+	sprintService := sprintsvc.New(newFakeSprintRepoIT(), taskRepo, nil)
+	viewService := sprintsvc.NewViewService(newFakeViewRepoIT(), newFakeSprintRepoIT(), taskRepo, nil)
+	activityRepo := newFakeTaskActivityRepo()
+	activityService := tasksvc.NewActivityService(activitysvc.New(activityRepo, &fakeActivityMemberRepo{}, nil), taskRepo, &fakeActivityMemberRepo{})
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	return router.New(router.Deps{
+		TokenManager: tm,
+		IAM:          newIAM(store),
+		TaskNumbers:  taskRepo,
+		Health:       handler.NewHealthHandler(),
+		Auth:         handler.NewAuthHandler(authService, testCookieCfg),
+		User:         handler.NewUserHandler(userService),
+		Project:      handler.NewProjectHandler(projectService, newIAM(store)),
+		Task: handler.NewTaskHandler(taskService, viewService, activityService,
+			handler.WithTaskAssignedProjectService(projectService)),
+		Sprint: handler.NewSprintHandler(sprintService, viewService),
+		View:   handler.NewViewHandler(viewService),
+		Log:    log,
+	}), projectRepo
 }
 
 func issueTaskToken(t *testing.T, subject string) string {
@@ -1419,6 +1454,69 @@ func TestIntegrationSprints_InvalidStatusReturns400(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Task tests
 // ---------------------------------------------------------------------------
+
+func TestIntegrationTasks_Create_CreatedByUserID_ValidMember(t *testing.T) {
+	taskRepo := newFakeTaskRepoIT()
+	projectID := uuid.New()
+	alice := uuid.New()
+	admin := uuid.New()
+	store := &projectPermStore{
+		projectPerms: map[uuid.UUID][]iam.Action{
+			projectID: {iam.ActionTasksRead, iam.ActionTasksWrite},
+		},
+	}
+	r, projectRepo := buildTaskTestRouterWithProjectRepo(taskRepo, store)
+	projectRepo.projects[projectID] = &projectdom.Project{ID: projectID, Name: "p"}
+	projectRepo.members[memberKey(projectID, alice)] = &projectdom.ProjectMember{
+		ID: uuid.New(), ProjectID: projectID, AccountID: alice, UserID: alice,
+		MemberType: "human", Username: "alice", FullName: "Alice",
+	}
+
+	tok := issueTaskToken(t, admin.String())
+	base := fmt.Sprintf("/api/v1/projects/%s/tasks", projectID)
+	w := serve(r, authedJSONReq(t.Context(), http.MethodPost, base, tok, map[string]any{
+		"title":              "Attributed create",
+		"created_by_user_id": alice.String(),
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	taskID := taskIDFrom(t, "task", w.Body.Bytes())
+	if _, err := taskRepo.FindTaskByID(t.Context(), uuid.MustParse(taskID)); err != nil {
+		t.Fatalf("expected task persisted: %v", err)
+	}
+}
+
+func TestIntegrationTasks_Create_CreatedByUserID_NonMember(t *testing.T) {
+	taskRepo := newFakeTaskRepoIT()
+	projectID := uuid.New()
+	store := &projectPermStore{
+		projectPerms: map[uuid.UUID][]iam.Action{
+			projectID: {iam.ActionTasksRead, iam.ActionTasksWrite},
+		},
+	}
+	r, projectRepo := buildTaskTestRouterWithProjectRepo(taskRepo, store)
+	projectRepo.projects[projectID] = &projectdom.Project{ID: projectID, Name: "p"}
+
+	tok := issueTaskToken(t, uuid.NewString())
+	base := fmt.Sprintf("/api/v1/projects/%s/tasks", projectID)
+	w := serve(r, authedJSONReq(t.Context(), http.MethodPost, base, tok, map[string]any{
+		"title":              "Should fail",
+		"created_by_user_id": uuid.New().String(),
+	}))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d (%s)", w.Code, w.Body.String())
+	}
+	if code := decodeErrorCode(t, w); code != "PROJECT_MEMBER_NOT_FOUND" {
+		t.Fatalf("error_code = %q, want PROJECT_MEMBER_NOT_FOUND", code)
+	}
+	taskRepo.mu.RLock()
+	n := len(taskRepo.tasks)
+	taskRepo.mu.RUnlock()
+	if n != 0 {
+		t.Fatalf("expected no task created, got %d", n)
+	}
+}
 
 func TestIntegrationTasks_CRUD(t *testing.T) {
 	taskRepo := newFakeTaskRepoIT()
