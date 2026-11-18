@@ -200,6 +200,12 @@ func (f *fakeTaskSvc) GetTask(_ context.Context, _, id uuid.UUID) (*taskdom.Task
 		return nil, taskdom.ErrTaskNotFound
 	}
 	cp := *t
+	if t.CustomFields != nil {
+		cp.CustomFields = make(map[string]any, len(t.CustomFields))
+		for k, v := range t.CustomFields {
+			cp.CustomFields[k] = v
+		}
+	}
 	return &cp, nil
 }
 
@@ -284,6 +290,14 @@ func applyFakeTaskUpdate(t *taskdom.Task, in taskdom.UpdateTaskInput) {
 	}
 	if in.Description != nil {
 		t.Description = *in.Description
+	}
+	if in.CustomFields != nil {
+		if t.CustomFields == nil {
+			t.CustomFields = make(map[string]any)
+		}
+		for k, v := range *in.CustomFields {
+			t.CustomFields[k] = v
+		}
 	}
 }
 
@@ -1594,6 +1608,297 @@ func TestTaskHandler_UpdateTask_AssignmentModeOnlyRecordsActivity(t *testing.T) 
 	}
 	if !found {
 		t.Fatal("expected a task.updated activity recording the assignment_mode change, found none — TaskAutoAssignConsumer would never be woken up for this task")
+	}
+}
+
+func TestTaskHandler_UpdateTask_CustomFields_RecordsActivities(t *testing.T) {
+	svc := newFakeTaskSvc()
+	actSvc := newFakeActivitySvc()
+	r := buildTaskHandlerRouterWithActivity(svc, actSvc)
+	projectID := uuid.New()
+	actorID := uuid.New()
+
+	// Set up custom field definitions in the fake task service
+	svc.customFields = []*taskdom.CustomFieldDefinition{
+		{
+			ID:          uuid.New(),
+			ProjectID:   projectID,
+			FieldKey:    "actual_dev_efforts",
+			DisplayName: "Actual Dev Efforts",
+			FieldType:   taskdom.FieldTypeNumber,
+		},
+		{
+			ID:          uuid.New(),
+			ProjectID:   projectID,
+			FieldKey:    "dev_completion_date",
+			DisplayName: "Development Completion Date",
+			FieldType:   taskdom.FieldTypeDate,
+		},
+		{
+			ID:          uuid.New(),
+			ProjectID:   projectID,
+			FieldKey:    "qa_by",
+			DisplayName: "QA by",
+			FieldType:   taskdom.FieldTypeText,
+		},
+		{
+			ID:          uuid.New(),
+			ProjectID:   projectID,
+			FieldKey:    "qa_start_date",
+			DisplayName: "QA Start Date",
+			FieldType:   taskdom.FieldTypeDate,
+		},
+		{
+			ID:          uuid.New(),
+			ProjectID:   projectID,
+			FieldKey:    "qa_end_date",
+			DisplayName: "QA End Date",
+			FieldType:   taskdom.FieldTypeDate,
+		},
+	}
+
+	createW := doTaskRequestWithActor(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID),
+		map[string]any{
+			"title": "Task with custom fields",
+			"custom_fields": map[string]any{
+				"actual_dev_efforts": 2,
+			},
+		},
+		actorID,
+	)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("create: got %d: %s", createW.Code, createW.Body.String())
+	}
+	taskID := decodeTaskID(t, createW.Body.Bytes())
+
+	// Explicitly populate task's initial CustomFields in the fake
+	svc.mu.Lock()
+	svc.tasks[uuid.MustParse(taskID)].CustomFields = map[string]any{
+		"actual_dev_efforts": float64(2),
+	}
+	svc.mu.Unlock()
+
+	patchW := doTaskRequestWithActor(r, http.MethodPatch,
+		fmt.Sprintf("/projects/%s/tasks/%s", projectID, taskID),
+		map[string]any{
+			"custom_fields": map[string]any{
+				"actual_dev_efforts":  float64(5),
+				"dev_completion_date": "2026-11-10",
+				"qa_by":               "Jane Doe",
+				"qa_start_date":       "2026-11-11",
+				"qa_end_date":         "2026-11-15",
+			},
+		},
+		actorID,
+	)
+	if patchW.Code != http.StatusOK {
+		t.Fatalf("patch: expected 200, got %d: %s", patchW.Code, patchW.Body.String())
+	}
+
+	activities, _, err := actSvc.ListActivities(context.Background(), projectID, uuid.MustParse(taskID), nil, 100)
+	if err != nil {
+		t.Fatalf("unexpected error listing activities: %v", err)
+	}
+
+	var changes []taskdom.FieldChange
+	for _, a := range activities {
+		if a.ActivityType == taskdom.ActivityTypeTaskUpdated {
+			var payload struct {
+				Changes []taskdom.FieldChange `json:"changes"`
+			}
+			if err := json.Unmarshal(a.Content, &payload); err == nil {
+				changes = append(changes, payload.Changes...)
+			}
+		}
+	}
+
+	if len(changes) == 0 {
+		t.Fatal("expected task.updated activity recording custom field changes, found none")
+	}
+
+	expectedFields := map[string]bool{
+		"Actual Dev Efforts":          false,
+		"Development Completion Date": false,
+		"QA by":                       false,
+		"QA Start Date":               false,
+		"QA End Date":                 false,
+	}
+
+	for _, ch := range changes {
+		if _, ok := expectedFields[ch.Field]; ok {
+			expectedFields[ch.Field] = true
+			if ch.Field == "Actual Dev Efforts" {
+				if ch.Old != float64(2) || ch.New != float64(5) {
+					t.Errorf("expected Actual Dev Efforts from 2 to 5, got old=%v, new=%v", ch.Old, ch.New)
+				}
+				if ch.FieldKey != "actual_dev_efforts" {
+					t.Errorf("expected FieldKey=actual_dev_efforts, got %q", ch.FieldKey)
+				}
+			}
+			if ch.Field == "QA by" {
+				if ch.Old != nil || ch.New != "Jane Doe" {
+					t.Errorf("expected QA by new='Jane Doe', got old=%v, new=%v", ch.Old, ch.New)
+				}
+			}
+		}
+	}
+
+	for field, found := range expectedFields {
+		if !found {
+			t.Errorf("expected change for custom field %q, but none recorded", field)
+		}
+	}
+}
+
+func TestTaskHandler_UpdateTask_CustomFields_PartialUpdateDoesNotClearOtherFields(t *testing.T) {
+	svc := newFakeTaskSvc()
+	actSvc := newFakeActivitySvc()
+	projectID := uuid.New()
+	actorID := uuid.New()
+
+	svc.customFields = []*taskdom.CustomFieldDefinition{
+		{ID: uuid.New(), ProjectID: projectID, FieldKey: "actual_dev_efforts", DisplayName: "Actual Dev Efforts", FieldType: taskdom.FieldTypeNumber},
+		{ID: uuid.New(), ProjectID: projectID, FieldKey: "dev_completion_date", DisplayName: "Development Completion Date", FieldType: taskdom.FieldTypeDate},
+	}
+
+	r := buildTaskHandlerRouterWithActivity(svc, actSvc)
+
+	createW := doTaskRequestWithActor(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID),
+		map[string]any{"title": "Initial Task with Custom Fields"},
+		actorID,
+	)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", createW.Code)
+	}
+	taskID := decodeTaskID(t, createW.Body.Bytes())
+	taskUUID := uuid.MustParse(taskID)
+
+	svc.mu.Lock()
+	svc.tasks[taskUUID].CustomFields = map[string]any{
+		"actual_dev_efforts":  float64(3),
+		"dev_completion_date": "2026-11-01",
+	}
+	svc.mu.Unlock()
+
+	// Update only actual_dev_efforts to 5
+	patchW := doTaskRequestWithActor(r, http.MethodPatch,
+		fmt.Sprintf("/projects/%s/tasks/%s", projectID, taskUUID),
+		map[string]any{
+			"custom_fields": map[string]any{
+				"actual_dev_efforts": float64(5),
+			},
+		},
+		actorID,
+	)
+	if patchW.Code != http.StatusOK {
+		t.Fatalf("patch: expected 200, got %d: %s", patchW.Code, patchW.Body.String())
+	}
+
+	// Verify activities recorded only actual_dev_efforts
+	activities, _, err := actSvc.ListActivities(context.Background(), projectID, taskUUID, nil, 100)
+	if err != nil {
+		t.Fatalf("unexpected error listing activities: %v", err)
+	}
+
+	var changes []taskdom.FieldChange
+	for _, a := range activities {
+		if a.ActivityType == taskdom.ActivityTypeTaskUpdated {
+			var payload struct {
+				Changes []taskdom.FieldChange `json:"changes"`
+			}
+			if err := json.Unmarshal(a.Content, &payload); err == nil {
+				changes = append(changes, payload.Changes...)
+			}
+		}
+	}
+
+	if len(changes) != 1 {
+		t.Fatalf("expected exactly 1 field change, got %d: %+v", len(changes), changes)
+	}
+	if changes[0].FieldKey != "actual_dev_efforts" || changes[0].New != float64(5) {
+		t.Errorf("expected change on actual_dev_efforts=5, got %+v", changes[0])
+	}
+
+	// Verify task details still retain dev_completion_date as well
+	svc.mu.RLock()
+	finalTask := svc.tasks[taskUUID]
+	actualEfforts := finalTask.CustomFields["actual_dev_efforts"]
+	devDate := finalTask.CustomFields["dev_completion_date"]
+	svc.mu.RUnlock()
+
+	if actualEfforts != float64(5) {
+		t.Errorf("expected actual_dev_efforts=5, got %v", actualEfforts)
+	}
+	if devDate != "2026-11-01" {
+		t.Errorf("expected dev_completion_date='2026-11-01' preserved, got %v", devDate)
+	}
+}
+
+func TestTaskHandler_UpdateTask_DefaultFields_StillRecordsActivities(t *testing.T) {
+	svc := newFakeTaskSvc()
+	actSvc := newFakeActivitySvc()
+	projectID := uuid.New()
+	actorID := uuid.New()
+
+	r := buildTaskHandlerRouterWithActivity(svc, actSvc)
+
+	createW := doTaskRequestWithActor(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID),
+		map[string]any{"title": "Initial Title"},
+		actorID,
+	)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", createW.Code)
+	}
+	taskID := decodeTaskID(t, createW.Body.Bytes())
+	taskUUID := uuid.MustParse(taskID)
+
+	patchW := doTaskRequestWithActor(r, http.MethodPatch,
+		fmt.Sprintf("/projects/%s/tasks/%s", projectID, taskUUID),
+		map[string]any{"title": "Updated Title"},
+		actorID,
+	)
+	if patchW.Code != http.StatusOK {
+		t.Fatalf("patch: expected 200, got %d: %s", patchW.Code, patchW.Body.String())
+	}
+
+	activities, _, err := actSvc.ListActivities(context.Background(), projectID, taskUUID, nil, 100)
+	if err != nil {
+		t.Fatalf("unexpected error listing activities: %v", err)
+	}
+
+	var foundTitleChange bool
+	for _, a := range activities {
+		if a.ActivityType == taskdom.ActivityTypeTaskUpdated {
+			var payload struct {
+				Changes []taskdom.FieldChange `json:"changes"`
+			}
+			if err := json.Unmarshal(a.Content, &payload); err == nil {
+				for _, ch := range payload.Changes {
+					if ch.Field == "title" && ch.Old == "Initial Title" && ch.New == "Updated Title" {
+						foundTitleChange = true
+					}
+				}
+			}
+		}
+	}
+
+	if !foundTitleChange {
+		t.Error("expected task.updated activity recording title change from 'Initial Title' to 'Updated Title'")
+	}
+}
+
+func TestTaskHandler_CustomFieldValuesEqual_DateNormalization(t *testing.T) {
+	if !taskdom.CustomFieldValuesEqual("2026-11-10T00:00:00Z", "2026-11-10") {
+		t.Error("expected 2026-11-10T00:00:00Z and 2026-11-10 to be equal")
+	}
+	if !taskdom.CustomFieldValuesEqual("2026-11-10", "2026-11-10T00:00:00Z") {
+		t.Error("expected 2026-11-10 and 2026-11-10T00:00:00Z to be equal")
+	}
+	if taskdom.CustomFieldValuesEqual("2026-11-10", "2026-11-11") {
+		t.Error("expected 2026-11-10 and 2026-11-11 to NOT be equal")
 	}
 }
 

@@ -1405,18 +1405,78 @@ func (h *TaskHandler) taskChangedFields(ctx context.Context, old *taskdom.Task, 
 	}
 
 	if req.CustomFields != nil {
+		cfs, err := h.svc.ListCustomFieldDefinitions(ctx, old.ProjectID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to list custom field definitions for activity log", "error", err, "project_id", old.ProjectID)
+		}
+		displayNameMap := make(map[string]string, len(cfs))
+		for _, cf := range cfs {
+			displayNameMap[cf.FieldKey] = cf.DisplayName
+		}
+
 		// custom_fields is merged key by key, so only the submitted keys can change.
-		for key, v := range *req.CustomFields {
-			oldJSON, oldErr := json.Marshal(old.CustomFields[key])
-			newJSON, newErr := json.Marshal(v)
-			if oldErr != nil || newErr != nil || string(oldJSON) != string(newJSON) {
-				changes = append(changes, taskdom.FieldChange{Field: "custom_fields"})
-				break
+		sortedKeys := make([]string, 0, len(*req.CustomFields))
+		for k := range *req.CustomFields {
+			sortedKeys = append(sortedKeys, k)
+		}
+		sort.Strings(sortedKeys)
+
+		for _, k := range sortedKeys {
+			var oldVal any
+			var hadOld bool
+			if old.CustomFields != nil {
+				oldVal, hadOld = old.CustomFields[k]
+			}
+			newVal := (*req.CustomFields)[k]
+
+			if isCustomFieldEmpty(hadOld, oldVal) && isCustomFieldEmpty(true, newVal) {
+				continue
+			}
+
+			if !customFieldValuesEqual(oldVal, newVal) {
+				fieldName := k
+				if dn, ok := displayNameMap[k]; ok && dn != "" {
+					fieldName = dn
+				}
+				var finalOld any
+				if hadOld && !isCustomFieldEmpty(hadOld, oldVal) {
+					finalOld = oldVal
+				}
+				var finalNew any
+				if !isCustomFieldEmpty(true, newVal) {
+					finalNew = newVal
+				}
+				changes = append(changes, taskdom.FieldChange{
+					Field:    fieldName,
+					FieldKey: k,
+					Old:      finalOld,
+					New:      finalNew,
+				})
 			}
 		}
 	}
 
 	return changes
+}
+
+// customFieldValuesEqual compares two custom-field values by delegating to taskdom.CustomFieldValuesEqual.
+func customFieldValuesEqual(a, b any) bool {
+	return taskdom.CustomFieldValuesEqual(a, b)
+}
+
+func isCustomFieldEmpty(had bool, val any) bool {
+	if !had || val == nil {
+		return true
+	}
+	switch v := val.(type) {
+	case string:
+		return strings.TrimSpace(v) == ""
+	case []any:
+		return len(v) == 0
+	case []string:
+		return len(v) == 0
+	}
+	return false
 }
 
 // resolveStatusName looks up a status by ID and returns its name, falling back

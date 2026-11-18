@@ -1,8 +1,10 @@
 package taskdom
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -88,9 +90,72 @@ type Activity struct {
 
 // FieldChange records a single before/after value for task.updated events.
 type FieldChange struct {
-	Field string `json:"field"`
-	Old   any    `json:"old"`
-	New   any    `json:"new"`
+	Field    string `json:"field"`
+	FieldKey string `json:"field_key,omitempty"`
+	Old      any    `json:"old"`
+	New      any    `json:"new"`
+}
+
+// CustomFieldValuesEqual compares two custom-field values for semantic equality,
+// handling canonical JSON representations, numeric equivalences, and normalized date strings.
+func CustomFieldValuesEqual(a, b any) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Try date string comparison if both values are strings.
+	if aStr, ok := a.(string); ok {
+		if bStr, ok := b.(string); ok {
+			if aStr == bStr {
+				return true
+			}
+			tA, errA := ParseFlexibleDate(aStr)
+			tB, errB := ParseFlexibleDate(bStr)
+			if errA == nil && errB == nil {
+				return tA.Equal(tB)
+			}
+		}
+	}
+
+	aj, aErr := json.Marshal(a)
+	bj, bErr := json.Marshal(b)
+	if aErr == nil && bErr == nil {
+		return bytes.Equal(aj, bj)
+	}
+
+	return a == b
+}
+
+var errInvalidDateFormat = errors.New("invalid date format")
+
+// ParseFlexibleDate parses dates commonly used in tasks (RFC3339, date-only, etc.).
+func ParseFlexibleDate(s string) (time.Time, error) {
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range formats {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, errInvalidDateFormat
+}
+
+// IsCustomFieldEmpty reports whether a custom field value represents an empty value.
+func IsCustomFieldEmpty(present bool, val any) bool {
+	if !present || val == nil {
+		return true
+	}
+	if s, ok := val.(string); ok && s == "" {
+		return true
+	}
+	return false
 }
 
 // Origin identifies what caused an activity, independently of the actor.
