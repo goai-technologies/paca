@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1423,14 +1422,9 @@ func (h *TaskHandler) taskChangedFields(ctx context.Context, old *taskdom.Task, 
 	return changes
 }
 
-// customFieldValuesEqual compares two custom-field values by their canonical JSON encoding.
+// customFieldValuesEqual compares two custom-field values by delegating to taskdom.CustomFieldValuesEqual.
 func customFieldValuesEqual(a, b any) bool {
-	aj, aErr := json.Marshal(a)
-	bj, bErr := json.Marshal(b)
-	if aErr != nil || bErr != nil {
-		return false
-	}
-	return bytes.Equal(aj, bj)
+	return taskdom.CustomFieldValuesEqual(a, b)
 }
 
 func isCustomFieldEmpty(had bool, val any) bool {

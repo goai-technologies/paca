@@ -1,3 +1,4 @@
+
 package worker
 
 import (
@@ -726,7 +727,14 @@ func (c *TaskAutofillConsumer) buildAnswerUpdate(ctx context.Context, projectID 
 	}
 	if customDirty {
 		in.CustomFields = &customFields
-		fieldDefs, _ := c.taskService.ListCustomFieldDefinitions(ctx, projectID)
+		fieldDefs, err := c.taskService.ListCustomFieldDefinitions(ctx, projectID)
+		if err != nil {
+			if c.log != nil {
+				c.log.WarnContext(ctx, "failed to list custom field definitions for autofill activity", "error", err, "project_id", projectID)
+			} else {
+				slog.WarnContext(ctx, "failed to list custom field definitions for autofill activity", "error", err, "project_id", projectID)
+			}
+		}
 		displayNameMap := make(map[string]string, len(fieldDefs))
 		for _, fd := range fieldDefs {
 			displayNameMap[fd.FieldKey] = fd.DisplayName
@@ -742,16 +750,24 @@ func (c *TaskAutofillConsumer) buildAnswerUpdate(ctx context.Context, projectID 
 			if task.CustomFields != nil {
 				oldVal = task.CustomFields[fk]
 			}
-			if !customFieldValuesEqual(oldVal, nVal) {
+			if !taskdom.CustomFieldValuesEqual(oldVal, nVal) {
 				fieldName := fk
 				if dn := displayNameMap[fk]; dn != "" {
 					fieldName = dn
 				}
+				var finalOld any
+				if task.CustomFields != nil && !taskdom.IsCustomFieldEmpty(true, oldVal) {
+					finalOld = oldVal
+				}
+				var finalNew any
+				if !taskdom.IsCustomFieldEmpty(true, nVal) {
+					finalNew = nVal
+				}
 				changes = append(changes, taskdom.FieldChange{
 					Field:    fieldName,
 					FieldKey: fk,
-					Old:      oldVal,
-					New:      nVal,
+					Old:      finalOld,
+					New:      finalNew,
 				})
 			}
 		}

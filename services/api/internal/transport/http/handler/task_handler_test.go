@@ -1568,19 +1568,15 @@ func TestTaskHandler_UpdateTask_CustomFields_PartialUpdateDoesNotClearOtherField
 	if createW.Code != http.StatusCreated {
 		t.Fatalf("create: expected 201, got %d", createW.Code)
 	}
+	taskID := decodeTaskID(t, createW.Body.Bytes())
+	taskUUID := uuid.MustParse(taskID)
 
-	var created struct {
-		Data struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	_ = json.Unmarshal(createW.Body.Bytes(), &created)
-	taskUUID := uuid.MustParse(created.Data.ID)
-
+	svc.mu.Lock()
 	svc.tasks[taskUUID].CustomFields = map[string]any{
 		"actual_dev_efforts":  float64(3),
 		"dev_completion_date": "2026-11-01",
 	}
+	svc.mu.Unlock()
 
 	// Update only actual_dev_efforts to 5
 	patchW := doTaskRequestWithActor(r, http.MethodPatch,
@@ -1622,12 +1618,83 @@ func TestTaskHandler_UpdateTask_CustomFields_PartialUpdateDoesNotClearOtherField
 	}
 
 	// Verify task details still retain dev_completion_date as well
+	svc.mu.RLock()
 	finalTask := svc.tasks[taskUUID]
-	if finalTask.CustomFields["actual_dev_efforts"] != float64(5) {
-		t.Errorf("expected actual_dev_efforts=5, got %v", finalTask.CustomFields["actual_dev_efforts"])
+	actualEfforts := finalTask.CustomFields["actual_dev_efforts"]
+	devDate := finalTask.CustomFields["dev_completion_date"]
+	svc.mu.RUnlock()
+
+	if actualEfforts != float64(5) {
+		t.Errorf("expected actual_dev_efforts=5, got %v", actualEfforts)
 	}
-	if finalTask.CustomFields["dev_completion_date"] != "2026-11-01" {
-		t.Errorf("expected dev_completion_date='2026-11-01' preserved, got %v", finalTask.CustomFields["dev_completion_date"])
+	if devDate != "2026-11-01" {
+		t.Errorf("expected dev_completion_date='2026-11-01' preserved, got %v", devDate)
+	}
+}
+
+func TestTaskHandler_UpdateTask_DefaultFields_StillRecordsActivities(t *testing.T) {
+	svc := newFakeTaskSvc()
+	actSvc := newFakeActivitySvc()
+	projectID := uuid.New()
+	actorID := uuid.New()
+
+	r := buildTaskHandlerRouterWithActivity(svc, actSvc)
+
+	createW := doTaskRequestWithActor(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID),
+		map[string]any{"title": "Initial Title"},
+		actorID,
+	)
+	if createW.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", createW.Code)
+	}
+	taskID := decodeTaskID(t, createW.Body.Bytes())
+	taskUUID := uuid.MustParse(taskID)
+
+	patchW := doTaskRequestWithActor(r, http.MethodPatch,
+		fmt.Sprintf("/projects/%s/tasks/%s", projectID, taskUUID),
+		map[string]any{"title": "Updated Title"},
+		actorID,
+	)
+	if patchW.Code != http.StatusOK {
+		t.Fatalf("patch: expected 200, got %d: %s", patchW.Code, patchW.Body.String())
+	}
+
+	activities, _, err := actSvc.ListActivities(context.Background(), projectID, taskUUID, nil, 100)
+	if err != nil {
+		t.Fatalf("unexpected error listing activities: %v", err)
+	}
+
+	var foundTitleChange bool
+	for _, a := range activities {
+		if a.ActivityType == taskdom.ActivityTypeTaskUpdated {
+			var payload struct {
+				Changes []taskdom.FieldChange `json:"changes"`
+			}
+			if err := json.Unmarshal(a.Content, &payload); err == nil {
+				for _, ch := range payload.Changes {
+					if ch.Field == "title" && ch.Old == "Initial Title" && ch.New == "Updated Title" {
+						foundTitleChange = true
+					}
+				}
+			}
+		}
+	}
+
+	if !foundTitleChange {
+		t.Error("expected task.updated activity recording title change from 'Initial Title' to 'Updated Title'")
+	}
+}
+
+func TestTaskHandler_CustomFieldValuesEqual_DateNormalization(t *testing.T) {
+	if !taskdom.CustomFieldValuesEqual("2026-11-10T00:00:00Z", "2026-11-10") {
+		t.Error("expected 2026-11-10T00:00:00Z and 2026-11-10 to be equal")
+	}
+	if !taskdom.CustomFieldValuesEqual("2026-11-10", "2026-11-10T00:00:00Z") {
+		t.Error("expected 2026-11-10 and 2026-11-10T00:00:00Z to be equal")
+	}
+	if taskdom.CustomFieldValuesEqual("2026-11-10", "2026-11-11") {
+		t.Error("expected 2026-11-10 and 2026-11-11 to NOT be equal")
 	}
 }
 
