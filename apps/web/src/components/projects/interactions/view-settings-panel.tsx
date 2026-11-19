@@ -1519,6 +1519,31 @@ export function ViewSettingsPanel({
 									/>
 								</SettingRow>
 
+								{sortByValue !== "manual" && (
+									<SettingRow
+										label={`${t("layout.timeline.sortByLabel")} order`}
+									>
+										<DynamicSelect
+											value={draft.sort_direction ?? "asc"}
+											options={[
+												{
+													key: "asc",
+													label: t("layout.timeline.sortAscending"),
+												},
+												{
+													key: "desc",
+													label: t("layout.timeline.sortDescending"),
+												},
+											]}
+											onChange={(v) =>
+												update({
+													sort_direction: v === "desc" ? "desc" : "asc",
+												})
+											}
+										/>
+									</SettingRow>
+								)}
+
 								{(view?.layout === "Table" || view?.layout === "Gantt") && (
 									<SettingRow label={t("layout.viewSettings.subtasksLabel")}>
 										<DynamicSelect

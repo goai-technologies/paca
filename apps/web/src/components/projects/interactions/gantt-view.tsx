@@ -1,5 +1,14 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { CalendarDays, ChevronRight, LocateFixed } from "lucide-react";
+import {
+	ArrowDown,
+	ArrowUp,
+	ArrowUpDown,
+	CalendarDays,
+	Check,
+	ChevronDown,
+	ChevronRight,
+	LocateFixed,
+} from "lucide-react";
 import {
 	Fragment,
 	useCallback,
@@ -11,6 +20,13 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { PaneResizeHandle } from "@/components/shared/pane-resize-handle";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import {
@@ -53,6 +69,11 @@ import {
 	taskSpan,
 	violatesBlock,
 } from "./gantt-scale";
+import {
+	type SortDirection,
+	sortTasks,
+	TIMELINE_SORT_OPTIONS,
+} from "./task-sort";
 import {
 	resolveSubtaskMode,
 	useSubtaskExpansion,
@@ -111,6 +132,14 @@ interface GanttViewProps {
 	zoom?: GanttZoom;
 	/** Remembers a zoom the user picked for this view. */
 	onZoomChange?: (zoom: GanttZoom) => void;
+	/** Current sort field (e.g. "card_id", "priority", "status", "created_at", "updated_at", "assignee", "manual") */
+	sortBy?: string;
+	/** Current sort direction ("asc" | "desc") */
+	sortDirection?: "asc" | "desc";
+	/** Callback when user changes sort field or direction */
+	onSortChange?: (field: string, direction: "asc" | "desc") => void;
+	/** Project task ID prefix for display (e.g. "PDM") */
+	taskIdPrefix?: string;
 	/** Whether "blocks" links are drawn as arrows. */
 	showDependencies?: boolean;
 	/** The project's "blocks" links; only those between shown bars are drawn. */
@@ -198,6 +227,10 @@ export function GanttView({
 	onRescheduleTask,
 	zoom: zoomProp,
 	onZoomChange,
+	sortBy: sortByProp,
+	sortDirection: sortDirProp,
+	onSortChange,
+	taskIdPrefix,
 	showDependencies = true,
 	blockLinks,
 	onCreateTask,
@@ -219,9 +252,69 @@ export function GanttView({
 	const [draggingId, setDraggingId] = useState<string | null>(null);
 	const [overGroupKey, setOverGroupKey] = useState<string | null>(null);
 	const [overTaskId, setOverTaskId] = useState<string | null>(null);
+	const [activeSortBy, setActiveSortBy] = useState<string>(() => {
+		if (sortByProp) return sortByProp;
+		if (viewConfig?.sort_by) return viewConfig.sort_by;
+		if (typeof window !== "undefined" && projectId) {
+			const saved = localStorage.getItem(`paca:timeline:sort_by:${projectId}`);
+			if (saved) return saved;
+		}
+		return "manual";
+	});
+
+	const [activeSortDir, setActiveSortDir] = useState<SortDirection>(() => {
+		if (sortDirProp === "asc" || sortDirProp === "desc") return sortDirProp;
+		if (
+			viewConfig?.sort_direction === "asc" ||
+			viewConfig?.sort_direction === "desc"
+		) {
+			return viewConfig.sort_direction;
+		}
+		if (typeof window !== "undefined" && projectId) {
+			const saved = localStorage.getItem(`paca:timeline:sort_dir:${projectId}`);
+			if (saved === "asc" || saved === "desc") return saved;
+		}
+		return "asc";
+	});
+
+	useEffect(() => {
+		if (sortByProp && sortByProp !== activeSortBy) setActiveSortBy(sortByProp);
+	}, [sortByProp, activeSortBy]);
+
+	useEffect(() => {
+		if (sortDirProp && sortDirProp !== activeSortDir)
+			setActiveSortDir(sortDirProp);
+	}, [sortDirProp, activeSortDir]);
+
+	const handleSortChange = (newField: string, newDir: SortDirection) => {
+		setActiveSortBy(newField);
+		setActiveSortDir(newDir);
+		if (typeof window !== "undefined" && projectId) {
+			try {
+				localStorage.setItem(`paca:timeline:sort_by:${projectId}`, newField);
+				localStorage.setItem(`paca:timeline:sort_dir:${projectId}`, newDir);
+			} catch {}
+		}
+		onSortChange?.(newField, newDir);
+	};
+
+	const handleToggleDirection = () => {
+		const nextDir = activeSortDir === "asc" ? "desc" : "asc";
+		handleSortChange(activeSortBy, nextDir);
+	};
+
+	const activeSortOption = TIMELINE_SORT_OPTIONS.find(
+		(opt) => opt.key === activeSortBy,
+	);
+	const activeSortLabel: string = activeSortOption
+		? String((t as (k: string) => string)(activeSortOption.labelKey))
+		: String(
+				(t as (k: string) => string)("layout.timeline.sortOptions.manual"),
+			);
+
 	const isStatusGrouping = !columnBy || columnBy === "status";
 	const canDrag = canEdit && !!onMoveToColumn;
-	const canReorder = manualSort && !!onReorderTask;
+	const canReorder = manualSort && activeSortBy === "manual" && !!onReorderTask;
 	const canReschedule = canEdit && !!onRescheduleTask;
 
 	const dragStartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -873,6 +966,11 @@ export function GanttView({
 							isExpanded={expansion.isExpanded}
 							renderRow={renderRowBody}
 							leftColWidth={leftColW}
+							sortBy={activeSortBy}
+							sortDirection={activeSortDir}
+							statuses={statuses}
+							members={members}
+							taskIdPrefix={taskIdPrefix}
 						/>
 					)}
 			</Fragment>
@@ -913,38 +1011,97 @@ export function GanttView({
 	const hasMajorBand = scale.major.length > 0;
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
-			{/* ── Toolbar: zoom and jump to today ─────────────────────── */}
-			<div className="flex shrink-0 items-center gap-2 border-b border-border/20 px-4 py-1.5">
-				<fieldset
-					aria-label={t("layout.gantt.zoomLabel")}
-					className="flex items-center rounded-lg border border-border/40 p-0.5"
-				>
-					{GANTT_ZOOMS.map((z) => (
-						<button
-							key={z}
-							type="button"
-							aria-pressed={zoom === z}
-							onClick={() => changeZoom(z)}
-							className={cn(
-								"rounded-md px-2.5 py-0.5 text-xs font-medium transition-colors duration-100",
-								zoom === z
-									? "bg-primary/12 text-primary"
-									: "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-							)}
+			{/* ── Toolbar: zoom, jump to today, and sort options ─────────── */}
+			<div className="flex shrink-0 items-center justify-between border-b border-border/20 px-4 py-1.5 gap-2">
+				<div className="flex items-center gap-2">
+					<fieldset
+						aria-label={t("layout.gantt.zoomLabel")}
+						className="flex items-center rounded-lg border border-border/40 p-0.5"
+					>
+						{GANTT_ZOOMS.map((z) => (
+							<button
+								key={z}
+								type="button"
+								aria-pressed={zoom === z}
+								onClick={() => changeZoom(z)}
+								className={cn(
+									"rounded-md px-2.5 py-0.5 text-xs font-medium transition-colors duration-100",
+									zoom === z
+										? "bg-primary/12 text-primary"
+										: "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+								)}
+							>
+								{t(ZOOM_LABEL_KEYS[z])}
+							</button>
+						))}
+					</fieldset>
+					<button
+						type="button"
+						onClick={jumpToToday}
+						title={t("layout.gantt.jumpToToday")}
+						className="flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors duration-100 hover:border-primary/50 hover:text-primary"
+					>
+						<LocateFixed className="size-3.5" />
+						{t("layout.gantt.today")}
+					</button>
+				</div>
+
+				{/* ── Sort controls ─────────────────────────────────────── */}
+				<div className="flex items-center gap-1.5">
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							render={
+								<button
+									type="button"
+									className="flex items-center gap-1.5 rounded-lg border border-border/40 bg-background/50 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors duration-100 hover:border-primary/50 hover:text-foreground"
+								/>
+							}
 						>
-							{t(ZOOM_LABEL_KEYS[z])}
+							<ArrowUpDown className="size-3.5 shrink-0 opacity-70" />
+							<span>{activeSortLabel}</span>
+							<ChevronDown className="size-3 opacity-60" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-52">
+							<div className="px-2 py-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+								{t("layout.timeline.sortByLabel")}
+							</div>
+							<DropdownMenuSeparator />
+							{TIMELINE_SORT_OPTIONS.map((opt) => (
+								<DropdownMenuItem
+									key={opt.key}
+									onClick={() => handleSortChange(opt.key, activeSortDir)}
+									className="flex items-center justify-between text-xs"
+								>
+									<span>
+										{String((t as (k: string) => string)(opt.labelKey))}
+									</span>
+									{activeSortBy === opt.key && (
+										<Check className="size-3.5 text-primary" />
+									)}
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuContent>
+					</DropdownMenu>
+
+					{activeSortBy !== "manual" && (
+						<button
+							type="button"
+							onClick={handleToggleDirection}
+							title={
+								activeSortDir === "asc"
+									? t("layout.timeline.sortAscending")
+									: t("layout.timeline.sortDescending")
+							}
+							className="flex size-7 items-center justify-center rounded-lg border border-border/40 text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors duration-100"
+						>
+							{activeSortDir === "asc" ? (
+								<ArrowUp className="size-3.5 text-primary" />
+							) : (
+								<ArrowDown className="size-3.5 text-primary" />
+							)}
 						</button>
-					))}
-				</fieldset>
-				<button
-					type="button"
-					onClick={jumpToToday}
-					title={t("layout.gantt.jumpToToday")}
-					className="flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors duration-100 hover:border-primary/50 hover:text-primary"
-				>
-					<LocateFixed className="size-3.5" />
-					{t("layout.gantt.today")}
-				</button>
+					)}
+				</div>
 			</div>
 
 			<div ref={scrollRef} className="flex-1 overflow-auto">
@@ -967,15 +1124,22 @@ export function GanttView({
 						{/* Task column label */}
 						<div
 							className={cn(
-								"sticky left-0 z-30 flex shrink-0 items-center gap-1.5",
+								"sticky left-0 z-30 flex shrink-0 items-center justify-between",
 								"border-r border-border/25 bg-background/95 px-4",
 							)}
 							style={{ width: leftColW }}
 						>
-							<CalendarDays className="size-3 text-muted-foreground/45" />
-							<span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/55">
-								{t("layout.gantt.taskColumnLabel")}
-							</span>
+							<div className="flex items-center gap-1.5 min-w-0">
+								<CalendarDays className="size-3 text-muted-foreground/45 shrink-0" />
+								<span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/55 truncate">
+									{t("layout.gantt.taskColumnLabel")}
+								</span>
+								{activeSortBy !== "manual" && (
+									<span className="ml-1 text-[10px] font-medium text-primary/90 bg-primary/10 rounded px-1.5 py-0.5 truncate">
+										{activeSortLabel} {activeSortDir === "asc" ? "↑" : "↓"}
+									</span>
+								)}
+							</div>
 							<PaneResizeHandle
 								config={GANTT_TASK_PANE}
 								pane={taskPane}
@@ -1069,10 +1233,16 @@ export function GanttView({
 							</div>
 						) : (
 							groupDefs.map((group) => {
-								const groupTasks = tasks.filter((task) =>
+								const rawGroupTasks = tasks.filter((task) =>
 									getTaskColumnKeys(task, columnBy, viewCtx).includes(
 										group.key,
 									),
+								);
+								const groupTasks = sortTasks(
+									rawGroupTasks,
+									activeSortBy,
+									activeSortDir,
+									{ statuses, members, taskIdPrefix },
 								);
 								// Keep empty groups as drop targets while dragging.
 								if (groupTasks.length === 0 && !(canDrag && draggingId))
@@ -1213,6 +1383,11 @@ interface GanttChildRowsProps {
 	isExpanded: (taskId: string) => boolean;
 	renderRow: (task: Task, depth: number) => React.ReactNode;
 	leftColWidth: number;
+	sortBy?: string;
+	sortDirection?: SortDirection;
+	statuses?: TaskStatus[];
+	members?: ProjectMember[];
+	taskIdPrefix?: string;
 }
 
 /** The children of an expanded timeline row, fetched when it opens with the
@@ -1225,14 +1400,28 @@ function GanttChildRows({
 	isExpanded,
 	renderRow,
 	leftColWidth,
+	sortBy,
+	sortDirection = "asc",
+	statuses,
+	members,
+	taskIdPrefix,
 }: GanttChildRowsProps) {
 	const { t } = useTranslation("projects");
 	const query = useInfiniteQuery(
 		childTasksInfiniteQueryOptions(projectId, parent.id, filters),
 	);
-	const children = useMemo(
+	const rawChildren = useMemo(
 		() => query.data?.pages.flatMap((p) => p.items) ?? [],
 		[query.data],
+	);
+	const children = useMemo(
+		() =>
+			sortTasks(rawChildren, sortBy, sortDirection, {
+				statuses,
+				members,
+				taskIdPrefix,
+			}),
+		[rawChildren, sortBy, sortDirection, statuses, members, taskIdPrefix],
 	);
 	const note = (text: React.ReactNode) => (
 		<div className="flex border-b border-border/10">
@@ -1277,6 +1466,11 @@ function GanttChildRows({
 							isExpanded={isExpanded}
 							renderRow={renderRow}
 							leftColWidth={leftColWidth}
+							sortBy={sortBy}
+							sortDirection={sortDirection}
+							statuses={statuses}
+							members={members}
+							taskIdPrefix={taskIdPrefix}
 						/>
 					)}
 				</Fragment>

@@ -2419,7 +2419,19 @@
 		},
 		"timeline": {
 			"title": "时间线",
-			"description": "在甘特图上展示史诗和长期规划。"
+			"description": "在甘特图上展示史诗和长期规划。",
+			"sortByLabel": "排序方式",
+			"sortAscending": "升序",
+			"sortDescending": "降序",
+			"sortOptions": {
+				"manual": "手动",
+				"cardId": "卡片 ID",
+				"priority": "优先级",
+				"status": "状态",
+				"createdAt": "创建日期",
+				"updatedAt": "更新日期",
+				"assignee": "经办人"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "未找到冲刺或访问被拒绝。",

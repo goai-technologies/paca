@@ -2419,7 +2419,19 @@
 		},
 		"timeline": {
 			"title": "Dòng thời gian",
-			"description": "Epic và kế hoạch dài hạn trên biểu đồ Gantt."
+			"description": "Epic và kế hoạch dài hạn trên biểu đồ Gantt.",
+			"sortByLabel": "Sắp xếp theo",
+			"sortAscending": "Tăng dần",
+			"sortDescending": "Giảm dần",
+			"sortOptions": {
+				"manual": "Thủ công",
+				"cardId": "Mã thẻ",
+				"priority": "Độ ưu tiên",
+				"status": "Trạng thái",
+				"createdAt": "Ngày tạo",
+				"updatedAt": "Ngày cập nhật",
+				"assignee": "Người thực hiện"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "Không tìm thấy sprint hoặc bạn không có quyền truy cập.",
