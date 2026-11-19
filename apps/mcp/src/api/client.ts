@@ -5,10 +5,10 @@ import type {
 	CreateSprintInput,
 	CreateTaskInput,
 	Document,
+	GitCredential,
+	GitRepository,
 	PacaConfig,
 	Project,
-	RepositoryCloneInfo,
-	RepositoryListItem,
 	Sprint,
 	SuccessEnvelope,
 	Task,
@@ -18,7 +18,13 @@ import type {
 	UpdateTaskInput,
 } from "../types/index.js";
 import { formatApiRequestError, markdownToBlocknote } from "../utils/index.js";
-import { fetchAllPages, withPaging } from "./paginate.js";
+import {
+	LIST_PAGE_SIZE,
+	type Page,
+	type PageOptions,
+	toPage,
+	withPaging,
+} from "./paginate.js";
 
 /**
  * Paca API client for interacting with the Paca backend.
@@ -49,6 +55,11 @@ export class PacaAPIClient {
 			"Content-Type": "application/json",
 			"X-API-Key": this.config.apiKey,
 		};
+		// Lets core attribute what the agent posts to this conversation; core
+		// ignores it unless the calling agent owns the conversation.
+		if (this.config.conversationId) {
+			headers["X-Paca-Conversation-Id"] = this.config.conversationId;
+		}
 
 		const options: RequestInit = {
 			method,
@@ -108,17 +119,28 @@ export class PacaAPIClient {
 
 	// ==================== Project Methods ====================
 
-	async listProjects(
-		page: number = 1,
-		pageSize: number = 50,
-	): Promise<Project[]> {
-		const response = await this.get(
-			`/api/v1/projects?page=${page}&page_size=${pageSize}`,
+	/** One page of the projects the caller can access. Projects page by
+	 *  number, so the cursor here is the next page number. */
+	async listProjects(opts: PageOptions = {}): Promise<Page<Project>> {
+		const pageSize = opts.pageSize ?? LIST_PAGE_SIZE;
+		const pageNumber = Math.max(
+			1,
+			Number.parseInt(opts.cursor ?? "1", 10) || 1,
 		);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.projects || response.data || [];
+		const response = await this.get(
+			`/api/v1/projects?page=${pageNumber}&page_size=${pageSize}`,
+		);
+		if (Array.isArray(response)) return { items: response, nextCursor: null };
+		const items: Project[] =
+			response.items || response.projects || response.data || [];
+		const total =
+			typeof response.total === "number" ? response.total : undefined;
+		const more = total !== undefined && pageNumber * pageSize < total;
+		return {
+			items,
+			nextCursor: more ? String(pageNumber + 1) : null,
+			...(total !== undefined ? { total } : {}),
+		};
 	}
 
 	async getProject(projectId: string): Promise<Project> {
@@ -267,12 +289,22 @@ export class PacaAPIClient {
 
 	// ==================== Sprint Methods ====================
 
-	async listSprints(projectId: string): Promise<Sprint[]> {
-		const response = await this.get(`/api/v1/projects/${projectId}/sprints`);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.sprints || response.data || [];
+	async listSprints(
+		projectId: string,
+		opts: PageOptions & { status?: string; search?: string } = {},
+	): Promise<Page<Sprint>> {
+		const filters = new URLSearchParams();
+		if (opts.status) filters.set("status", opts.status);
+		if (opts.search) filters.set("search", opts.search);
+		const qs = filters.toString();
+		return toPage<Sprint>(
+			await this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/sprints${qs ? `?${qs}` : ""}`,
+					opts,
+				),
+			),
+		);
 	}
 
 	async getSprint(projectId: string, sprintId: string): Promise<Sprint> {
@@ -328,14 +360,22 @@ export class PacaAPIClient {
 
 	// ==================== Document Methods ====================
 
+	/** One page of documents; `folderId` narrows to one folder ("null" for
+	 *  the top level), `title` to an exact, case-insensitive title. */
 	async listDocuments(
 		projectId: string,
-		folderId?: string,
-	): Promise<Document[]> {
-		const queryString = folderId ? `?folder_id=${folderId}` : "";
-		return fetchAllPages((cursor) =>
-			this.get(
-				withPaging(`/api/v1/projects/${projectId}/docs${queryString}`, cursor),
+		opts: PageOptions & { folderId?: string; title?: string } = {},
+	): Promise<Page<Document>> {
+		const filters = new URLSearchParams();
+		if (opts.folderId) filters.set("folder_id", opts.folderId);
+		if (opts.title) filters.set("title", opts.title);
+		const qs = filters.toString();
+		return toPage<Document>(
+			await this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/docs${qs ? `?${qs}` : ""}`,
+					opts,
+				),
 			),
 		);
 	}
@@ -382,32 +422,54 @@ export class PacaAPIClient {
 		await this.delete(`/api/v1/projects/${projectId}/docs/${docId}`);
 	}
 
-	// ==================== Repository Methods ====================
-	// These hit a repository plugin's own proxied backend routes (mounted at
-	// /api/v1/plugins/:pluginId/* — see PluginHandler.ProxyRequest in
-	// services/api), not a core-API endpoint. Matches whatever a repository
-	// plugin (e.g. paca-plugin-github) actually implements — ported from the
-	// equivalent request shapes in the now-removed services/ai-agent's
-	// repo_tools.py (ListRepositoriesExecutor / CloneRepositoryExecutor /
-	// PushBranchExecutor).
+	// ==================== Git Methods ====================
+	// Core's platform-neutral Git API (services/api git handler); the provider
+	// plugin behind a repository is never called directly.
 
-	async listPluginRepositories(
-		pluginId: string,
-		projectId: string,
-	): Promise<RepositoryListItem[]> {
+	async listGitRepositories(projectId: string): Promise<GitRepository[]> {
 		const response = await this.get(
-			`/api/v1/plugins/${pluginId}/projects/${projectId}/repositories`,
+			`/api/v1/projects/${projectId}/git/repositories`,
 		);
 		return Array.isArray(response) ? response : [];
 	}
 
-	async getRepositoryCloneInfo(
-		pluginId: string,
+	/**
+	 * Calls one of core's per-repository Git endpoints
+	 * (`/projects/{id}/git/repositories/{repoId}/…`): change requests, reviews,
+	 * comments, issues and CI. Core resolves the provider and the identity.
+	 */
+	async gitRepo(
+		method: "GET" | "POST" | "PATCH" | "PUT",
 		projectId: string,
 		repoId: string,
-	): Promise<RepositoryCloneInfo | undefined> {
-		return this.get(
-			`/api/v1/plugins/${pluginId}/projects/${projectId}/repositories/${repoId}/clone-info`,
+		path: string,
+		opts: {
+			query?: Record<string, string | number | undefined>;
+			body?: any;
+		} = {},
+	): Promise<any> {
+		const params = new URLSearchParams();
+		for (const [k, v] of Object.entries(opts.query ?? {})) {
+			if (v !== undefined && v !== "") params.set(k, String(v));
+		}
+		const qs = params.toString();
+		const url = `/api/v1/projects/${encodeURIComponent(projectId)}/git/repositories/${encodeURIComponent(repoId)}${path}${qs ? `?${qs}` : ""}`;
+		return this.request(
+			method,
+			url,
+			method === "GET" ? undefined : (opts.body ?? {}),
+		);
+	}
+
+	/** Mints a short-lived credential for ONE git command; a write credential needs git:write. */
+	async getGitCredential(
+		projectId: string,
+		repoId: string,
+		access: "read" | "write",
+	): Promise<GitCredential | undefined> {
+		return this.post(
+			`/api/v1/projects/${projectId}/git/repositories/${repoId}/credential/${access}`,
+			{},
 		);
 	}
 }

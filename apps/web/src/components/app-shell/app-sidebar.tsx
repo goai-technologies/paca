@@ -19,7 +19,9 @@ import {
 	ChevronDown,
 	ChevronRight,
 	Clock,
+	CornerLeftUp,
 	File,
+	FileCode2,
 	FileText,
 	Folder,
 	FolderKanban,
@@ -27,7 +29,7 @@ import {
 	GanttChart,
 	Home,
 	KanbanSquare,
-	Loader2,
+	Lock,
 	MessageSquare,
 	Monitor,
 	Moon,
@@ -47,15 +49,20 @@ import {
 } from "lucide-react";
 import {
 	type ComponentType,
+	createContext,
+	type ReactNode,
 	useCallback,
+	useContext,
 	useEffect,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { useManagedCopyLabel } from "@/components/projects/docs/managed-copy-banner";
 import { EntityAvatar } from "@/components/shared/entity-avatar";
 import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
+import { PaneResizeHandle } from "@/components/shared/pane-resize-handle";
 import { Badge } from "@/components/ui/badge";
 import {
 	DropdownMenu,
@@ -82,6 +89,8 @@ import {
 	SidebarSeparator,
 	useSidebar,
 } from "@/components/ui/sidebar";
+import { Spinner } from "@/components/ui/spinner";
+import { toast } from "@/components/ui/toast";
 import { useBranding } from "@/hooks/use-branding";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
@@ -102,7 +111,9 @@ import {
 	updateDocument,
 	updateFolder,
 } from "@/lib/doc-api";
-import { sprintsQueryOptions, updateTask } from "@/lib/interaction-api";
+import { sprintsInfiniteQueryOptions, updateTask } from "@/lib/interaction-api";
+import { notifyError } from "@/lib/notify";
+import { SIDEBAR_PANE, usePaneWidth } from "@/lib/pane-width";
 import type { PluginNavRegistration } from "@/lib/plugin-api";
 import { ExtensionPoint } from "@/lib/plugins/extension-point";
 import { resolvePluginIcon } from "@/lib/plugins/icon-resolver";
@@ -114,6 +125,12 @@ import {
 import { projectAvatar } from "@/lib/provider-logos";
 import { createLoadMoreScrollHandler } from "@/lib/scroll-pagination";
 import { cn } from "@/lib/utils";
+import {
+	DOC_NODE_DRAG_TYPE,
+	type DocNodeDragPayload,
+	isMoveBlocked,
+	parseDocNodeDragPayload,
+} from "./doc-dnd";
 import { UserMenu } from "./user-menu";
 
 // Shared by every inactive nav item (top-level, project, plugin, and
@@ -165,6 +182,183 @@ function TreeInlineRename({
 	);
 }
 
+const ROOT_DROP_TARGET = "root";
+
+/** The one drop target currently highlighted ("root" or a folder id), shared
+ *  by the whole docs tree so nested targets never highlight together. */
+const DocDropTargetContext = createContext<{
+	active: string | null;
+	setActive: (target: string | null) => void;
+}>({ active: null, setActive: () => {} });
+
+/** Drag source props for a document or folder row's main button. They live on
+ *  the button itself because Firefox won't start a drag from a button nested
+ *  in a draggable parent. */
+function docNodeDragProps(
+	payload: DocNodeDragPayload,
+	enabled: boolean,
+): React.HTMLAttributes<HTMLElement> & { draggable?: boolean } {
+	if (!enabled) return {};
+	return {
+		draggable: true,
+		onDragStart: (e) => {
+			e.stopPropagation();
+			e.dataTransfer.effectAllowed = "move";
+			e.dataTransfer.setData(DOC_NODE_DRAG_TYPE, JSON.stringify(payload));
+		},
+	};
+}
+
+/** Moves a document or folder into `targetFolderId` (null = top level). Only
+ *  the source and target folders' lists (and folder paths) are refetched. */
+function useMoveDocNode(projectId: string) {
+	const { t } = useTranslation("appShell");
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async (v: {
+			payload: DocNodeDragPayload;
+			targetFolderId: string | null;
+		}): Promise<void> => {
+			const { payload: p, targetFolderId } = v;
+			if (p.kind === "folder") {
+				await updateFolder(projectId, p.id, { parent_id: targetFolderId });
+			} else {
+				await updateDocument(projectId, p.id, { folder_id: targetFolderId });
+			}
+		},
+		onError: (err: unknown) => {
+			const code = getApiErrorCode(err);
+			if (
+				code === ApiErrorCode.DocFolderCycle ||
+				code === ApiErrorCode.DocFolderSelfParent
+			) {
+				toast.add({ type: "error", title: t("docs.errors.moveIntoSelf") });
+			} else {
+				notifyError(err, t("docs.errors.moveFailed"));
+			}
+		},
+		onSettled: (_data, _err, v) => {
+			const { payload: p, targetFolderId } = v;
+			for (const folderId of [p.parentId, targetFolderId]) {
+				qc.invalidateQueries({
+					queryKey:
+						p.kind === "folder"
+							? docQueryKeys.folderChildren(projectId, folderId)
+							: docQueryKeys.docChildren(projectId, folderId),
+				});
+			}
+			if (p.kind === "folder") {
+				// Every descendant's path changes too, so mark all paths stale.
+				qc.invalidateQueries({
+					queryKey: [...docQueryKeys.all(projectId), "folders", "path"],
+				});
+			} else {
+				qc.invalidateQueries({
+					queryKey: docQueryKeys.detail(projectId, p.id),
+				});
+			}
+		},
+	});
+}
+
+/** Makes an element a drop target that moves dragged documents/folders into
+ *  `targetFolderId` (null = the top level of the tree). `targetPath` is the
+ *  target's id preceded by its ancestors' ids (empty for the top level). */
+function useDocNodeDrop(
+	projectId: string,
+	targetFolderId: string | null,
+	targetPath: readonly string[],
+	canWrite: boolean,
+	onMoved?: () => void,
+) {
+	const { active, setActive } = useContext(DocDropTargetContext);
+	const targetKey = targetFolderId ?? ROOT_DROP_TARGET;
+	const isOver = active === targetKey;
+	const moveMutation = useMoveDocNode(projectId);
+
+	const dropProps = canWrite
+		? {
+				onDragOver: (e: React.DragEvent) => {
+					if (!e.dataTransfer.types.includes(DOC_NODE_DRAG_TYPE)) return;
+					// The innermost folder under the cursor is the target.
+					e.preventDefault();
+					e.stopPropagation();
+					e.dataTransfer.dropEffect = "move";
+					setActive(targetKey);
+				},
+				onDragLeave: (e: React.DragEvent) => {
+					if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+						setActive(null);
+					}
+				},
+				onDrop: (e: React.DragEvent) => {
+					const raw = e.dataTransfer.getData(DOC_NODE_DRAG_TYPE);
+					if (!raw) return;
+					e.preventDefault();
+					e.stopPropagation();
+					setActive(null);
+					const payload = parseDocNodeDragPayload(raw, projectId);
+					if (!payload || isMoveBlocked(payload, targetFolderId, targetPath)) {
+						return;
+					}
+					moveMutation.mutate(
+						{ payload, targetFolderId },
+						{ onSuccess: onMoved },
+					);
+				},
+			}
+		: {};
+
+	return { isOver, dropProps };
+}
+
+/** The top level of the docs tree: dropping here moves an item out of its folder. */
+function DocsRootDropArea({
+	projectId,
+	canWrite,
+	children,
+}: {
+	projectId: string;
+	canWrite: boolean;
+	children: ReactNode;
+}) {
+	const { isOver, dropProps } = useDocNodeDrop(projectId, null, [], canWrite);
+	return (
+		<div
+			className={cn(
+				"py-1 space-y-0.5 rounded-md transition-colors",
+				isOver && "bg-primary/10 ring-1 ring-primary/40",
+			)}
+			{...dropProps}
+		>
+			{children}
+		</div>
+	);
+}
+
+/** Marks a tree row whose document is a managed copy of a repository file.
+ *  The label is part of the row button's accessible name and its tooltip. */
+function ManagedCopyMarker({
+	label,
+	locked,
+}: {
+	label: string;
+	locked: boolean;
+}) {
+	const Icon = locked ? Lock : FileCode2;
+	return (
+		<span
+			role="img"
+			aria-label={label}
+			title={label}
+			data-testid={locked ? "doc-locked-marker" : "doc-managed-marker"}
+			className="ml-auto flex shrink-0 items-center text-sidebar-foreground/40"
+		>
+			<Icon aria-hidden className="size-3" />
+		</span>
+	);
+}
+
 /** Single document row in the sidebar tree */
 function DocsDocRow({
 	doc,
@@ -178,7 +372,10 @@ function DocsDocRow({
 	depth: number;
 }) {
 	const { t } = useTranslation("appShell");
+	const { t: tProjects } = useTranslation("projects");
+	const managedCopyLabel = useManagedCopyLabel();
 	const location = useRouterState({ select: (s) => s.location.pathname });
+	const moveMutation = useMoveDocNode(projectId);
 	const navigate = useNavigate();
 	const qc = useQueryClient();
 	const [renaming, setRenaming] = useState(false);
@@ -194,6 +391,7 @@ function DocsDocRow({
 	const isActive = location === `/projects/${projectId}/docs/${doc.id}`;
 
 	const renameMutation = useMutation({
+		meta: { success: "renamed", subject: "document" },
 		mutationFn: (title: string) => updateDocument(projectId, doc.id, { title }),
 		onSuccess: (updated) => {
 			setRenameError(null);
@@ -218,6 +416,7 @@ function DocsDocRow({
 	});
 
 	const deleteMutation = useMutation({
+		meta: { success: "deleted", subject: "document" },
 		mutationFn: () => deleteDocument(projectId, doc.id),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: docQueryKeys.all(projectId) });
@@ -235,6 +434,15 @@ function DocsDocRow({
 			>
 				<button
 					type="button"
+					{...docNodeDragProps(
+						{
+							kind: "doc",
+							id: doc.id,
+							projectId,
+							parentId: doc.folder_id ?? null,
+						},
+						canWrite && !renaming,
+					)}
 					className={cn(
 						"flex flex-1 min-w-0 items-center gap-1.5 rounded-md px-2 py-1 cursor-pointer transition-all duration-150 text-sm",
 						isActive
@@ -286,6 +494,16 @@ function DocsDocRow({
 							)}
 						</span>
 					)}
+					{doc.source && !renaming && (
+						<ManagedCopyMarker
+							label={
+								doc.source_locked
+									? `${managedCopyLabel(doc.source)}. ${tProjects("docs.managedCopy.locked")}`
+									: managedCopyLabel(doc.source)
+							}
+							locked={doc.source_locked}
+						/>
+					)}
 				</button>
 
 				{canWrite && !renaming && (
@@ -298,6 +516,19 @@ function DocsDocRow({
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="start" className="w-36">
 							<DropdownMenuItem
+								// A locked managed copy's title comes from its repository.
+								// It stays focusable and hoverable so the reason can be read.
+								disabled={doc.source_locked}
+								className={
+									doc.source_locked
+										? "data-disabled:pointer-events-auto"
+										: undefined
+								}
+								title={
+									doc.source_locked
+										? tProjects("docs.managedCopy.locked")
+										: undefined
+								}
 								onClick={(e) => {
 									e.stopPropagation();
 									setRenameError(null);
@@ -306,7 +537,31 @@ function DocsDocRow({
 							>
 								<Pencil className="size-3.5 mr-2" />
 								{t("docs.rename")}
+								{doc.source_locked && (
+									<span className="sr-only">
+										{tProjects("docs.managedCopy.locked")}
+									</span>
+								)}
 							</DropdownMenuItem>
+							{doc.folder_id && (
+								<DropdownMenuItem
+									onClick={(e) => {
+										e.stopPropagation();
+										moveMutation.mutate({
+											payload: {
+												kind: "doc",
+												id: doc.id,
+												projectId,
+												parentId: doc.folder_id ?? null,
+											},
+											targetFolderId: null,
+										});
+									}}
+								>
+									<CornerLeftUp className="size-3.5 mr-2" />
+									{t("docs.moveToTop")}
+								</DropdownMenuItem>
+							)}
 							<DropdownMenuSeparator />
 							<DropdownMenuItem
 								className="text-destructive focus:text-destructive"
@@ -342,6 +597,7 @@ function DocsFolderNode({
 	expandedFolders,
 	onToggle,
 	depth,
+	ancestorIds = [],
 }: {
 	folder: DocFolder;
 	projectId: string;
@@ -349,6 +605,8 @@ function DocsFolderNode({
 	expandedFolders: Set<string>;
 	onToggle: (id: string) => void;
 	depth: number;
+	/** Ids of the folders above this one, outermost first. */
+	ancestorIds?: readonly string[];
 }) {
 	const { t } = useTranslation("appShell");
 	const qc = useQueryClient();
@@ -365,6 +623,21 @@ function DocsFolderNode({
 	const navigate = useNavigate();
 
 	const isExpanded = expandedFolders.has(folder.id);
+	const moveMutation = useMoveDocNode(projectId);
+	const folderPath = useMemo(
+		() => [...ancestorIds, folder.id],
+		[ancestorIds, folder.id],
+	);
+	const { isOver, dropProps } = useDocNodeDrop(
+		projectId,
+		folder.id,
+		folderPath,
+		canWrite,
+		// A collapsed target would swallow the item; open it so the move shows.
+		() => {
+			if (!expandedFolders.has(folder.id)) onToggle(folder.id);
+		},
+	);
 
 	// A folder's subfolders and documents are fetched only once it is
 	// expanded, a page at a time.
@@ -385,6 +658,7 @@ function DocsFolderNode({
 		[docsQuery.data],
 	);
 	const renameMutation = useMutation({
+		meta: { success: "renamed", subject: "folder" },
 		mutationFn: (name: string) => updateFolder(projectId, folder.id, { name }),
 		onSuccess: () => {
 			setRenameError(null);
@@ -403,12 +677,14 @@ function DocsFolderNode({
 	});
 
 	const deleteMutation = useMutation({
+		meta: { success: "deleted", subject: "folder" },
 		mutationFn: () => deleteFolder(projectId, folder.id),
 		onSuccess: () =>
 			qc.invalidateQueries({ queryKey: docQueryKeys.folders(projectId) }),
 	});
 
 	const newDocMutation = useMutation({
+		meta: { success: "created", subject: "document" },
 		mutationFn: () =>
 			createDocument(projectId, {
 				title: t("docs.untitled"),
@@ -425,6 +701,7 @@ function DocsFolderNode({
 	});
 
 	const newSubfolderMutation = useMutation({
+		meta: { success: "created", subject: "folder" },
 		mutationFn: (name: string) =>
 			createFolder(projectId, { name, parent_id: folder.id }),
 		onSuccess: () =>
@@ -432,7 +709,13 @@ function DocsFolderNode({
 	});
 
 	return (
-		<div>
+		<div
+			className={cn(
+				"rounded-md transition-colors",
+				isOver && "bg-primary/10 ring-1 ring-primary/40",
+			)}
+			{...dropProps}
+		>
 			{/* Folder row */}
 			<div
 				className="group relative flex items-center gap-1 pr-1"
@@ -440,6 +723,15 @@ function DocsFolderNode({
 			>
 				<button
 					type="button"
+					{...docNodeDragProps(
+						{
+							kind: "folder",
+							id: folder.id,
+							projectId,
+							parentId: folder.parent_id ?? null,
+						},
+						canWrite && !renaming,
+					)}
 					className="flex flex-1 min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 cursor-pointer transition-all duration-150 text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
 					onClick={() => {
 						if (!renaming) onToggle(folder.id);
@@ -501,6 +793,25 @@ function DocsFolderNode({
 									<Pencil className="size-3.5 mr-2" />
 									{t("docs.rename")}
 								</DropdownMenuItem>
+								{folder.parent_id && (
+									<DropdownMenuItem
+										onClick={(e) => {
+											e.stopPropagation();
+											moveMutation.mutate({
+												payload: {
+													kind: "folder",
+													id: folder.id,
+													projectId,
+													parentId: folder.parent_id ?? null,
+												},
+												targetFolderId: null,
+											});
+										}}
+									>
+										<CornerLeftUp className="size-3.5 mr-2" />
+										{t("docs.moveToTop")}
+									</DropdownMenuItem>
+								)}
 								<DropdownMenuSeparator />
 								<DropdownMenuItem
 									className="text-destructive focus:text-destructive"
@@ -539,6 +850,7 @@ function DocsFolderNode({
 							expandedFolders={expandedFolders}
 							onToggle={onToggle}
 							depth={depth + 1}
+							ancestorIds={folderPath}
 						/>
 					))}
 					<div style={{ paddingLeft: `${8 + (depth + 1) * 16}px` }}>
@@ -706,6 +1018,7 @@ function DocsSidebarSection({ projectId }: { projectId: string }) {
 	);
 
 	const newDocMutation = useMutation({
+		meta: { success: "created", subject: "document" },
 		mutationFn: () => createDocument(projectId, { title: t("docs.untitled") }),
 		onSuccess: (doc) => {
 			qc.invalidateQueries({ queryKey: docQueryKeys.all(projectId) });
@@ -717,10 +1030,23 @@ function DocsSidebarSection({ projectId }: { projectId: string }) {
 	});
 
 	const newFolderMutation = useMutation({
+		meta: { success: "created", subject: "folder" },
 		mutationFn: (name: string) => createFolder(projectId, { name }),
 		onSuccess: () =>
 			qc.invalidateQueries({ queryKey: docQueryKeys.folders(projectId) }),
 	});
+
+	// The single highlighted drop target, cleared whenever a drag ends.
+	const [activeDropTarget, setActiveDropTarget] = useState<string | null>(null);
+	const dropTargetValue = useMemo(
+		() => ({ active: activeDropTarget, setActive: setActiveDropTarget }),
+		[activeDropTarget],
+	);
+	useEffect(() => {
+		const clear = () => setActiveDropTarget(null);
+		document.addEventListener("dragend", clear);
+		return () => document.removeEventListener("dragend", clear);
+	}, []);
 
 	const toggleCollapse = () => {
 		setCollapsed((prev) => {
@@ -742,30 +1068,19 @@ function DocsSidebarSection({ projectId }: { projectId: string }) {
 	};
 
 	const isEmpty = rootFolders.length === 0 && rootOnlyDocs.length === 0;
-	const { state: sidebarState } = useSidebar();
-	const isSidebarCollapsed = sidebarState === "collapsed";
+	const { state: sidebarState, isMobile } = useSidebar();
+	const isSidebarCollapsed = sidebarState === "collapsed" && !isMobile;
 
-	if (isSidebarCollapsed) {
-		return (
-			<SidebarGroup>
-				<SidebarGroupContent>
-					<SidebarMenu>
-						<SidebarMenuItem>
-							<SidebarMenuButton tooltip={t("docs.documentation")}>
-								<BookOpen className="size-4" />
-							</SidebarMenuButton>
-						</SidebarMenuItem>
-					</SidebarMenu>
-				</SidebarGroupContent>
-			</SidebarGroup>
-		);
-	}
+	// A bare book icon that does nothing is noise on the rail.
+	if (isSidebarCollapsed) return null;
 
 	return (
 		<SidebarGroup className="px-0">
 			{/* Section header */}
 			<SidebarGroupLabel
-				className="flex cursor-pointer items-center justify-between hover:text-sidebar-foreground transition-colors px-3"
+				render={<button type="button" />}
+				aria-expanded={!collapsed}
+				className="w-full text-left flex cursor-pointer items-center justify-between hover:text-sidebar-foreground transition-colors px-3"
 				onClick={toggleCollapse}
 			>
 				<span>{t("docs.documentation")}</span>
@@ -779,82 +1094,86 @@ function DocsSidebarSection({ projectId }: { projectId: string }) {
 
 			{!collapsed && (
 				<SidebarGroupContent>
-					<div className="py-1 space-y-0.5">
-						{isEmpty ? (
-							<div className="px-4 py-2 text-xs text-sidebar-foreground/40 italic">
-								{t("docs.noDocumentsYet")}
-							</div>
-						) : (
-							<>
-								{rootFolders.map((folder) => (
-									<DocsFolderNode
-										key={folder.id}
-										folder={folder}
-										projectId={projectId}
-										canWrite={canWrite}
-										expandedFolders={expandedFolders}
-										onToggle={toggleFolder}
-										depth={0}
-									/>
-								))}
-								<div className="px-2">
-									<LoadMoreSentinel
-										compact
-										hasMore={!!rootFoldersQuery.hasNextPage}
-										isLoadingMore={rootFoldersQuery.isFetchingNextPage}
-										isError={rootFoldersQuery.isFetchNextPageError}
-										onLoadMore={() => void rootFoldersQuery.fetchNextPage()}
-									/>
+					<DocDropTargetContext.Provider value={dropTargetValue}>
+						<DocsRootDropArea projectId={projectId} canWrite={canWrite}>
+							{isEmpty ? (
+								<div className="px-4 py-2 text-xs text-sidebar-foreground/40 italic">
+									{t("docs.noDocumentsYet")}
 								</div>
-								{rootOnlyDocs.map((doc) => (
-									<DocsDocRow
-										key={doc.id}
-										doc={doc}
-										projectId={projectId}
-										canWrite={canWrite}
-										depth={0}
-									/>
-								))}
-								<div className="px-2">
-									<LoadMoreSentinel
-										compact
-										hasMore={!!rootDocsQuery.hasNextPage}
-										isLoadingMore={rootDocsQuery.isFetchingNextPage}
-										isError={rootDocsQuery.isFetchNextPageError}
-										onLoadMore={() => void rootDocsQuery.fetchNextPage()}
-									/>
+							) : (
+								<>
+									{rootFolders.map((folder) => (
+										<DocsFolderNode
+											key={folder.id}
+											folder={folder}
+											projectId={projectId}
+											canWrite={canWrite}
+											expandedFolders={expandedFolders}
+											onToggle={toggleFolder}
+											depth={0}
+										/>
+									))}
+									<div className="px-2">
+										<LoadMoreSentinel
+											compact
+											hasMore={!!rootFoldersQuery.hasNextPage}
+											isLoadingMore={rootFoldersQuery.isFetchingNextPage}
+											isError={rootFoldersQuery.isFetchNextPageError}
+											onLoadMore={() => void rootFoldersQuery.fetchNextPage()}
+										/>
+									</div>
+									{rootOnlyDocs.map((doc) => (
+										<DocsDocRow
+											key={doc.id}
+											doc={doc}
+											projectId={projectId}
+											canWrite={canWrite}
+											depth={0}
+										/>
+									))}
+									<div className="px-2">
+										<LoadMoreSentinel
+											compact
+											hasMore={!!rootDocsQuery.hasNextPage}
+											isLoadingMore={rootDocsQuery.isFetchingNextPage}
+											isError={rootDocsQuery.isFetchNextPageError}
+											onLoadMore={() => void rootDocsQuery.fetchNextPage()}
+										/>
+									</div>
+								</>
+							)}
+							{canWrite && (
+								<div className="px-2 pt-1">
+									<DropdownMenu>
+										<DropdownMenuTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-sidebar-foreground/35 hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-all duration-150">
+											<Plus className="size-3 shrink-0" />
+											<span>{t("docs.add")}</span>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="start" className="w-40">
+											<DropdownMenuItem
+												onClick={() => newDocMutation.mutate()}
+												disabled={newDocMutation.isPending}
+											>
+												<File className="size-3.5 mr-2" />
+												{t("docs.newDocument")}
+											</DropdownMenuItem>
+											<DropdownMenuItem
+												onClick={() =>
+													newFolderMutation.mutate(
+														t("docs.newFolderDefaultName"),
+													)
+												}
+												disabled={newFolderMutation.isPending}
+											>
+												<FolderOpen className="size-3.5 mr-2" />
+												{t("docs.newFolder")}
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
 								</div>
-							</>
-						)}
-						{canWrite && (
-							<div className="px-2 pt-1">
-								<DropdownMenu>
-									<DropdownMenuTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs text-sidebar-foreground/35 hover:text-sidebar-foreground hover:bg-sidebar-accent/40 transition-all duration-150">
-										<Plus className="size-3 shrink-0" />
-										<span>{t("docs.add")}</span>
-									</DropdownMenuTrigger>
-									<DropdownMenuContent align="start" className="w-40">
-										<DropdownMenuItem
-											onClick={() => newDocMutation.mutate()}
-											disabled={newDocMutation.isPending}
-										>
-											<File className="size-3.5 mr-2" />
-											{t("docs.newDocument")}
-										</DropdownMenuItem>
-										<DropdownMenuItem
-											onClick={() =>
-												newFolderMutation.mutate(t("docs.newFolderDefaultName"))
-											}
-											disabled={newFolderMutation.isPending}
-										>
-											<FolderOpen className="size-3.5 mr-2" />
-											{t("docs.newFolder")}
-										</DropdownMenuItem>
-									</DropdownMenuContent>
-								</DropdownMenu>
-							</div>
-						)}
-					</div>
+							)}
+						</DocsRootDropArea>
+					</DocDropTargetContext.Provider>
 				</SidebarGroupContent>
 			)}
 		</SidebarGroup>
@@ -974,7 +1293,7 @@ function ProjectSwitcher({
 						))}
 						{isFetchingNextPage ? (
 							<div className="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground">
-								<Loader2 className="size-3 animate-spin" />
+								<Spinner aria-hidden="true" className="size-3" />
 								{t("projectSwitcher.loadingMore")}
 							</div>
 						) : null}
@@ -1152,22 +1471,32 @@ function ProjectNavItems({ projectId }: { projectId: string }) {
 		});
 	};
 
+	// The icon rail has no room for section headers, so they are not togglable
+	// there (and stay out of the tab order); the section is always expanded.
+	const { state: sidebarState, isMobile } = useSidebar();
+	const isRail = sidebarState === "collapsed" && !isMobile;
+	const isCollapsed = collapsed && !isRail;
+
 	return (
 		<SidebarGroup>
-			<SidebarGroupLabel
-				className="flex cursor-pointer items-center justify-between hover:text-sidebar-foreground transition-colors"
-				onClick={toggle}
-			>
-				<span>{t("nav.project")}</span>
-				<ChevronRight
-					className={cn(
-						"size-3.5 transition-transform duration-200 text-sidebar-foreground/40",
-						!collapsed && "rotate-90",
-					)}
-				/>
-			</SidebarGroupLabel>
+			{!isRail && (
+				<SidebarGroupLabel
+					render={<button type="button" />}
+					aria-expanded={!isCollapsed}
+					className="w-full text-left flex cursor-pointer items-center justify-between hover:text-sidebar-foreground transition-colors"
+					onClick={toggle}
+				>
+					<span>{t("nav.project")}</span>
+					<ChevronRight
+						className={cn(
+							"size-3.5 transition-transform duration-200 text-sidebar-foreground/40",
+							!isCollapsed && "rotate-90",
+						)}
+					/>
+				</SidebarGroupLabel>
+			)}
 
-			{!collapsed && (
+			{!isCollapsed && (
 				<SidebarGroupContent>
 					<SidebarMenu>
 						{PROJECT_NAV_ITEMS.filter((item) => {
@@ -1210,6 +1539,66 @@ function ProjectNavItems({ projectId }: { projectId: string }) {
 	);
 }
 
+/** A sidebar group whose label toggles it open/closed, remembering the choice
+ * in localStorage under `storageKey` (same behavior as the Project section). */
+function CollapsibleSidebarGroup({
+	storageKey,
+	label,
+	children,
+}: {
+	storageKey: string;
+	label: string;
+	children: React.ReactNode;
+}) {
+	const [collapsed, setCollapsed] = useState(() => {
+		try {
+			return localStorage.getItem(storageKey) === "true";
+		} catch {
+			return false;
+		}
+	});
+
+	const toggle = () => {
+		setCollapsed((prev) => {
+			const next = !prev;
+			try {
+				localStorage.setItem(storageKey, String(next));
+			} catch {
+				/* ignore */
+			}
+			return next;
+		});
+	};
+
+	// The icon rail has no room for section headers, so they are not togglable
+	// there (and stay out of the tab order); the section is always expanded.
+	const { state: sidebarState, isMobile } = useSidebar();
+	const isRail = sidebarState === "collapsed" && !isMobile;
+	const isCollapsed = collapsed && !isRail;
+
+	return (
+		<SidebarGroup>
+			{!isRail && (
+				<SidebarGroupLabel
+					render={<button type="button" />}
+					aria-expanded={!isCollapsed}
+					className="w-full text-left flex cursor-pointer items-center justify-between transition-colors hover:text-sidebar-foreground"
+					onClick={toggle}
+				>
+					<span>{label}</span>
+					<ChevronRight
+						className={cn(
+							"size-3.5 text-sidebar-foreground/40 transition-transform duration-200",
+							!isCollapsed && "rotate-90",
+						)}
+					/>
+				</SidebarGroupLabel>
+			)}
+			{!isCollapsed && <SidebarGroupContent>{children}</SidebarGroupContent>}
+		</SidebarGroup>
+	);
+}
+
 // ── Plugin-contributed pages ────────────────────────────────────────────────
 
 /** Sidebar nav items for plugin `project.page` extension points (e.g. a
@@ -1230,36 +1619,36 @@ function PluginProjectPages({ projectId }: { projectId: string }) {
 	if (navItems.length === 0) return null;
 
 	return (
-		<SidebarGroup>
-			<SidebarGroupLabel>{t("nav.plugins")}</SidebarGroupLabel>
-			<SidebarGroupContent>
-				<SidebarMenu>
-					{navItems.map((item) => {
-						const Icon = resolvePluginIcon(item.icon);
-						const to = `/projects/${projectId}/plugins/${item.pluginId}/${item.slug}`;
-						const isActive = location === to || location.startsWith(`${to}/`);
-						return (
-							<SidebarMenuItem key={`${item.pluginId}:${item.slug}`}>
-								<SidebarMenuButton
-									isActive={isActive}
-									tooltip={item.label}
-									render={<Link to={to} />}
-									className={cn(
-										"relative transition-all duration-150",
-										isActive
-											? "bg-primary/10 text-primary font-medium before:absolute before:left-0 before:inset-y-2 before:w-0.75 before:rounded-full before:bg-primary"
-											: NAV_ITEM_INACTIVE_CLASS,
-									)}
-								>
-									<Icon className="size-4" />
-									<span>{item.label}</span>
-								</SidebarMenuButton>
-							</SidebarMenuItem>
-						);
-					})}
-				</SidebarMenu>
-			</SidebarGroupContent>
-		</SidebarGroup>
+		<CollapsibleSidebarGroup
+			storageKey={`paca:sidebar-project-plugins-collapsed:${projectId}`}
+			label={t("nav.plugins")}
+		>
+			<SidebarMenu>
+				{navItems.map((item) => {
+					const Icon = resolvePluginIcon(item.icon);
+					const to = `/projects/${projectId}/plugins/${item.pluginId}/${item.slug}`;
+					const isActive = location === to || location.startsWith(`${to}/`);
+					return (
+						<SidebarMenuItem key={`${item.pluginId}:${item.slug}`}>
+							<SidebarMenuButton
+								isActive={isActive}
+								tooltip={item.label}
+								render={<Link to={to} />}
+								className={cn(
+									"relative transition-all duration-150",
+									isActive
+										? "bg-primary/10 text-primary font-medium before:absolute before:left-0 before:inset-y-2 before:w-0.75 before:rounded-full before:bg-primary"
+										: NAV_ITEM_INACTIVE_CLASS,
+								)}
+							>
+								<Icon className="size-4" />
+								<span>{item.label}</span>
+							</SidebarMenuButton>
+						</SidebarMenuItem>
+					);
+				})}
+			</SidebarMenu>
+		</CollapsibleSidebarGroup>
 	);
 }
 
@@ -1436,26 +1825,44 @@ function ProjectInteractionsSection({ projectId }: { projectId: string }) {
 	// No refetchInterval: kept live via useProjectRealtime's socket-driven
 	// sprint.* invalidation (see hooks/use-project-realtime.ts) instead of
 	// polling.
-	const { data: sprints = [] } = useQuery({
-		...sprintsQueryOptions(projectId),
+	// One paged query per status group, so each list loads more on scroll or
+	// click and its count badge comes from the server's total_count.
+	const openQuery = useInfiniteQuery({
+		...sprintsInfiniteQueryOptions(projectId, { status: ["active"] }),
+		enabled: canViewSprints,
+		retry: false,
+	});
+	const plannedQuery = useInfiniteQuery({
+		...sprintsInfiniteQueryOptions(projectId, { status: ["planned"] }),
+		enabled: canViewSprints,
+		retry: false,
+	});
+	const completedQuery = useInfiniteQuery({
+		...sprintsInfiniteQueryOptions(projectId, {
+			status: ["completed"],
+			sort: "recent",
+		}),
 		enabled: canViewSprints,
 		retry: false,
 	});
 
+	// The icon rail has no room for section headers, so they are not togglable
+	// there (and stay out of the tab order); the section is always expanded.
+	const { state: sidebarState, isMobile } = useSidebar();
+	const isRail = sidebarState === "collapsed" && !isMobile;
+	const isCollapsed = collapsed && !isRail;
+
 	// Hide entire section if user lacks the "View Sprints" permission
 	if (!canViewSprints) return null;
 
-	const openSprints = sprints
-		.filter((s) => s.status === "active")
-		.sort((a, b) => a.name.localeCompare(b.name));
-
-	const plannedSprints = sprints
-		.filter((s) => s.status === "planned")
-		.sort((a, b) => a.name.localeCompare(b.name));
-
-	const completedSprints = sprints
-		.filter((s) => s.status === "completed")
-		.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+	const openSprints = openQuery.data?.pages.flatMap((p) => p.items) ?? [];
+	const plannedSprints = plannedQuery.data?.pages.flatMap((p) => p.items) ?? [];
+	const completedSprints =
+		completedQuery.data?.pages.flatMap((p) => p.items) ?? [];
+	const plannedCount =
+		plannedQuery.data?.pages[0]?.total_count ?? plannedSprints.length;
+	const completedCount =
+		completedQuery.data?.pages[0]?.total_count ?? completedSprints.length;
 
 	const backlogHref = `/projects/${projectId}/interactions/backlog`;
 	const isBacklogActive = location.startsWith(backlogHref);
@@ -1480,20 +1887,24 @@ function ProjectInteractionsSection({ projectId }: { projectId: string }) {
 
 	return (
 		<SidebarGroup>
-			<SidebarGroupLabel
-				className="flex cursor-pointer items-center justify-between hover:text-sidebar-foreground transition-colors"
-				onClick={toggle}
-			>
-				<span>{t("interactions.title")}</span>
-				<ChevronRight
-					className={cn(
-						"size-3.5 transition-transform duration-200 text-sidebar-foreground/40",
-						!collapsed && "rotate-90",
-					)}
-				/>
-			</SidebarGroupLabel>
+			{!isRail && (
+				<SidebarGroupLabel
+					render={<button type="button" />}
+					aria-expanded={!isCollapsed}
+					className="w-full text-left flex cursor-pointer items-center justify-between hover:text-sidebar-foreground transition-colors"
+					onClick={toggle}
+				>
+					<span>{t("interactions.title")}</span>
+					<ChevronRight
+						className={cn(
+							"size-3.5 transition-transform duration-200 text-sidebar-foreground/40",
+							!isCollapsed && "rotate-90",
+						)}
+					/>
+				</SidebarGroupLabel>
+			)}
 
-			{!collapsed && (
+			{!isCollapsed && (
 				<SidebarGroupContent>
 					<SidebarMenu>
 						{/* Timeline */}
@@ -1566,6 +1977,15 @@ function ProjectInteractionsSection({ projectId }: { projectId: string }) {
 								</SidebarMenuItem>
 							);
 						})}
+						<SidebarMenuItem>
+							<LoadMoreSentinel
+								compact
+								hasMore={!!openQuery.hasNextPage}
+								isLoadingMore={openQuery.isFetchingNextPage}
+								isError={openQuery.isFetchNextPageError}
+								onLoadMore={() => void openQuery.fetchNextPage()}
+							/>
+						</SidebarMenuItem>
 						{/* Planned sprints (collapsible) */}
 						{plannedSprints.length > 0 && (
 							<>
@@ -1585,7 +2005,7 @@ function ProjectInteractionsSection({ projectId }: { projectId: string }) {
 											{t("interactions.plannedSprints")}
 										</span>
 										<span className="rounded-full bg-sidebar-accent/60 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">
-											{plannedSprints.length}
+											{plannedCount}
 										</span>
 									</SidebarMenuButton>
 								</SidebarMenuItem>
@@ -1621,6 +2041,17 @@ function ProjectInteractionsSection({ projectId }: { projectId: string }) {
 											</SidebarMenuItem>
 										);
 									})}
+								{!plannedSprintsCollapsed && (
+									<SidebarMenuItem>
+										<LoadMoreSentinel
+											compact
+											hasMore={!!plannedQuery.hasNextPage}
+											isLoadingMore={plannedQuery.isFetchingNextPage}
+											isError={plannedQuery.isFetchNextPageError}
+											onLoadMore={() => void plannedQuery.fetchNextPage()}
+										/>
+									</SidebarMenuItem>
+								)}
 							</>
 						)}
 						{/* Closed sprints (collapsible) */}
@@ -1642,7 +2073,7 @@ function ProjectInteractionsSection({ projectId }: { projectId: string }) {
 											{t("interactions.completedSprints")}
 										</span>
 										<span className="rounded-full bg-sidebar-accent/60 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">
-											{completedSprints.length}
+											{completedCount}
 										</span>
 									</SidebarMenuButton>
 								</SidebarMenuItem>
@@ -1669,6 +2100,17 @@ function ProjectInteractionsSection({ projectId }: { projectId: string }) {
 											</SidebarMenuItem>
 										);
 									})}
+								{!completedSprintsCollapsed && (
+									<SidebarMenuItem>
+										<LoadMoreSentinel
+											compact
+											hasMore={!!completedQuery.hasNextPage}
+											isLoadingMore={completedQuery.isFetchingNextPage}
+											isError={completedQuery.isFetchNextPageError}
+											onLoadMore={() => void completedQuery.fetchNextPage()}
+										/>
+									</SidebarMenuItem>
+								)}
 							</>
 						)}
 					</SidebarMenu>
@@ -1737,6 +2179,9 @@ function ThemeSwitcher() {
 // ── App Sidebar ────────────────────────────────────────────────────────────────
 export function AppSidebar() {
 	const { t } = useTranslation("appShell");
+	const { t: tShared } = useTranslation("shared");
+	const { state: sidebarState, isMobile } = useSidebar();
+	const sidebarPane = usePaneWidth(SIDEBAR_PANE);
 	const { hasPermission } = usePermissions();
 	const { resolvedMode } = useThemeMode();
 	const { projectId } = useParams({ strict: false });
@@ -1766,7 +2211,9 @@ export function AppSidebar() {
 	const canAccessPlugins = hasPermission("plugins:write");
 
 	const canAccessSettings =
-		hasPermission("settings:write") || hasPermission("settings.sso:write");
+		hasPermission("settings:write") ||
+		hasPermission("settings.sso:write") ||
+		hasPermission("settings.security:write");
 
 	const canCreateProject = hasPermission("projects:create");
 
@@ -1840,7 +2287,9 @@ export function AppSidebar() {
 			<SidebarSeparator />
 
 			{/* Navigation — switches between workspace and project context */}
-			<SidebarContent>
+			{/* Optional sections render nothing when empty, which can leave two
+				   dividers back to back; show only the first. */}
+			<SidebarContent className="[&_[data-slot=sidebar-separator]+[data-slot=sidebar-separator]]:hidden">
 				{isProjectContext ? (
 					<>
 						{user && <ProjectNav />}
@@ -1855,6 +2304,7 @@ export function AppSidebar() {
 						/>
 						<SidebarSeparator />
 						<PluginProjectPages projectId={projectId} />
+						<SidebarSeparator />
 						<ProjectNavItems projectId={projectId} />
 					</>
 				) : (
@@ -1943,14 +2393,14 @@ export function AppSidebar() {
 						{showPluginsSection ? (
 							<>
 								<SidebarSeparator />
-								<SidebarGroup>
-									<SidebarGroupLabel>{t("nav.plugins")}</SidebarGroupLabel>
-									<SidebarGroupContent>
-										<SidebarMenu>
-											<PluginAdminPages navItems={adminPluginNavItems} />
-										</SidebarMenu>
-									</SidebarGroupContent>
-								</SidebarGroup>
+								<CollapsibleSidebarGroup
+									storageKey="paca:sidebar-admin-plugins-collapsed"
+									label={t("nav.plugins")}
+								>
+									<SidebarMenu>
+										<PluginAdminPages navItems={adminPluginNavItems} />
+									</SidebarMenu>
+								</CollapsibleSidebarGroup>
 							</>
 						) : null}
 					</>
@@ -1964,7 +2414,19 @@ export function AppSidebar() {
 				<UserMenu />
 			</SidebarFooter>
 
-			<SidebarRail />
+			{/* One gesture per edge: while open the edge only resizes (collapse
+			   with the header toggle); the click-to-toggle rail exists only
+			   while collapsed, to bring the sidebar back. */}
+			{sidebarState === "collapsed" && <SidebarRail />}
+			{!isMobile && sidebarState === "expanded" && (
+				<PaneResizeHandle
+					config={SIDEBAR_PANE}
+					pane={sidebarPane}
+					label={tShared("paneResize.sidebar")}
+					edge="right"
+					testId="sidebar-resize-handle"
+				/>
+			)}
 		</Sidebar>
 	);
 }

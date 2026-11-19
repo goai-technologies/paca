@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { roleErrorKey } from "@/components/roles/role-errors";
@@ -13,11 +13,8 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import {
-	deleteRole,
-	projectRolesQueryOptions,
-	type Role,
-} from "@/lib/role-api";
+import { Spinner } from "@/components/ui/spinner";
+import { deleteRole, projectRolesKey, type Role } from "@/lib/role-api";
 
 interface DeleteProjectRoleDialogProps {
 	projectId: string;
@@ -38,10 +35,11 @@ export function DeleteProjectRoleDialog({
 	const [error, setError] = useState<string | null>(null);
 
 	const mutation = useMutation({
+		meta: { success: "deleted", subject: "role" },
 		mutationFn: () => deleteRole(role.id, projectId),
 		onSuccess: () => {
 			void queryClient.invalidateQueries({
-				queryKey: projectRolesQueryOptions(projectId).queryKey,
+				queryKey: projectRolesKey(projectId),
 			});
 			onOpenChange(false);
 		},
@@ -99,7 +97,7 @@ export function DeleteProjectRoleDialog({
 						onClick={() => mutation.mutate()}
 					>
 						{mutation.isPending ? (
-							<Loader2 className="size-3.5 animate-spin" />
+							<Spinner aria-hidden="true" className="size-3.5" />
 						) : (
 							<Trash2 className="size-3.5" />
 						)}

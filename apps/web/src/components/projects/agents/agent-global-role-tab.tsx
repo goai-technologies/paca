@@ -1,8 +1,7 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck, ShieldOff } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { PermissionSummary } from "@/components/admin/global-roles/permission-summary";
 import {
 	isFullAccessRole,
@@ -13,8 +12,9 @@ import { RoleBadgeList, toRoleBadgeData } from "@/components/shared/role-badge";
 import { Button } from "@/components/ui/button";
 import { useCanAssignGlobalRole } from "@/hooks/use-can-assign-global-role";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useRolesByIds } from "@/hooks/use-role-search";
 import { type Agent, globalAgentQueryOptions } from "@/lib/agent-api";
-import { platformRolesQueryOptions, type Role } from "@/lib/role-api";
+import type { Role } from "@/lib/role-api";
 import { useSetAgentGlobalRole } from "./use-set-agent-global-role";
 
 /** How many of the role's permissions to list before folding the rest into "+N". */
@@ -44,12 +44,12 @@ export function AgentGlobalRoleTab({
 
 	// The agent only carries its roles' ids and names; what they grant comes
 	// from the roles list, which needs roles:read.
-	const { data: allRoles } = useQuery({
-		...platformRolesQueryOptions,
-		enabled: hasPermission("roles:read"),
-	});
 	const heldIds = (agent.roles ?? []).map((r) => r.id);
-	const heldRoles = (allRoles ?? []).filter((r) => heldIds.includes(r.id));
+	const heldRoles = useRolesByIds(
+		undefined,
+		heldIds,
+		hasPermission("roles:read"),
+	);
 
 	const [mode, setMode] = useState<Mode>("view");
 	const [selected, setSelected] = useState<{

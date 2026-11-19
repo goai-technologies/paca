@@ -119,6 +119,27 @@ func TestViewFromEntity_NilFilters(t *testing.T) {
 	}
 }
 
+// TestViewFromEntity_Context verifies that the view's context (sprint, backlog
+// or timeline) is exposed on the response.
+func TestViewFromEntity_Context(t *testing.T) {
+	for _, ctx := range []sprintdom.ViewContext{
+		sprintdom.ViewContextSprint,
+		sprintdom.ViewContextBacklog,
+		sprintdom.ViewContextTimeline,
+	} {
+		resp := dto.ViewFromEntity(&sprintdom.SprintView{
+			ID:          uuid.New(),
+			ProjectID:   uuid.New(),
+			Name:        "v",
+			ViewType:    sprintdom.ViewTypeTable,
+			ViewContext: ctx,
+		})
+		if resp.Context != ctx {
+			t.Errorf("Context = %q, want %q", resp.Context, ctx)
+		}
+	}
+}
+
 // TestViewFromEntity_PluginConfigRoundtrip verifies plugin fields are copied
 // from domain config to DTO config.
 func TestViewFromEntity_PluginConfigRoundtrip(t *testing.T) {

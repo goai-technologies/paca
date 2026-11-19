@@ -110,6 +110,20 @@ type Settings struct {
 	SandboxCPULimit    string
 	SandboxMemoryLimit string
 
+	// SandboxPodReadyTimeout is a positive Go duration from SANDBOX_POD_READY_TIMEOUT.
+	// Zero (unset) uses the Kubernetes backend default of five minutes.
+	SandboxPodReadyTimeout time.Duration
+
+	// SandboxDockerInSandbox gates the per-conversation/environment DinD
+	// sidecar (docker_enabled) on the kubernetes backend: a privileged
+	// sidecar needs a sandbox namespace whose Pod Security Admission
+	// allows privileged Pods, and a namespace enforcing even the Baseline
+	// standard rejects them outright. SANDBOX_DOCKER_IN_SANDBOX, default
+	// true so an existing deployment keeps its current behaviour; false
+	// makes the kubernetes backend refuse a docker_enabled sandbox with an
+	// actionable error instead of submitting a Pod that admission forbids.
+	SandboxDockerInSandbox bool
+
 	// SandboxImagePullSecrets names Secrets already present in
 	// SandboxNamespace, attached to every sandbox Pod — needed when
 	// AgentServerImage is pulled from a private registry. Only read when
@@ -197,6 +211,7 @@ func Load() (Settings, error) {
 		SandboxCPULimit:                 os.Getenv("SANDBOX_CPU_LIMIT"),
 		SandboxMemoryLimit:              os.Getenv("SANDBOX_MEMORY_LIMIT"),
 		SandboxEnvironmentsStorageClass: os.Getenv("SANDBOX_ENVIRONMENTS_STORAGE_CLASS"),
+		SandboxDockerInSandbox:          envBool("SANDBOX_DOCKER_IN_SANDBOX", true),
 		SSHBastionPortRangeStart:        envInt("SSH_BASTION_PORT_RANGE_START", 0),
 		SSHBastionPortRangeEnd:          envInt("SSH_BASTION_PORT_RANGE_END", 0),
 		PortForwardRangeStart:           envInt("PORT_FORWARD_RANGE_START", 0),
@@ -251,6 +266,13 @@ func Load() (Settings, error) {
 		// PortPoolStart/PortPoolSize above already default when unset —
 		// nothing further to validate for this backend.
 	case "kubernetes":
+		if raw := os.Getenv("SANDBOX_POD_READY_TIMEOUT"); raw != "" {
+			timeout, err := time.ParseDuration(raw)
+			if err != nil || timeout <= 0 {
+				return Settings{}, fmt.Errorf("config: SANDBOX_POD_READY_TIMEOUT must be a positive Go duration (e.g. 5m), got %q", raw)
+			}
+			s.SandboxPodReadyTimeout = timeout
+		}
 		if s.SandboxNamespace == "" {
 			return Settings{}, fmt.Errorf(
 				"config: SANDBOX_NAMESPACE is required when SANDBOX_BACKEND=kubernetes " +
@@ -309,6 +331,18 @@ func inClusterNamespace() string {
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// envBool reads a boolean env var, keeping fallback when it is unset or
+// unparseable (an operator typo must not silently flip a security-relevant
+// default).
+func envBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
 	}
 	return fallback
 }

@@ -1,5 +1,6 @@
 import { AlertTriangle, Lock, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ReportIssueButton } from "@/components/report-issue-button";
 import { Button } from "@/components/ui/button";
 import { getHttpStatus, isForbiddenError } from "@/lib/api-error";
 
@@ -32,13 +33,11 @@ export function RouteErrorComponent({ error }: { error: Error }) {
 		<div className="flex flex-col h-full items-center justify-center gap-4 p-6">
 			<div
 				className={`flex size-12 items-center justify-center rounded-full ${
-					isForbidden
-						? "bg-amber-100 dark:bg-amber-900/20"
-						: "bg-destructive/10"
+					isForbidden ? "bg-warning/10" : "bg-destructive/10"
 				}`}
 			>
 				{isForbidden ? (
-					<Lock className="size-6 text-amber-500 dark:text-amber-400" />
+					<Lock className="size-6 text-warning" />
 				) : (
 					<AlertTriangle className="size-6 text-destructive" />
 				)}
@@ -46,9 +45,7 @@ export function RouteErrorComponent({ error }: { error: Error }) {
 			<div className="text-center space-y-1 max-w-sm">
 				<p
 					className={`text-sm font-medium ${
-						isForbidden
-							? "text-amber-700 dark:text-amber-400"
-							: "text-destructive"
+						isForbidden ? "text-warning" : "text-destructive"
 					}`}
 				>
 					{isForbidden
@@ -72,15 +69,18 @@ export function RouteErrorComponent({ error }: { error: Error }) {
 			{/* Retrying a permission error hits the same 403 again — nothing on
 			    this page changed, so there's nothing for Retry to do. */}
 			{!isForbidden && (
-				<Button
-					variant="outline"
-					size="sm"
-					className="gap-1.5"
-					onClick={() => window.location.reload()}
-				>
-					<RefreshCw className="size-3.5" />
-					{t("common.retry", "Retry")}
-				</Button>
+				<div className="flex flex-wrap items-center justify-center gap-2">
+					<Button
+						variant="outline"
+						size="sm"
+						className="gap-1.5"
+						onClick={() => window.location.reload()}
+					>
+						<RefreshCw className="size-3.5" />
+						{t("common.retry", "Retry")}
+					</Button>
+					<ReportIssueButton error={error} />
+				</div>
 			)}
 		</div>
 	);

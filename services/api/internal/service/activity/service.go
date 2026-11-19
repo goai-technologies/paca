@@ -17,9 +17,9 @@ import (
 
 const defaultPageSize = 50
 
-// MemberLookup resolves an authenticated actor to their project membership.
+// MemberLookup resolves an account to its project membership.
 type MemberLookup interface {
-	FindMemberByActor(ctx context.Context, projectID, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error)
+	FindMember(ctx context.Context, projectID, accountID uuid.UUID) (*projectdom.ProjectMember, error)
 }
 
 // Service reads the activity log and owns comments. It embeds its Recorder,
@@ -118,8 +118,7 @@ type CommentKind struct {
 type CommentInput struct {
 	ProjectID uuid.UUID
 	EntityID  uuid.UUID
-	ActorID   uuid.UUID  // authenticated user
-	AgentID   *uuid.UUID // set when an agent is acting
+	ActorID   uuid.UUID // authenticated account
 	Content   json.RawMessage
 }
 
@@ -129,10 +128,11 @@ func (s *Service) AddComment(ctx context.Context, k CommentKind, in CommentInput
 	if !IsCommentContentValid(in.Content) {
 		return nil, nil, k.ErrContentInvalid
 	}
-	member, err := s.resolveMember(ctx, k, in.ProjectID, in.ActorID, in.AgentID)
+	member, err := s.resolveMember(ctx, k, in.ProjectID, in.ActorID)
 	if err != nil {
 		return nil, nil, err
 	}
+	in.Content = s.linkMentions(ctx, in.ProjectID, in.Content)
 	now := time.Now()
 	entityID := in.EntityID
 	a := &activitydom.Activity{
@@ -141,7 +141,7 @@ func (s *Service) AddComment(ctx context.Context, k CommentKind, in CommentInput
 		EntityType:   string(k.EntityType),
 		EntityID:     &entityID,
 		ActorID:      &member.ID,
-		Origin:       string(actorOrigin(in.AgentID)),
+		Origin:       string(actorOrigin(ctx)),
 		ActivityType: activitydom.TypeComment,
 		Content:      in.Content,
 		CreatedAt:    now,
@@ -154,16 +154,61 @@ func (s *Service) AddComment(ctx context.Context, k CommentKind, in CommentInput
 	return a, member, nil
 }
 
+// SystemCommentInput is a comment written by the platform itself (the
+// automation engine), with no human author.
+type SystemCommentInput struct {
+	ProjectID uuid.UUID
+	EntityID  uuid.UUID
+	Origin    events.Origin
+	Content   json.RawMessage
+}
+
+// AddSystemComment stores and publishes a comment that has no author. It
+// fans out the same added topic as a human comment, so open activity panes
+// and plugins see it, and tags the event with in.Origin so the automation
+// engine's self-trigger guard can skip it.
+func (s *Service) AddSystemComment(ctx context.Context, k CommentKind, in SystemCommentInput) (*activitydom.Activity, error) {
+	if !IsCommentContentValid(in.Content) {
+		return nil, k.ErrContentInvalid
+	}
+	now := time.Now()
+	entityID := in.EntityID
+	a := &activitydom.Activity{
+		ID:           uuid.New(),
+		ProjectID:    in.ProjectID,
+		EntityType:   string(k.EntityType),
+		EntityID:     &entityID,
+		Origin:       string(in.Origin),
+		ActivityType: activitydom.TypeComment,
+		Content:      in.Content,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := s.repo.Create(ctx, a); err != nil {
+		return nil, err
+	}
+	s.Record(ctx, Entry{
+		ProjectID:  a.ProjectID,
+		EntityType: k.EntityType,
+		EntityID:   a.EntityIDOrNil(),
+		Topic:      k.TopicAdded,
+		Payload:    EntityPayload(a, k.IDKey),
+		Origin:     in.Origin,
+		Plugins:    true,
+	})
+	return a, nil
+}
+
 // UpdateComment replaces a comment's content. Only its author may edit it.
-func (s *Service) UpdateComment(ctx context.Context, k CommentKind, id, projectID, actorID uuid.UUID, agentID *uuid.UUID, content json.RawMessage) (*activitydom.Activity, error) {
+func (s *Service) UpdateComment(ctx context.Context, k CommentKind, id, projectID, actorID uuid.UUID, content json.RawMessage) (*activitydom.Activity, error) {
 	if !IsCommentContentValid(content) {
 		return nil, k.ErrContentInvalid
 	}
-	a, err := s.ownComment(ctx, k, id, projectID, actorID, agentID)
+	a, err := s.ownComment(ctx, k, id, projectID, actorID)
 	if err != nil {
 		return nil, err
 	}
-	a.Content = content
+	a.Content = s.linkMentions(ctx, projectID, content)
 	a.UpdatedAt = time.Now()
 	if err := s.repo.UpdateContent(ctx, a.ID, a.Content, a.UpdatedAt); err != nil {
 		return nil, err
@@ -173,8 +218,8 @@ func (s *Service) UpdateComment(ctx context.Context, k CommentKind, id, projectI
 }
 
 // DeleteComment soft-deletes a comment. Only its author may delete it.
-func (s *Service) DeleteComment(ctx context.Context, k CommentKind, id, projectID, actorID uuid.UUID, agentID *uuid.UUID) error {
-	a, err := s.ownComment(ctx, k, id, projectID, actorID, agentID)
+func (s *Service) DeleteComment(ctx context.Context, k CommentKind, id, projectID, actorID uuid.UUID) error {
+	a, err := s.ownComment(ctx, k, id, projectID, actorID)
 	if err != nil {
 		return err
 	}
@@ -192,7 +237,7 @@ func (s *Service) DeleteComment(ctx context.Context, k CommentKind, id, projectI
 
 // ownComment loads comment id and checks it is a k comment in projectID
 // written by the caller.
-func (s *Service) ownComment(ctx context.Context, k CommentKind, id, projectID, actorID uuid.UUID, agentID *uuid.UUID) (*activitydom.Activity, error) {
+func (s *Service) ownComment(ctx context.Context, k CommentKind, id, projectID, actorID uuid.UUID) (*activitydom.Activity, error) {
 	a, err := s.repo.FindByID(ctx, id)
 	if errors.Is(err, activitydom.ErrNotFound) {
 		return nil, k.ErrNotFound
@@ -208,7 +253,7 @@ func (s *Service) ownComment(ctx context.Context, k CommentKind, id, projectID, 
 	if a.ActivityType != activitydom.TypeComment {
 		return nil, k.ErrNotAComment
 	}
-	member, err := s.resolveMember(ctx, k, projectID, actorID, agentID)
+	member, err := s.resolveMember(ctx, k, projectID, actorID)
 	if err != nil {
 		return nil, err
 	}
@@ -221,12 +266,12 @@ func (s *Service) ownComment(ctx context.Context, k CommentKind, id, projectID, 
 // resolveMember maps the caller to their project membership. The
 // built-in system actor is never a member by design, so for it
 // "member not found" becomes the clearer ErrActorUnidentified.
-func (s *Service) resolveMember(ctx context.Context, k CommentKind, projectID, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error) {
+func (s *Service) resolveMember(ctx context.Context, k CommentKind, projectID, actorID uuid.UUID) (*projectdom.ProjectMember, error) {
 	if s.members == nil {
 		return nil, projectdom.ErrMemberNotFound
 	}
-	m, err := s.members.FindMemberByActor(ctx, projectID, actorID, agentID)
-	if errors.Is(err, projectdom.ErrMemberNotFound) && userdom.IsUnidentifiedSystemActor(actorID, agentID) {
+	m, err := s.members.FindMember(ctx, projectID, actorID)
+	if errors.Is(err, projectdom.ErrMemberNotFound) && userdom.IsUnidentifiedSystemActor(actorID) {
 		return nil, k.ErrActorUnidentified
 	}
 	return m, err
@@ -247,22 +292,23 @@ func (s *Service) publishComment(ctx context.Context, k CommentKind, topic strin
 }
 
 // OriginFor returns explicit when set, otherwise the origin implied by the
-// actor: agent, user, or system when there is none.
-func OriginFor(explicit events.Origin, actorID, agentID *uuid.UUID) events.Origin {
+// actor: the request caller's origin (agent or user), or system when there is
+// no actor.
+func OriginFor(ctx context.Context, explicit events.Origin, actorID *uuid.UUID) events.Origin {
 	switch {
 	case explicit != "":
 		return explicit
-	case agentID != nil:
-		return events.OriginAgent
-	case actorID != nil:
-		return events.OriginUser
+	case actorID == nil:
+		return events.OriginSystem
 	}
-	return events.OriginSystem
+	return actorOrigin(ctx)
 }
 
-func actorOrigin(agentID *uuid.UUID) events.Origin {
-	if agentID != nil {
-		return events.OriginAgent
+// actorOrigin is the origin of a comment: the request's caller, defaulting to
+// a user.
+func actorOrigin(ctx context.Context) events.Origin {
+	if o := events.RequestOrigin(ctx); o != "" {
+		return o
 	}
 	return events.OriginUser
 }

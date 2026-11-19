@@ -16,11 +16,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import {
-	platformRolesQueryOptions,
-	type Role,
-	setDefaultRole,
-} from "@/lib/role-api";
+import { platformRolesKey, type Role, setDefaultRole } from "@/lib/role-api";
 
 interface SetDefaultRoleDialogProps {
 	role: Role;
@@ -44,10 +40,11 @@ export function SetDefaultRoleDialog({
 	const [error, setError] = useState<string | null>(null);
 
 	const mutation = useMutation({
+		meta: { success: "updated", subject: "defaultRole" },
 		mutationFn: () => setDefaultRole(role.id),
 		onSuccess: () => {
 			void queryClient.invalidateQueries({
-				queryKey: platformRolesQueryOptions.queryKey,
+				queryKey: platformRolesKey,
 			});
 			onOpenChange(false);
 		},
@@ -67,7 +64,7 @@ export function SetDefaultRoleDialog({
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
 					<div className="flex items-center gap-2.5">
-						<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">
+						<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
 							<Star className="size-4" />
 						</div>
 						<DialogTitle className="text-base">

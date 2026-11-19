@@ -21,9 +21,29 @@ export interface Sprint {
 	updated_at: string;
 }
 
+/** One page of a project's sprints. `total_count` covers every sprint that
+ *  matches the filters, not just this page. */
 export interface SprintListResult {
 	items: Sprint[];
+	page_size: number;
+	next_cursor: string | null;
+	total_count: number;
 }
+
+export interface ListSprintsOptions {
+	/** Only sprints in one of these statuses. */
+	status?: SprintStatus[];
+	/** Words that must all appear in the sprint name. */
+	search?: string;
+	/** Only these sprints (at most 100) — a batch lookup. */
+	ids?: string[];
+	/** "name" (default) or "recent" (last updated first). */
+	sort?: "name" | "recent";
+	cursor?: string;
+	pageSize?: number;
+}
+
+export const SPRINTS_PAGE_SIZE = 30;
 
 export interface Task {
 	id: string;
@@ -53,12 +73,17 @@ export interface Task {
 	tags?: string[];
 	view_position?: number | null;
 	view_group_key?: string | null;
+	/** Direct-child aggregates, present on list responses (absent = none). */
+	subtask_count?: number;
+	subtask_done_count?: number;
 	created_at: string;
 	updated_at: string;
 	// "manual" (default) or "auto" — see the assignees PropertyField in
 	// properties-panel.tsx, which shows an "Auto" toggle instead of the
 	// member picker when this is "auto".
 	assignment_mode: "manual" | "auto";
+	/** Row version, bumped by the server on every update (see cache-patch.ts). */
+	version?: number;
 	/** The people behind assignee_ids / reporter_id. The list endpoints embed
 	 *  them (include=assignees,reporter); everywhere else they are absent. */
 	assignees?: ProjectMember[];
@@ -85,7 +110,10 @@ interface TaskPositionListResult {
 }
 
 // ── View types ─────────────────────────────────────────────────────────────────
-export type ViewType = "table" | "board" | "roadmap" | "plugin";
+export type ViewType = "table" | "board" | "gantt" | "plugin";
+
+/** The time span one step of the Gantt chart's scale covers. */
+export type GanttZoom = "day" | "week" | "month" | "quarter" | "year";
 
 /**
  * A single entry in a FilterConfig's `items` map.
@@ -120,7 +148,7 @@ export interface FilterConfig {
  *   resolved option values, same recursive semantics as `FilterConfig`)
  * - `number` → `min` / `max` (inclusive range; either may be unset)
  * - `date` → `after` / `before` (inclusive range, "YYYY-MM-DD"; either may be unset)
- * - `text` / `url` → `contains` (case-insensitive substring match)
+ * - `text` / `url` / `long_text` → `contains` (case-insensitive substring match)
  */
 export interface CustomFieldFilterConfig {
 	selector?: FilterConfig;
@@ -192,6 +220,12 @@ export interface ViewConfig {
 	slice_by?: string;
 	filters?: ViewFilters;
 	collapsed_columns?: string[];
+	/** Table / Timeline: how subtasks are shown. Unset means "collapsed". */
+	subtask_mode?: "collapsed" | "expanded" | "hidden";
+	/** Gantt: the time scale. Unset falls back to the view's default ("week"). */
+	gantt_zoom?: GanttZoom;
+	/** Gantt: whether "blocks" links are drawn as arrows. Unset means "shown". */
+	gantt_dependencies?: "shown" | "hidden";
 	/** Saved number of tasks to fetch when paginating further ("load more") within this view. Unset falls back to a fixed default. */
 	page_size?: number;
 	/** Saved number of tasks to fetch on the first load of this view, independent of page_size. Unset falls back to the layout's default. */
@@ -201,7 +235,7 @@ export interface ViewConfig {
 	plugin_component?: string;
 }
 
-export type ViewLayout = "Board" | "Table" | "Roadmap" | "Plugin";
+export type ViewLayout = "Board" | "Table" | "Gantt" | "Plugin";
 
 // ── Filter resolver helpers ───────────────────────────────────────────────────
 
@@ -280,14 +314,14 @@ export interface InteractionView {
 // ── View shape helpers ─────────────────────────────────────────────────────────
 function viewTypeToLayout(vt: ViewType): ViewLayout {
 	if (vt === "board") return "Board";
-	if (vt === "roadmap") return "Roadmap";
+	if (vt === "gantt") return "Gantt";
 	if (vt === "plugin") return "Plugin";
 	return "Table";
 }
 
 export function layoutToViewType(l: ViewLayout): ViewType {
 	if (l === "Board") return "board";
-	if (l === "Roadmap") return "roadmap";
+	if (l === "Gantt") return "gantt";
 	if (l === "Plugin") return "plugin";
 	return "table";
 }
@@ -444,11 +478,23 @@ export const viewsByContextQueryOptions = (
 
 // ── Sprint API ────────────────────────────────────────────────────────────────
 
-export async function listSprints(projectId: string): Promise<Sprint[]> {
+/** One page of a project's sprints. */
+export async function listSprints(
+	projectId: string,
+	opts: ListSprintsOptions = {},
+): Promise<SprintListResult> {
+	const params: Record<string, string | number> = {
+		page_size: opts.pageSize ?? SPRINTS_PAGE_SIZE,
+	};
+	if (opts.status?.length) params.status = opts.status.join(",");
+	if (opts.search?.trim()) params.search = opts.search.trim();
+	if (opts.ids?.length) params.ids = opts.ids.join(",");
+	if (opts.sort) params.sort = opts.sort;
+	if (opts.cursor) params.cursor = opts.cursor;
 	const { data } = await apiClient.instance.get<
 		SuccessEnvelope<SprintListResult>
-	>(`/projects/${projectId}/sprints`);
-	return data.data.items;
+	>(`/projects/${projectId}/sprints`, { params });
+	return data.data;
 }
 
 export async function getSprint(
@@ -539,6 +585,9 @@ export interface ListTasksOptions {
 	taskTypeIds?: string[];
 	taskTypeNull?: boolean;
 	parentTaskId?: string;
+	/** Omit tasks whose parent is a non-Epic task — they are listed nested
+	 *  under that parent instead. */
+	excludeSubtasks?: boolean;
 	pageSize?: number;
 	cursor?: string;
 	/** When set to a field key (e.g. "story_points" or a custom field key), the API returns
@@ -568,6 +617,30 @@ export interface ListTasksOptions {
 	importanceRanges?: { min: number; max: number }[];
 	/** Matches tasks with ANY of these tag values. */
 	tags?: string[];
+	/** Narrows the list to one group (column) of a group-by dimension: `groupBy`
+	 *  is the column_by value (status, sprint, assignee, reporter, type,
+	 *  importance, tags or a custom field key) and `groupKey` the column's key —
+	 *  an entity id, importance bucket, tag, custom field value, or one of the
+	 *  "no value" sentinels (`__none`, `__backlog`, `__unassigned`). */
+	groupBy?: string;
+	groupKey?: string;
+}
+
+/** How many columns the API lists at most (see `truncated`). */
+export const MAX_COLUMNS = 100;
+
+/** The columns of a group-by dimension; `truncated` when more exist than listed. */
+export interface TaskColumnList {
+	columns: TaskColumn[];
+	truncated: boolean;
+}
+
+/** A column of a group-by dimension whose columns come from the data. */
+export interface TaskColumn {
+	key: string;
+	label: string;
+	/** Tasks in the column among those the request's filters match. */
+	count: number;
 }
 
 /** The people (assignees, reporter) the task list embeds in each task. Every
@@ -620,6 +693,7 @@ function buildTaskQueryParams(opts: ListTasksOptions = {}) {
 	else if (opts.taskTypeIds && opts.taskTypeIds.length > 0)
 		params.task_type_ids = opts.taskTypeIds.join(",");
 	if (opts.parentTaskId) params.parent_task_id = opts.parentTaskId;
+	if (opts.excludeSubtasks) params.exclude_subtasks = true;
 	if (opts.sumField && opts.sumField !== "count")
 		params.sum_field = opts.sumField;
 	// For non-manual sorts, pass sort_by to the backend so the database applies the
@@ -650,7 +724,36 @@ function buildTaskQueryParams(opts: ListTasksOptions = {}) {
 		params.importance_ranges = JSON.stringify(opts.importanceRanges);
 	}
 	if (opts.tags && opts.tags.length > 0) params.tags = opts.tags.join(",");
+	if (opts.groupBy && opts.groupKey !== undefined) {
+		params.group_by = opts.groupBy;
+		params.group_key = opts.groupKey;
+	}
 	return params;
+}
+
+/** The columns of a group-by dimension whose columns come from the data (tags,
+ *  assignees, reporters, free-valued custom fields), narrowed by the same
+ *  filters as the task list. The "no value" column always exists and is not
+ *  included. */
+export async function listTaskColumns(
+	projectId: string,
+	columnBy: string,
+	opts: ListTasksOptions = {},
+): Promise<TaskColumnList> {
+	const {
+		page_size: _p,
+		cursor: _c,
+		include: _i,
+		group_by: _gb,
+		group_key: _gk,
+		...filters
+	} = buildTaskQueryParams({ ...opts, groupBy: undefined });
+	const { data } = await apiClient.instance.get<
+		SuccessEnvelope<TaskColumnList>
+	>(`/projects/${projectId}/tasks/columns`, {
+		params: { ...filters, column_by: columnBy },
+	});
+	return data.data;
 }
 
 export async function listAllTasks(
@@ -755,6 +858,33 @@ export async function getTask(
 	return data.data;
 }
 
+export const TASK_KEY_RE = /^[A-Za-z0-9]{1,10}-[1-9][0-9]*$/;
+
+export function isTaskKey(value: string): boolean {
+	return TASK_KEY_RE.test(value.trim());
+}
+
+/** Shareable URL for a task: the short `/PRJ-1` form when the project has a
+ *  task prefix, otherwise the canonical project/task URL. */
+export function taskShareUrl(
+	task: { id: string; project_id?: string; task_number: number },
+	taskIdPrefix: string | undefined,
+	projectId?: string,
+): string {
+	const origin = window.location.origin;
+	if (taskIdPrefix && task.task_number > 0) {
+		return `${origin}/${taskIdPrefix.toUpperCase()}-${task.task_number}`;
+	}
+	return `${origin}/projects/${projectId ?? task.project_id}/tasks/${task.id}`;
+}
+
+export async function getTaskByKey(taskKey: string): Promise<Task> {
+	const { data } = await apiClient.instance.get<SuccessEnvelope<Task>>(
+		`/tasks/by-key/${encodeURIComponent(taskKey.trim().toUpperCase())}`,
+	);
+	return data.data;
+}
+
 export async function updateTask(
 	projectId: string,
 	taskId: string,
@@ -832,6 +962,14 @@ export const taskQueryOptions = (projectId: string, taskId: string) =>
 		staleTime: 15_000,
 	});
 
+export const taskByKeyQueryOptions = (taskKey: string) =>
+	queryOptions({
+		queryKey: ["tasks", "by-key", taskKey.trim().toUpperCase()],
+		queryFn: () => getTaskByKey(taskKey),
+		staleTime: 15_000,
+		retry: false,
+	});
+
 /** Infinite-query version of the subtasks fetch — backs the task detail
  *  panel's Subtasks section. Pages load SUBTASKS_PAGE_SIZE at a time via
  *  next_cursor, same pattern as epicTasksInfiniteQueryOptions, so a task
@@ -850,10 +988,83 @@ export const subtasksInfiniteQueryOptions = (
 		staleTime: 15_000,
 	});
 
-export const sprintsQueryOptions = (projectId: string) =>
-	queryOptions({
-		queryKey: ["projects", projectId, "sprints"],
-		queryFn: () => listSprints(projectId),
+/** Filters that carry over from a view to the children listed under a parent
+ *  row: everything except what scopes the top level (sprint, task type) or
+ *  only makes sense for it (positions, sums, paging). */
+export type ChildTaskFilters = Omit<
+	ListTasksOptions,
+	| "parentTaskId"
+	| "excludeSubtasks"
+	| "pageSize"
+	| "cursor"
+	| "sumField"
+	| "viewId"
+	| "sprintId"
+	| "sprintIds"
+	| "taskTypeIds"
+	| "taskTypeNull"
+>;
+
+/** Infinite query of one parent's direct children for the nested list rows.
+ *  Unlike the detail panel's subtasks query, it applies the view's filters
+ *  and sort. Keyed under ["projects", id, "tasks"] so task mutations and
+ *  realtime events refetch it. */
+export const childTasksInfiniteQueryOptions = (
+	projectId: string,
+	parentTaskId: string,
+	filters: ChildTaskFilters = {},
+) =>
+	infiniteQueryOptions({
+		queryKey: [
+			"projects",
+			projectId,
+			"tasks",
+			parentTaskId,
+			"children",
+			filters,
+		],
+		queryFn: async ({ pageParam }: { pageParam: string | undefined }) => {
+			const { data } = await apiClient.instance.get<
+				SuccessEnvelope<TaskListResult>
+			>(`/projects/${projectId}/tasks`, {
+				params: buildTaskQueryParams({
+					...filters,
+					parentTaskId,
+					cursor: pageParam,
+					pageSize: SUBTASKS_PAGE_SIZE,
+				}),
+			});
+			seedTaskPeople(data.data.items);
+			return data.data;
+		},
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+		staleTime: 15_000,
+	});
+
+/** Cursor-paged sprint list, optionally filtered by status / name search.
+ *  Keyed under ["projects", id, "sprints"] so sprint mutations and realtime
+ *  events refetch it. */
+export const sprintsInfiniteQueryOptions = (
+	projectId: string,
+	filters: Pick<ListSprintsOptions, "status" | "search" | "sort"> = {},
+) =>
+	infiniteQueryOptions({
+		queryKey: [
+			"projects",
+			projectId,
+			"sprints",
+			"list",
+			{
+				status: filters.status ?? null,
+				search: filters.search ?? "",
+				sort: filters.sort ?? "name",
+			},
+		] as const,
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listSprints(projectId, { ...filters, cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 		staleTime: 30_000,
 	});
 
@@ -1115,14 +1326,26 @@ export const LINK_TYPE_LABELS: Record<DisplayLinkType, string> = {
 	is_duplicated_by: "is duplicated by",
 };
 
+export const TASK_LINKS_PAGE_SIZE = 30;
+
+/** One page of a task's links; `total_count` covers all of them. */
+export interface TaskLinkPage {
+	items: TaskLink[];
+	page_size: number;
+	next_cursor: string | null;
+	total_count: number;
+}
+
 export async function listTaskLinks(
 	projectId: string,
 	taskId: string,
-): Promise<TaskLink[]> {
-	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<{ items: TaskLink[] }>
-	>(`/projects/${projectId}/tasks/${taskId}/links`);
-	return data.data.items;
+	cursor?: string,
+): Promise<TaskLinkPage> {
+	const { data } = await apiClient.instance.get<SuccessEnvelope<TaskLinkPage>>(
+		`/projects/${projectId}/tasks/${taskId}/links`,
+		{ params: { page_size: TASK_LINKS_PAGE_SIZE, cursor } },
+	);
+	return data.data;
 }
 
 export async function createTaskLink(
@@ -1147,10 +1370,70 @@ export async function deleteTaskLink(
 	);
 }
 
-export const taskLinksQueryOptions = (projectId: string, taskId: string) =>
+/** A link in a project-wide listing: just the two task ids, no summary. */
+export interface ProjectTaskLink {
+	id: string;
+	source_task_id: string;
+	target_task_id: string;
+	link_type: LinkType;
+	created_at: string;
+}
+
+export const PROJECT_TASK_LINKS_PAGE_SIZE = 500;
+/** Stops a runaway listing: 20 pages of 500 is far more links of one type
+ *  than a project's chart can show. */
+const PROJECT_TASK_LINKS_MAX_PAGES = 20;
+
+/** Every link of `linkType` in the project between tasks the caller may read,
+ *  oldest first, gathered across pages. */
+export async function listProjectTaskLinks(
+	projectId: string,
+	linkType: LinkType,
+): Promise<ProjectTaskLink[]> {
+	const links: ProjectTaskLink[] = [];
+	let cursor: string | undefined;
+	for (let page = 0; page < PROJECT_TASK_LINKS_MAX_PAGES; page++) {
+		const { data } = await apiClient.instance.get<
+			SuccessEnvelope<{
+				items: ProjectTaskLink[];
+				next_cursor: string | null;
+			}>
+		>(`/projects/${projectId}/task-links`, {
+			params: {
+				link_type: linkType,
+				page_size: PROJECT_TASK_LINKS_PAGE_SIZE,
+				cursor,
+			},
+		});
+		links.push(...data.data.items);
+		if (!data.data.next_cursor) break;
+		cursor = data.data.next_cursor;
+	}
+	return links;
+}
+
+/** Key prefix of the project-wide link listings; a link change refreshes them. */
+export const projectTaskLinksKey = (projectId: string) =>
+	["projects", projectId, "task-links"] as const;
+
+export const projectTaskLinksQueryOptions = (
+	projectId: string,
+	linkType: LinkType,
+) =>
 	queryOptions({
+		queryKey: [...projectTaskLinksKey(projectId), linkType],
+		queryFn: () => listProjectTaskLinks(projectId, linkType),
+		staleTime: 15_000,
+		enabled: !!projectId,
+	});
+
+export const taskLinksQueryOptions = (projectId: string, taskId: string) =>
+	infiniteQueryOptions({
 		queryKey: ["projects", projectId, "tasks", taskId, "links"],
-		queryFn: () => listTaskLinks(projectId, taskId),
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listTaskLinks(projectId, taskId, pageParam),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 		staleTime: 15_000,
 		enabled: !!projectId && !!taskId,
 	});

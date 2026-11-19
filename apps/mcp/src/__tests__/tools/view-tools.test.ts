@@ -45,6 +45,7 @@ function makeClient(overrides: Record<string, any> = {}) {
 		listTaskPositions: vi
 			.fn()
 			.mockResolvedValue([{ task_id: "t1", position: 0 }]),
+		moveTaskPosition: vi.fn().mockResolvedValue(undefined),
 		bulkMoveTasks: vi.fn().mockResolvedValue(undefined),
 		listCustomFieldDefinitions: vi.fn().mockResolvedValue([customField]),
 		createCustomFieldDefinition: vi.fn().mockResolvedValue(customField),
@@ -485,28 +486,35 @@ describe("handleViewTool – list_task_positions", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleViewTool – bulk_move_tasks", () => {
-	it("calls client.bulkMoveTasks with mapped input", async () => {
+	it("calls the bulk route with the API's items shape", async () => {
 		const client = makeClient();
 		await handleViewTool(
 			"bulk_move_tasks",
-			{ projectId: "p1", viewId: "v1", taskId: "t1", targetViewId: "v2" },
+			{
+				projectId: "p1",
+				viewId: "v1",
+				items: [
+					{ taskId: "t1", position: 3 },
+					{ taskId: "t2", position: 4, groupKey: "todo" },
+				],
+			},
 			client,
 		);
 		expect(client.bulkMoveTasks).toHaveBeenCalledWith("p1", "v1", {
-			task_id: "t1",
-			target_view_id: "v2",
-			target_status_id: null,
-			target_position: undefined,
+			items: [
+				{ task_id: "t1", position: 3, group_key: null },
+				{ task_id: "t2", position: 4, group_key: "todo" },
+			],
 		});
 	});
 
-	it("includes 'moved successfully' in response", async () => {
+	it("reports how many positions changed", async () => {
 		const result = await handleViewTool(
 			"bulk_move_tasks",
-			{ projectId: "p1", viewId: "v1", taskId: "t1", targetViewId: "v2" },
+			{ projectId: "p1", viewId: "v1", items: [{ taskId: "t1", position: 0 }] },
 			makeClient(),
 		);
-		expect(result.content[0].text).toContain("moved successfully");
+		expect(result.content[0].text).toContain("Moved 1 task position in view v1");
 	});
 });
 
@@ -515,34 +523,27 @@ describe("handleViewTool – bulk_move_tasks", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleViewTool – move_task", () => {
-	it("calls client.bulkMoveTasks (same underlying method as bulk_move_tasks)", async () => {
+	it("calls the single-task position route", async () => {
 		const client = makeClient();
 		await handleViewTool(
 			"move_task",
-			{
-				projectId: "p1",
-				viewId: "v1",
-				taskId: "t1",
-				targetViewId: "v2",
-				targetPosition: 3,
-			},
+			{ projectId: "p1", viewId: "v1", taskId: "t1", position: 3 },
 			client,
 		);
-		expect(client.bulkMoveTasks).toHaveBeenCalledWith("p1", "v1", {
-			task_id: "t1",
-			target_view_id: "v2",
-			target_status_id: null,
-			target_position: 3,
+		expect(client.moveTaskPosition).toHaveBeenCalledWith("p1", "v1", "t1", {
+			position: 3,
+			group_key: null,
 		});
+		expect(client.bulkMoveTasks).not.toHaveBeenCalled();
 	});
 
-	it("includes 'moved successfully' in response", async () => {
+	it("reports the task and position", async () => {
 		const result = await handleViewTool(
 			"move_task",
-			{ projectId: "p1", viewId: "v1", taskId: "t1", targetViewId: "v2" },
+			{ projectId: "p1", viewId: "v1", taskId: "t1", position: 3 },
 			makeClient(),
 		);
-		expect(result.content[0].text).toContain("moved successfully");
+		expect(result.content[0].text).toBe("Moved task t1 to position 3 in view v1");
 	});
 });
 

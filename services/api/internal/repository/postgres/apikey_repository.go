@@ -103,28 +103,29 @@ func (r *APIKeyRepository) FindByHash(ctx context.Context, keyHash string) (*api
 
 // ListByAccountID returns one page of the account's non-revoked API keys,
 // newest first (created_at DESC, id DESC). The total is returned on the
-// first page (no cursor) only.
-func (r *APIKeyRepository) ListByAccountID(ctx context.Context, accountID uuid.UUID, cursorAfter *string, limit int) ([]*apikeydom.APIKey, bool, int, error) {
+// first cursor page and on every numbered page only.
+func (r *APIKeyRepository) ListByAccountID(ctx context.Context, accountID uuid.UUID, filter apikeydom.KeyFilter, cursorAfter *string, limit int) ([]*apikeydom.APIKey, bool, int, error) {
 	if limit <= 0 {
 		limit = 30
 	}
-	// The total is a first-page field: later pages skip the COUNT.
+	// The total is returned on the first cursor page and on every numbered
+	// page (Offset); later cursor pages skip the COUNT.
 	var total int
-	if cursorAfter == nil {
+	if cursorAfter == nil || filter.Offset > 0 {
 		if err := r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM `+apiKeyFrom+` WHERE k.account_id = $1 AND k.revoked_at IS NULL`, accountID.String()); err != nil {
 			return nil, false, 0, fmt.Errorf("api key repo: count: %w", err)
 		}
 	}
 	q := `SELECT ` + apiKeyCols + ` FROM ` + apiKeyFrom + ` WHERE k.account_id = $1 AND k.revoked_at IS NULL`
 	sink := &argList{args: []any{accountID.String()}}
-	if cursorAfter != nil {
+	if cursorAfter != nil && filter.Offset == 0 {
 		at, id, err := apikeydom.DecodeCursor(*cursorAfter)
 		if err != nil {
 			return nil, false, 0, err
 		}
 		q += ` AND (k.created_at, k.id) < (` + sink.addArg(at) + `, ` + sink.addArg(id.String()) + `::uuid)`
 	}
-	q += ` ORDER BY k.created_at DESC, k.id DESC LIMIT ` + sink.addArg(limit+1)
+	q += ` ORDER BY k.created_at DESC, k.id DESC LIMIT ` + sink.addArg(limit+1) + ` OFFSET ` + sink.addArg(filter.Offset)
 	var recs []apiKeyRecord
 	if err := r.db.SelectContext(ctx, &recs, q, sink.args...); err != nil {
 		return nil, false, 0, fmt.Errorf("api key repo: list: %w", err)

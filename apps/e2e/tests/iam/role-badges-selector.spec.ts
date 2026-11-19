@@ -198,7 +198,7 @@ test.describe("Role badges on the users list", () => {
 	test("The role filter narrows the list to users holding a role, and Clear filters resets it", async ({
 		page,
 	}) => {
-		await page.getByRole("combobox", { name: "Filter by role" }).click();
+		await page.getByRole("button", { name: "All roles", exact: true }).click();
 		await page
 			.getByRole("option", { name: describedRole, exact: true })
 			.click();
@@ -232,8 +232,8 @@ test.describe("Choosing roles for a user", () => {
 		await createGlobalRole(request, roleC, readUsers);
 		// Give one of them a description through the API for the search.
 		const roles = (
-			await (await request.get(`${BASE_URL}/api/v1/admin/roles`)).json()
-		).data as Array<{ id: string; name: string }>;
+			await (await request.get(`${BASE_URL}/api/v1/admin/roles?page_size=100`)).json()
+		).data.items as Array<{ id: string; name: string }>;
 		const a = roles.find((r) => r.name === roleA);
 		await request.put(`${BASE_URL}/api/v1/admin/roles/${a?.id}`, {
 			data: { name: roleA, description: describedA, policy: readUsers },

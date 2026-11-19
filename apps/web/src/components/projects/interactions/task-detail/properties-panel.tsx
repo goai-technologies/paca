@@ -1,12 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import {
 	ArrowRight,
-	BookOpen,
 	Check,
 	ExternalLink,
-	KanbanSquare,
 	Layers,
-	Loader2,
 	Plus,
 	Search,
 	X,
@@ -20,19 +17,19 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Spinner } from "@/components/ui/spinner";
 import { useJevEnabled } from "@/hooks/use-jev-enabled";
 import {
 	commitmentsProjectIdQueryOptions,
 	isCommitmentType,
 } from "@/lib/commitment-api";
-import type { Sprint, Task } from "@/lib/interaction-api";
+import type { Task } from "@/lib/interaction-api";
 import {
 	findEpicType,
 	type ProjectMember,
 	type TaskStatus,
 	type TaskType,
 } from "@/lib/project-api";
-import { memberAvatar } from "@/lib/provider-logos";
 import { getTaskTypeIconComponent } from "../../task-types/task-type-icons";
 import { AssigneePicker } from "../assignee-picker";
 import type { PriorityMeta } from "../priority";
@@ -42,6 +39,8 @@ import {
 	IMPORTANCE_BUCKET_VALUES,
 	PRIORITY_LEVELS,
 } from "../priority";
+import { ReporterPicker } from "../reporter-picker";
+import { SprintPicker } from "../sprint-picker";
 import { TaskTypeSelector } from "../task-type-selector";
 import { useEpicSearch } from "../use-epic-search";
 import {
@@ -53,7 +52,7 @@ import { AddFieldDialog } from "./add-field-dialog";
 import { CommitmentField } from "./commitment-field";
 import { CommitmentProjectField } from "./commitment-project-field";
 import { FieldRow } from "./primitives";
-import type { SelectOption, UserOption } from "./property-field";
+import type { SelectOption } from "./property-field";
 import { PropertyField } from "./property-field";
 import { NumberEditor } from "./property-field/number-editor";
 import { StoryPointsEditor } from "./property-field/story-points-editor";
@@ -85,7 +84,6 @@ interface PropertiesPanelProps {
 	reporter: ProjectMember | undefined;
 	statuses?: TaskStatus[];
 	taskTypes?: TaskType[];
-	sprints?: Sprint[];
 	projectId?: string;
 	initialCustomFields?: CustomFieldDef[];
 	canEdit?: boolean;
@@ -102,16 +100,6 @@ interface PropertiesPanelProps {
 	onNavigateToTask?: (taskId: string) => void;
 }
 
-function toUserOption(m: ProjectMember): UserOption {
-	return {
-		value: m.id,
-		label: m.full_name || m.username,
-		avatar: memberAvatar(m),
-	};
-}
-
-const SPRINT_GROUP_ORDER = { active: 0, planned: 1, completed: 2 } as const;
-
 export function PropertiesPanel({
 	task,
 	status,
@@ -119,7 +107,6 @@ export function PropertiesPanel({
 	reporter,
 	statuses = [],
 	taskTypes = [],
-	sprints = [],
 	projectId,
 	initialCustomFields = [],
 	canEdit = true,
@@ -165,38 +152,6 @@ export function PropertiesPanel({
 		colorDot: s.color ?? undefined,
 	}));
 
-	const selectableSprints = sprints.filter(
-		(s) => s.status !== "completed" || s.id === task.sprint_id,
-	);
-	const sprintOptions: SelectOption[] = [
-		{
-			value: "__backlog__",
-			label: t("taskDetail.properties.productBacklog"),
-			icon: <BookOpen className="size-3 shrink-0 opacity-60" />,
-		},
-		// Completed sprints can't be assigned to, but keep the task's current
-		// sprint so the select still shows its value. Grouped by status (stable
-		// sort keeps the API order within each group).
-		...[...selectableSprints]
-			.sort(
-				(a, b) => SPRINT_GROUP_ORDER[a.status] - SPRINT_GROUP_ORDER[b.status],
-			)
-			.map((s) => ({
-				value: s.id,
-				label: s.name,
-				group: t(`taskDetail.properties.sprintGroup.${s.status}`),
-				icon: (
-					<KanbanSquare className="size-3 shrink-0 text-muted-foreground/70" />
-				),
-				hint:
-					s.status === "planned"
-						? t("taskDetail.properties.sprintNotStarted")
-						: undefined,
-			})),
-	];
-
-	const reporterUserOption = reporter ? toUserOption(reporter) : null;
-
 	return (
 		<>
 			<div className="divide-y divide-border/20 rounded-xl border border-border/30 bg-card/50 px-4 py-0.5">
@@ -216,8 +171,9 @@ export function PropertiesPanel({
 					mode="date-range"
 					startDate={task.start_date}
 					dueDate={task.due_date}
-					onStartDateChange={(v) => onUpdate?.({ start_date: v })}
-					onDueDateChange={(v) => onUpdate?.({ due_date: v })}
+					onDateRangeChange={({ startDate, dueDate }) =>
+						onUpdate?.({ start_date: startDate, due_date: dueDate })
+					}
 					canEdit={canEdit}
 				/>
 
@@ -348,29 +304,26 @@ export function PropertiesPanel({
 					canEdit={canEdit}
 				/>
 
-				<PropertyField
-					label={t("taskDetail.properties.reporter")}
-					mode="user"
-					userValue={reporterUserOption}
-					users={[]}
-					canEdit={false}
-					hidden={!reporter}
-				/>
+				<FieldRow label={t("taskDetail.properties.reporter")}>
+					<ReporterPicker
+						projectId={task.project_id}
+						reporter={reporter}
+						reporterId={task.reporter_id ?? null}
+						canEdit={canEdit}
+						onChange={(reporter_id) => onUpdate?.({ reporter_id })}
+					/>
+				</FieldRow>
 
-				<PropertyField
-					label={t("taskDetail.properties.sprint")}
-					mode="select"
-					value={task.sprint_id ?? "__backlog__"}
-					options={sprintOptions}
-					onChange={(v) =>
-						onUpdate?.({
-							sprint_id:
-								v === "__backlog__" ? null : typeof v === "string" ? v : null,
-						})
-					}
-					canEdit={canEdit && selectableSprints.length > 0}
-					hidden={!task.sprint_id && !(canEdit && selectableSprints.length > 0)}
-				/>
+				{(task.sprint_id || canEdit) && (
+					<FieldRow label={t("taskDetail.properties.sprint")}>
+						<SprintPicker
+							projectId={task.project_id}
+							sprintId={task.sprint_id ?? null}
+							canEdit={canEdit}
+							onChange={(sprint_id) => onUpdate?.({ sprint_id })}
+						/>
+					</FieldRow>
+				)}
 
 				{/* Commitment – any ticket except a commitment itself; children inherit.
 				 * A commitment gets the Project field instead: which project it is for. */}
@@ -481,7 +434,10 @@ export function PropertiesPanel({
 										>
 											{isEpicSearching && epicSearchLoading ? (
 												<div className="flex items-center justify-center py-4">
-													<Loader2 className="size-4 animate-spin text-muted-foreground/50" />
+													<Spinner
+														aria-hidden="true"
+														className="text-muted-foreground/50"
+													/>
 												</div>
 											) : (
 												<>
@@ -507,7 +463,7 @@ export function PropertiesPanel({
 											)}
 											{activeEpicsPagination?.isLoadingMore && (
 												<div className="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground/50">
-													<Loader2 className="size-3 animate-spin" />
+													<Spinner aria-hidden="true" className="size-3" />
 													{t("epicPicker.loadingMore")}
 												</div>
 											)}
@@ -584,6 +540,7 @@ export function PropertiesPanel({
 							});
 						}}
 						customOptions={cf.options}
+						customRows={cf.rows}
 						canEdit={canEdit}
 					/>
 				))}

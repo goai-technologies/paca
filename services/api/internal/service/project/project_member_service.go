@@ -150,7 +150,7 @@ func (s *Service) addAgentMember(ctx context.Context, projectID, agentID uuid.UU
 		return nil, projectdom.ErrAgentNotInvitable
 	}
 
-	if _, err := s.repo.FindMemberByAgent(ctx, projectID, agentID); err == nil {
+	if _, err := s.repo.FindMember(ctx, projectID, agentID); err == nil {
 		return nil, projectdom.ErrMemberAlreadyAdded
 	} else if !errors.Is(err, projectdom.ErrMemberNotFound) {
 		return nil, err
@@ -165,7 +165,7 @@ func (s *Service) addAgentMember(ctx context.Context, projectID, agentID uuid.UU
 		return nil, err
 	}
 	s.roleGrantsChanged(roleIDs)
-	added, err := s.repo.FindMemberByAgent(ctx, projectID, agentID)
+	added, err := s.repo.FindMember(ctx, projectID, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -174,14 +174,18 @@ func (s *Service) addAgentMember(ctx context.Context, projectID, agentID uuid.UU
 }
 
 // RemoveMember removes a user from the project.
-func (s *Service) RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error {
+func (s *Service) RemoveMember(ctx context.Context, projectID, accountID uuid.UUID) error {
 	if _, err := s.repo.FindByID(ctx, projectID); err != nil {
 		return err
 	}
-	if _, err := s.repo.FindMember(ctx, projectID, userID); err != nil {
+	if _, err := s.repo.FindMember(ctx, projectID, accountID); err != nil {
 		return err
 	}
-	return s.repo.RemoveMember(ctx, projectID, userID)
+	if err := s.repo.RemoveMember(ctx, projectID, accountID); err != nil {
+		return err
+	}
+	s.accessRevoked()
+	return nil
 }
 
 // AddAgentMember inserts an agent as a project member holding roleIDs.
@@ -198,7 +202,11 @@ func (s *Service) AddAgentMember(ctx context.Context, memberID, projectID, agent
 
 // RemoveAgentMember soft-deletes the agent's membership record.
 func (s *Service) RemoveAgentMember(ctx context.Context, projectID, agentID uuid.UUID) error {
-	return s.repo.RemoveAgentMember(ctx, projectID, agentID)
+	if err := s.repo.RemoveAgentMember(ctx, projectID, agentID); err != nil {
+		return err
+	}
+	s.accessRevoked()
+	return nil
 }
 
 // UpdateMemberDescription changes a member's Jev-facing description by member ID.
@@ -248,6 +256,7 @@ func (s *Service) RemoveMemberByMemberID(ctx context.Context, projectID, memberI
 	if err := s.repo.RemoveMemberByMemberID(ctx, memberID); err != nil {
 		return err
 	}
+	s.accessRevoked()
 	s.record(ctx, projectID, events.EntityMember, memberID, TopicMemberRemoved, memberPayload(member))
 	return nil
 }

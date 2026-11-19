@@ -74,7 +74,7 @@ func TestDocTree_PagesLevelsInManualOrderWithoutBodies(t *testing.T) {
 	var gotFolders []uuid.UUID
 	var cur *string
 	for i := 0; i < 20; i++ {
-		fs, more, err := repo.ListFolders(ctx, f.p, nil, cur, 2)
+		fs, more, err := repo.ListFolders(ctx, f.p, nil, docdom.FolderFilter{}, cur, 2)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +90,7 @@ func TestDocTree_PagesLevelsInManualOrderWithoutBodies(t *testing.T) {
 	if fmt.Sprint(gotFolders) != fmt.Sprint(rootFolders) {
 		t.Fatalf("root folders\n got %v\nwant %v", gotFolders, rootFolders)
 	}
-	kids, more, err := repo.ListFolders(ctx, f.p, &rootFolders[0], nil, 10)
+	kids, more, err := repo.ListFolders(ctx, f.p, &rootFolders[0], docdom.FolderFilter{}, nil, 10)
 	if err != nil || more || len(kids) != 1 || kids[0].ID != child {
 		t.Fatalf("child folders = %v, %v, %v", kids, more, err)
 	}

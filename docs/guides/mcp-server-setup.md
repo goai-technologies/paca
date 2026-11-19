@@ -194,7 +194,8 @@ Agent: (uses MCP tools)
 2. create_task - Creates "Implement authentication" task
 3. create_task - Creates "Set up database" task  
 4. create_task - Creates "Create user API" task
-5. bulk_move_tasks - Moves all tasks to the new sprint
+5. update_task - Sets the sprint for each created task (sprintId)
+6. bulk_move_tasks - Sets each task's manual position within the sprint's view
 ```
 
 ### Example 2: Review and Update Task Status

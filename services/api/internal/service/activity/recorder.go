@@ -29,12 +29,15 @@ type Entry struct {
 	// receive; it must be JSON-marshalable.
 	Payload any
 
-	// ActorID/ActorAgentID/Origin attribute the entry. Left all unset, they
+	// ActorID/Origin attribute the entry. Left all unset, they
 	// are taken from the request context (see events.WithRequestActor), and
 	// an entry made outside a request is a system one.
-	ActorID      *uuid.UUID
-	ActorAgentID *uuid.UUID
-	Origin       events.Origin
+	ActorID *uuid.UUID
+	Origin  events.Origin
+
+	// Snapshot is the entity after the change, for realtime clients to patch
+	// their cache with; see events.Event.Snapshot.
+	Snapshot any
 
 	// Plugins also delivers the entry to the plugin event stream. Only the
 	// task and doc events plugins subscribe to set it.
@@ -83,9 +86,9 @@ func (r *FanoutRecorder) Record(ctx context.Context, e Entry) {
 		ProjectID:        e.ProjectID,
 		EntityType:       e.EntityType,
 		ActorID:          e.ActorID,
-		ActorAgentID:     e.ActorAgentID,
 		Origin:           e.Origin,
 		SkipPluginEvents: !e.Plugins,
+		Snapshot:         e.Snapshot,
 	}
 	if e.EntityID != uuid.Nil {
 		id := e.EntityID

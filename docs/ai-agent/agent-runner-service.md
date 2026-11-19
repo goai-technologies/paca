@@ -130,9 +130,9 @@ After `Run` returns, `handler.Handle` makes one more best-effort ACP call before
 
 ## Repository Access
 
-Unlike `services/ai-agent`, `agent-runner` **never clones a repository itself**. Cloning, committing, and PR creation happen entirely inside the sandbox, driven by the agent's own tool calls against the built-in Paca MCP server (`apps/mcp`, running as `npx @paca-ai/paca-mcp` inside the container — see [Skills & MCP Server Injection](#skills--mcp-server-injection)). `apps/mcp/src/tools/repo-tools.ts` fetches short-lived VCS tokens from `services/api` on demand, runs `git` as a subprocess, and scrubs the token from any output before it can reach the model's context or a log line. `clone_repository` recursively deletes its target directory before cloning into it (`targetDir` is agent-chosen, defaulting to `/home/goose/repo`); `assertSafeDeleteTarget` refuses to run that delete against a handful of top-level system directories (`/`, `/etc`, `/home`, ...) regardless of what the agent passes.
+`agent-runner` **never clones a repository itself**. Reading, cloning, committing, pushing and reviewing happen inside the sandbox, driven by the agent's own tool calls against the built-in Paca MCP server (`apps/mcp`, running as `npx @paca-ai/paca-mcp` inside the container — see [Skills & MCP Server Injection](#skills--mcp-server-injection)). The Git tools call `services/api`, which resolves the repository's provider and mints a short-lived, repository-scoped credential for each git command; git receives it through a credential helper, so no token is ever in a remote URL, a file, the environment or tool output.
 
-See [repository-plugin-adapter.md](repository-plugin-adapter.md) for the full token-fetch protocol.
+See [git-agent-workflow.md](git-agent-workflow.md) for the tools, the credential helper and the workspace protocol.
 
 ---
 
@@ -171,6 +171,8 @@ There is no REST equivalent to `services/ai-agent`'s `/conversations/:id/pause` 
 
 The three internal endpoints require `X-Internal-Token` matching `INTERNAL_API_KEY` — `services/api`'s `AI_AGENT_INTERNAL_KEY` must equal this value.
 
+`/agent-bridge/ws` authenticates after the upgrade, with the `hello` frame (agent id plus bridge token). Because that handshake is unauthenticated until the frame arrives, it is bounded: at most `maxPendingHellos` (128) handshakes in flight per agent-runner process — excess upgrades get `503` before the socket is accepted — the `hello` frame may not exceed 1 KiB, and a peer that sends no `hello` within 10 s is closed. The 10 MiB bridge frame limit applies only after the token checks out. Anyone exempting this path from an edge/browser authentication layer inherits that bound and must not remove it.
+
 ---
 
 ## Environment Variables
@@ -187,6 +189,7 @@ The three internal endpoints require `X-Internal-Token` matching `INTERNAL_API_K
 | `PORT_POOL_START` / `PORT_POOL_SIZE` | | Container port pool. Default: `10000` / `100` |
 | `WORKER_CONCURRENCY` | | Trigger goroutines in flight at once. Default: `5` |
 | `CHAT_SANDBOX_IDLE_TIMEOUT_MINUTES` | | Idle timeout before the reaper tears down a paused chat sandbox. Default: `3` |
+| `SANDBOX_POD_READY_TIMEOUT` | | Kubernetes only: positive Go duration for a sandbox Pod to obtain an IP, including node provisioning. Default: `5m`; `60s` restores the old wait. Covers conversation Jobs and static environments, separately from HTTP readiness; caller deadlines still apply. |
 | `HTTP_ADDR` | | Address `internal/acpbridge.Server` listens on. Default: `:8080` |
 | `LLM_MODELS_PATH` | | Path to the static model catalog. Default: `./data/llm_models.json` |
 | `LOG_LEVEL` | | Default: `info` |

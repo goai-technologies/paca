@@ -14,8 +14,10 @@ const SSO_ERROR_CODES = [
 	"state_invalid",
 	"exchange_failed",
 	"email_not_allowed",
+	"group_not_allowed",
 	"no_account",
 	"account_exists",
+	"ip_not_allowed",
 	"rate_limited",
 ] as const;
 
@@ -34,7 +36,7 @@ export function SsoErrorNotice({ code }: { code?: string }) {
 	return (
 		<div
 			role="alert"
-			className="mb-5 flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-400"
+			className="mb-5 flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
 		>
 			<AlertCircle className="mt-px size-4 shrink-0" />
 			<span>{t(`login.sso.errors.${key}`)}</span>
@@ -45,19 +47,29 @@ export function SsoErrorNotice({ code }: { code?: string }) {
 /**
  * "Continue with …" buttons for every enabled SSO provider. Renders nothing
  * when none is configured, so the login page is unchanged by default.
+ * `divider` separates them from a password form above; without one (an
+ * SSO-only login page) it would separate them from nothing.
  */
-export function SsoSignInButtons({ rememberMe }: { rememberMe: boolean }) {
+export function SsoSignInButtons({
+	rememberMe,
+	divider = true,
+}: {
+	rememberMe: boolean;
+	divider?: boolean;
+}) {
 	const { t } = useTranslation("auth");
 	const { data: providers } = useQuery(publicSsoProvidersQueryOptions);
 	if (!providers?.length) return null;
 
 	return (
 		<div className="mt-6">
-			<div className="mb-4 flex items-center gap-3 text-xs text-(--sea-ink-soft)">
-				<span className="h-px flex-1 bg-(--line)" />
-				{t("login.sso.divider")}
-				<span className="h-px flex-1 bg-(--line)" />
-			</div>
+			{divider ? (
+				<div className="mb-4 flex items-center gap-3 text-xs text-(--sea-ink-soft)">
+					<span className="h-px flex-1 bg-(--line)" />
+					{t("login.sso.divider")}
+					<span className="h-px flex-1 bg-(--line)" />
+				</div>
+			) : null}
 			<div className="space-y-2.5">
 				{providers.map((p) => (
 					<a

@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Shield } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DeleteRoleDialog } from "@/components/admin/global-roles/DeleteRoleDialog";
 import { GlobalRolesHeader } from "@/components/admin/global-roles/GlobalRolesHeader";
@@ -16,10 +16,12 @@ import { RolesTableSkeleton } from "@/components/admin/global-roles/RolesTableSk
 import { SetDefaultRoleDialog } from "@/components/admin/global-roles/SetDefaultRoleDialog";
 import { activePermissions } from "@/components/admin/global-roles/utils";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
+import { Pagination } from "@/components/ui/pagination";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useTablePaging } from "@/hooks/use-table-paging";
 import { myPermissionsQueryOptions } from "@/lib/admin-api";
 import { hasPermission } from "@/lib/permissions";
-import { platformRolesQueryOptions, type Role } from "@/lib/role-api";
+import { platformRolesPageQueryOptions, type Role } from "@/lib/role-api";
 
 export const Route = createFileRoute("/_authenticated/admin/global-roles/")({
 	beforeLoad: async ({ context: { queryClient } }) => {
@@ -45,11 +47,25 @@ function GlobalRolesPage() {
 	const canRead = hasPermission("roles:read");
 	const canWrite = hasPermission("roles:write");
 
+	const { page, pageSize, setPage, setPageSize } =
+		useTablePaging("admin-global-roles");
 	const {
-		data: roles = [],
+		data: rolePage,
 		isLoading: isDataLoading,
 		isError,
-	} = useQuery({ ...platformRolesQueryOptions, enabled: canRead });
+		error,
+	} = useQuery({
+		...platformRolesPageQueryOptions(page, pageSize),
+		enabled: canRead,
+		placeholderData: keepPreviousData,
+	});
+	const roles = useMemo(() => rolePage?.items ?? [], [rolePage]);
+	const rolesCount = rolePage?.total_count ?? 0;
+	const totalPages = Math.max(1, Math.ceil(rolesCount / pageSize));
+	// Deleting the last role of the last page leaves it empty: step back.
+	useEffect(() => {
+		if (rolePage && page > totalPages) setPage(totalPages);
+	}, [rolePage, page, totalPages, setPage]);
 	// While permissions are still loading, canRead defaults to false same as
 	// a confirmed denial — fold isPermissionsLoading into isLoading (and
 	// guard the noPermission check below) so the page shows the skeleton
@@ -61,10 +77,11 @@ function GlobalRolesPage() {
 	const [deleteRole, setDeleteRole] = useState<Role | null>(null);
 	const [defaultRole, setDefaultRole] = useState<Role | null>(null);
 
-	const totalGranted = roles.reduce(
-		(sum, r) => sum + activePermissions(r.policy).length,
-		0,
-	);
+	// The grants sum is only meaningful when every role is on this page.
+	const totalGranted =
+		rolesCount > pageSize
+			? undefined
+			: roles.reduce((sum, r) => sum + activePermissions(r.policy).length, 0);
 
 	return (
 		<div className="flex flex-col gap-6 p-6 max-w-5xl w-full mx-auto">
@@ -78,10 +95,7 @@ function GlobalRolesPage() {
 			) : null}
 
 			{canRead && !isLoading && !isError && (
-				<GlobalRolesStats
-					rolesCount={roles.length}
-					totalGranted={totalGranted}
-				/>
+				<GlobalRolesStats rolesCount={rolesCount} totalGranted={totalGranted} />
 			)}
 
 			{!isPermissionsLoading && !canRead ? (
@@ -93,7 +107,7 @@ function GlobalRolesPage() {
 			) : isLoading ? (
 				<RolesTableSkeleton />
 			) : isError ? (
-				<GlobalRolesErrorState />
+				<GlobalRolesErrorState error={error} />
 			) : roles.length === 0 ? (
 				<EmptyRolesState
 					canWrite={canWrite}
@@ -108,6 +122,16 @@ function GlobalRolesPage() {
 					onSetDefault={setDefaultRole}
 				/>
 			)}
+			{canRead && !isLoading && !isError && rolesCount > 0 ? (
+				<Pagination
+					page={page}
+					totalPages={totalPages}
+					onPageChange={setPage}
+					total={rolesCount}
+					pageSize={pageSize}
+					onPageSizeChange={setPageSize}
+				/>
+			) : null}
 
 			{editRole ? (
 				<RoleFormDialog

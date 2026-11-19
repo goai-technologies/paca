@@ -36,19 +36,10 @@ vi.mock("@/lib/role-api", () => ({
 		queryKey: ["roles", "attribute-schema"],
 		queryFn: async () => SCHEMA,
 	}),
-	projectRolesQueryOptions: (projectId: string) => ({
-		queryKey: ["projects", projectId, "roles"],
-	}),
-	platformRolesQueryOptions: { queryKey: ["admin", "roles"] },
+	projectRolesKey: (projectId: string) => ["projects", projectId, "roles"],
+	platformRolesKey: ["admin", "roles"],
 }));
 
-vi.mock("@/lib/interaction-api", async (orig) => ({
-	...(await orig<typeof import("@/lib/interaction-api")>()),
-	sprintsQueryOptions: () => ({
-		queryKey: ["sprints"],
-		queryFn: async () => [{ id: "s1", name: "Sprint 1" }],
-	}),
-}));
 vi.mock("@/lib/doc-api", async (orig) => ({
 	...(await orig<typeof import("@/lib/doc-api")>()),
 	docFoldersQueryOptions: () => ({

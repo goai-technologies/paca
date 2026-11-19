@@ -39,6 +39,34 @@ describe("auth-api", () => {
 		});
 	});
 
+	it("returns the challenge and its methods when a second factor is owed", async () => {
+		mockPost.mockResolvedValue({
+			data: {
+				data: {
+					mfa_required: true,
+					mfa_challenge: "chal",
+					mfa_methods: ["passkey"],
+				},
+			},
+		});
+
+		await expect(login("alice", "secret", false)).resolves.toEqual({
+			challenge: "chal",
+			methods: ["passkey"],
+		});
+	});
+
+	it("assumes a code when the server names no methods", async () => {
+		mockPost.mockResolvedValue({
+			data: { data: { mfa_required: true, mfa_challenge: "chal" } },
+		});
+
+		await expect(login("alice", "secret", false)).resolves.toEqual({
+			challenge: "chal",
+			methods: ["totp"],
+		});
+	});
+
 	it("calls logout endpoint", async () => {
 		mockPost.mockResolvedValue({});
 

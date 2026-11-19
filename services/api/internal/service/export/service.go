@@ -29,8 +29,6 @@ import (
 )
 
 const (
-	// listLimit caps how many past exports the list endpoint returns.
-	listLimit = 20
 	// pageSize is how many tasks Execute reads per query.
 	pageSize = 500
 	// downloadTTL is how long a presigned download URL stays valid.
@@ -154,8 +152,11 @@ func (s *Service) RequestExport(ctx context.Context, projectID, requestedBy uuid
 }
 
 // List implements exportdom.Service.
-func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]*exportdom.ProjectExport, error) {
-	return s.repo.ListByProject(ctx, projectID, listLimit)
+func (s *Service) List(ctx context.Context, projectID uuid.UUID, page, pageSize int) ([]*exportdom.ProjectExport, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	return s.repo.ListByProject(ctx, projectID, (page-1)*pageSize, pageSize)
 }
 
 // Get implements exportdom.Service. An export that belongs to a different
@@ -505,7 +506,7 @@ func (s *Service) loadLookups(ctx context.Context, project *projectdom.Project) 
 	if err != nil {
 		return nil, fmt.Errorf("list custom fields: %w", err)
 	}
-	sprints, err := s.sprints.ListSprints(ctx, project.ID)
+	sprints, err := s.sprints.ListAllSprints(ctx, project.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list sprints: %w", err)
 	}

@@ -28,7 +28,13 @@ const attachment = {
 
 function makeClient(overrides: Record<string, any> = {}) {
 	return {
-		listTaskAttachments: vi.fn().mockResolvedValue([attachment]),
+		listTaskAttachments: vi
+			.fn()
+			.mockResolvedValue({ items: [attachment], nextCursor: null }),
+		getTaskAttachment: vi.fn().mockImplementation(async (_p, _t, id) => {
+			if (id === attachment.id) return attachment;
+			throw new Error("not found");
+		}),
 		getAttachmentDownloadURL: vi
 			.fn()
 			.mockResolvedValue("https://cdn.example.com/photo.png"),
@@ -153,7 +159,10 @@ describe("handleAttachmentTool – list_task_attachments", () => {
 			{ projectId: "p1", taskId: "t1" },
 			client,
 		);
-		expect(client.listTaskAttachments).toHaveBeenCalledWith("p1", "t1");
+		expect(client.listTaskAttachments).toHaveBeenCalledWith("p1", "t1", {
+			cursor: undefined,
+			pageSize: undefined,
+		});
 	});
 
 	it("includes 'Attachments:' header in the response", async () => {
@@ -252,7 +261,7 @@ describe("handleAttachmentTool – read_task_attachment", () => {
 			created_at: "2024-01-01T00:00:00Z",
 		};
 		const client = makeClient({
-			listTaskAttachments: vi.fn().mockResolvedValue([textAttachment]),
+			getTaskAttachment: vi.fn().mockResolvedValue(textAttachment),
 			downloadAttachmentContent: vi.fn().mockResolvedValue({
 				buffer: new TextEncoder().encode("hello world").buffer,
 				contentType: "text/markdown",
@@ -280,7 +289,7 @@ describe("handleAttachmentTool – read_task_attachment", () => {
 			created_at: "2024-01-01T00:00:00Z",
 		};
 		const client = makeClient({
-			listTaskAttachments: vi.fn().mockResolvedValue([codeAttachment]),
+			getTaskAttachment: vi.fn().mockResolvedValue(codeAttachment),
 			downloadAttachmentContent: vi.fn().mockResolvedValue({
 				buffer: new TextEncoder().encode("print('hi')").buffer,
 				contentType: "application/octet-stream",
@@ -307,7 +316,7 @@ describe("handleAttachmentTool – read_task_attachment", () => {
 			created_at: "2024-01-01T00:00:00Z",
 		};
 		const client = makeClient({
-			listTaskAttachments: vi.fn().mockResolvedValue([dockerfileAttachment]),
+			getTaskAttachment: vi.fn().mockResolvedValue(dockerfileAttachment),
 			downloadAttachmentContent: vi.fn().mockResolvedValue({
 				buffer: new TextEncoder().encode("FROM node:20").buffer,
 				contentType: "application/octet-stream",
@@ -334,7 +343,7 @@ describe("handleAttachmentTool – read_task_attachment", () => {
 			created_at: "2024-01-01T00:00:00Z",
 		};
 		const client = makeClient({
-			listTaskAttachments: vi.fn().mockResolvedValue([pdfAttachment]),
+			getTaskAttachment: vi.fn().mockResolvedValue(pdfAttachment),
 		});
 		const result = await handleAttachmentTool(
 			"read_task_attachment",
@@ -358,7 +367,7 @@ describe("handleAttachmentTool – read_task_attachment", () => {
 			created_at: "2024-01-01T00:00:00Z",
 		};
 		const client = makeClient({
-			listTaskAttachments: vi.fn().mockResolvedValue([bigAttachment]),
+			getTaskAttachment: vi.fn().mockResolvedValue(bigAttachment),
 		});
 		const result = await handleAttachmentTool(
 			"read_task_attachment",

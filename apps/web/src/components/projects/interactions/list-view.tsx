@@ -1,7 +1,14 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
+import { useStableValue } from "@/hooks/use-stable-value";
 
-import type { Sprint, Task, ViewConfig } from "@/lib/interaction-api";
+import type {
+	ChildTaskFilters,
+	Sprint,
+	Task,
+	ViewConfig,
+} from "@/lib/interaction-api";
 import type {
 	CustomFieldDefinition,
 	ProjectMember,
@@ -11,6 +18,10 @@ import type {
 
 import { ListGroup } from "./list-group";
 import type { SprintFormPayload } from "./sprint-form-modal";
+import {
+	resolveSubtaskMode,
+	useSubtaskExpansion,
+} from "./use-subtask-expansion";
 import {
 	applyStatusFilterToColumnDefs,
 	type ColumnGroupDef,
@@ -32,6 +43,9 @@ export interface ListViewProps {
 	taskTypes: TaskType[];
 	members?: ProjectMember[];
 	reporters?: ProjectMember[];
+	/** The columns the API lists for a column_by whose columns come from the
+	 *  data — see ViewContext.dynamicColumns. */
+	dynamicColumns?: { key: string; label: string }[];
 	customFields?: CustomFieldDefinition[];
 	epics?: Task[];
 	/** Load-more state for the epic picker, shared by every group/row/card. */
@@ -52,6 +66,13 @@ export interface ListViewProps {
 	sortBy?: string;
 	onUpdateTaskField?: (taskId: string, update: TaskFieldUpdate) => void;
 	sprints?: Sprint[];
+	/** Load-more state for the sprint groups when columns are by sprint. */
+	sprintsPagination?: {
+		hasMore: boolean;
+		isLoadingMore: boolean;
+		isError?: boolean;
+		onLoadMore: () => void;
+	};
 	onStartSprint?: (
 		sprintId: string,
 		payload: SprintFormPayload,
@@ -60,6 +81,12 @@ export interface ListViewProps {
 	/** Opens the delete-confirmation dialog — Mod+Backspace shortcut. */
 	onDeleteTask?: (taskId: string) => void;
 	onCollapseChange?: (collapsedColumns: string[]) => void;
+	/** The view's filters/sort, applied to subtasks listed under a parent. */
+	childFilters?: ChildTaskFilters;
+	/** True while any filter or search narrows the list. */
+	filtersActive?: boolean;
+	/** Identifies the view for remembering which rows are expanded. */
+	viewKey?: string;
 	columnPagination?: Record<
 		string,
 		{
@@ -74,6 +101,8 @@ export interface ListViewProps {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+const EMPTY_TASKS: Task[] = [];
+
 export function ListView({
 	projectId,
 	tasks,
@@ -82,6 +111,7 @@ export function ListView({
 	taskTypes,
 	members = [],
 	reporters,
+	dynamicColumns,
 	customFields = [],
 	epics = [],
 	epicsPagination,
@@ -96,13 +126,42 @@ export function ListView({
 	sortBy,
 	onUpdateTaskField,
 	sprints,
+	sprintsPagination,
 	onStartSprint,
 	onCreateSprint,
 	onDeleteTask,
 	onCollapseChange,
+	childFilters,
+	filtersActive = false,
+	viewKey = "default",
 	columnPagination,
 }: ListViewProps) {
 	const { t } = useTranslation("projects");
+	const subtaskMode = resolveSubtaskMode(viewConfig);
+	const subtaskExpansion = useSubtaskExpansion(
+		projectId,
+		viewKey,
+		subtaskMode === "expanded",
+	);
+	const nestingEnabled = subtaskMode !== "hidden";
+	const nesting = useMemo(
+		() =>
+			nestingEnabled
+				? {
+						isExpanded: subtaskExpansion.isExpanded,
+						onToggle: subtaskExpansion.toggle,
+						filters: childFilters ?? {},
+						filtersActive,
+					}
+				: undefined,
+		[
+			nestingEnabled,
+			subtaskExpansion.isExpanded,
+			subtaskExpansion.toggle,
+			childFilters,
+			filtersActive,
+		],
+	);
 	const columnBy = viewConfig?.column_by ?? "status";
 	const swimlaneBy = viewConfig?.swimlanes;
 	const fieldSum = viewConfig?.field_sum;
@@ -114,8 +173,24 @@ export function ListView({
 		!viewConfig?.column_by || viewConfig.column_by === "status";
 
 	const viewCtx = useMemo(
-		() => ({ statuses, taskTypes, members, reporters, customFields, sprints }),
-		[statuses, taskTypes, members, reporters, customFields, sprints],
+		() => ({
+			statuses,
+			taskTypes,
+			members,
+			reporters,
+			customFields,
+			sprints,
+			dynamicColumns,
+		}),
+		[
+			statuses,
+			taskTypes,
+			members,
+			reporters,
+			customFields,
+			sprints,
+			dynamicColumns,
+		],
 	);
 
 	const groupDefs = useMemo(
@@ -123,7 +198,7 @@ export function ListView({
 		[columnBy, viewCtx, t],
 	);
 
-	const effectiveGroupDefs = useMemo((): ColumnGroupDef[] => {
+	const computedGroupDefs = useMemo((): ColumnGroupDef[] => {
 		let defs: ColumnGroupDef[];
 		if (groupDefs.length > 0) {
 			defs = groupDefs;
@@ -169,15 +244,30 @@ export function ListView({
 		t,
 	]);
 
+	// Rebuilt whenever the task list changes (dynamic groups depend on it),
+	// usually to the same contents: keep the previous array so rows don't
+	// re-render for it.
+	const effectiveGroupDefs = useStableValue(computedGroupDefs);
+
 	const swimlaneDefs = useMemo(
 		() => getSwimlaneDefs(swimlaneBy, viewCtx, t),
 		[swimlaneBy, viewCtx, t],
 	);
 
+	// One array per group, rebuilt only when the tasks or the grouping change:
+	// a fresh array on every render makes each group reset its row state.
+	const tasksByGroup = useMemo(() => {
+		const byGroup = new Map<string, Task[]>();
+		for (const def of effectiveGroupDefs) byGroup.set(def.key, []);
+		for (const task of tasks) {
+			for (const key of new Set(getTaskColumnKeys(task, columnBy, viewCtx))) {
+				byGroup.get(key)?.push(task);
+			}
+		}
+		return byGroup;
+	}, [tasks, effectiveGroupDefs, columnBy, viewCtx]);
 	const getGroupTasks = (groupKey: string): Task[] =>
-		tasks.filter((t) =>
-			getTaskColumnKeys(t, columnBy, viewCtx).includes(groupKey),
-		);
+		tasksByGroup.get(groupKey) ?? EMPTY_TASKS;
 
 	const savedCollapsedColumns = viewConfig?.collapsed_columns;
 
@@ -270,6 +360,7 @@ export function ListView({
 										handleGroupCollapseChange(grp.key, isCollapsed)
 								: undefined
 						}
+						nesting={nesting}
 						groupPagination={columnPagination?.[grp.key]}
 						totalCount={columnPagination?.[grp.key]?.totalCount}
 						apiFieldSum={columnPagination?.[grp.key]?.fieldSum}
@@ -284,6 +375,9 @@ export function ListView({
 					/>
 				);
 			})}
+			{columnBy === "sprint" && sprintsPagination && (
+				<LoadMoreSentinel {...sprintsPagination} />
+			)}
 		</div>
 	);
 }

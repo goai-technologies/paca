@@ -16,6 +16,7 @@ import (
 	"github.com/Paca-AI/api/internal/commitmentmigration"
 	"github.com/Paca-AI/api/internal/config"
 	userdom "github.com/Paca-AI/api/internal/domain/user"
+	"github.com/Paca-AI/api/internal/events"
 	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	"github.com/Paca-AI/api/internal/platform/cache"
 	"github.com/Paca-AI/api/internal/platform/database"
@@ -24,7 +25,6 @@ import (
 	"github.com/Paca-AI/api/internal/platform/netguard"
 	pluginrt "github.com/Paca-AI/api/internal/platform/plugin"
 	"github.com/Paca-AI/api/internal/platform/secret"
-	"github.com/Paca-AI/api/internal/platform/storage"
 	jwttoken "github.com/Paca-AI/api/internal/platform/token"
 	pgRepo "github.com/Paca-AI/api/internal/repository/postgres"
 	redisRepo "github.com/Paca-AI/api/internal/repository/redis"
@@ -38,6 +38,8 @@ import (
 	docsvc "github.com/Paca-AI/api/internal/service/doc"
 	environmentsvc "github.com/Paca-AI/api/internal/service/environment"
 	exportsvc "github.com/Paca-AI/api/internal/service/export"
+	gitsvc "github.com/Paca-AI/api/internal/service/git"
+	mfasvc "github.com/Paca-AI/api/internal/service/mfa"
 	notificationsvc "github.com/Paca-AI/api/internal/service/notification"
 	pluginsvc "github.com/Paca-AI/api/internal/service/plugin"
 	projectsvc "github.com/Paca-AI/api/internal/service/project"
@@ -74,9 +76,14 @@ type App struct {
 	taskAutofillConsumer   *worker.TaskAutofillConsumer
 	taskAutoAssignConsumer *worker.TaskAutoAssignConsumer
 	agentQueueConsumer     *worker.AgentQueueConsumer
+	questionConsumer       *worker.QuestionNotificationConsumer
 	dueDateScheduler       *worker.DueDateScheduler
 	cronScheduler          *worker.CronScheduler
+	changeReconciler       *worker.ChangeReconciler
+	docHashBackfill        *worker.DocHashBackfill
 	waitScheduler          *worker.WaitScheduler
+	gitRouter              *gitsvc.Router
+	stopGitRouter          context.CancelFunc
 	log                    *slog.Logger
 }
 
@@ -114,7 +121,10 @@ func New(cfg *config.Config) (*App, error) {
 	// cached policies after every committed change, and simulates through the
 	// same engine and action registry the gates use.
 	roleRepo := pgRepo.NewRoleRepository(db)
-	roleService := rolesvc.New(roleRepo, authorizer, authorizer, authorizer.Registry(), authorizer.Schema())
+	// Role and attachment changes, and accounts losing their access, are
+	// announced to services/realtime so open sockets are re-checked at once.
+	iamNotifier := events.NotifyIAMChanges(authorizer, publisher)
+	roleService := rolesvc.New(roleRepo, iamNotifier, authorizer, authorizer.Registry(), authorizer.Schema()).WithRealtime(publisher)
 	projectRepo := pgRepo.NewProjectRepository(db)
 	taskRepo := pgRepo.NewTaskRepository(db)
 	// The activity log: one repository and one service behind every
@@ -169,14 +179,15 @@ func New(cfg *config.Config) (*App, error) {
 	authService := authsvc.New(userRepo, tokenManager, refreshStore, cfg.JWT.RefreshTTL, cfg.JWT.RefreshSessionTTL)
 	userService := usersvc.New(userRepo, permissionStore).
 		WithPasswordSetTokenRepo(passwordSetTokenRepo).
-		WithEventPublishing(publisher)
+		WithEventPublishing(publisher).
+		WithGrantsNotifier(iamNotifier)
 	agentRepo := pgRepo.NewAgentRepository(db)
 	environmentRepo := pgRepo.NewEnvironmentRepository(db)
 	annotationRepo := pgRepo.NewAnnotationRepository(db)
 	projectServiceBase := projectsvc.New(projectRepo, taskRepo, agentRepo).
 		WithActivityRecorder(activityRecorder).
 		WithServiceAccounts(pgRepo.NewServiceAccountRepository(db))
-	projectServiceBase = projectServiceBase.WithRoleInvalidator(authorizer)
+	projectServiceBase = projectServiceBase.WithRoleInvalidator(iamNotifier)
 	projectService := projectsvc.NewCachedService(projectServiceBase, cacheStore, cfg.Cache.ProjectTTL, log)
 	// Member lists show each member's roles, so changing them drops the cache.
 	roleService = roleService.WithMembersCache(projectService)
@@ -202,9 +213,7 @@ func New(cfg *config.Config) (*App, error) {
 		WithPublisher(publisher).
 		WithRedisClient(redisClient)
 	agentService = agentService.WithEnvironmentService(environmentService)
-	// Backs GetConversationForAgent's agents.read check (read_conversation
-	// MCP tool) — see agentsvc.Service.authorizer's doc comment.
-	agentService = agentService.WithAuthorizer(authorizer)
+	agentService = agentService.WithGrantsNotifier(iamNotifier)
 	// Every agent run started without an HTTP request of its own (task
 	// assignment, automation, comment mention) and the description-write
 	// trigger go through this gate — see package triggergate. The agent
@@ -243,6 +252,28 @@ func New(cfg *config.Config) (*App, error) {
 		// Surface it once at startup.
 		log.Warn("ENCRYPTION_KEY not set: agent LLM API keys, plugin secrets, and project Jev API keys will be stored in plaintext, not encrypted")
 	}
+	// IP allow-lists and TOTP second factor, checked after the password. With
+	// no enrollments, CIDRs or policy configured (the default) it is a no-op.
+	// TOTP enrollment needs the encryptor; without it only the allow-lists work.
+	mfaService := mfasvc.New(pgRepo.NewMFARepository(db), encryptor, "Paca")
+	// Passkeys need a relying-party identity, taken from PUBLIC_URL; without
+	// one they stay off and accounts keep using TOTP.
+	// The store is installed either way, so accounts that already registered a
+	// passkey keep owing a second factor if the relying party goes missing.
+	passkeyRepo := pgRepo.NewPasskeyRepository(db)
+	mfaService.WithPasskeyStore(passkeyRepo)
+	if rp, ok := mfasvc.RelyingPartyFromURL(cfg.Server.PublicURL, cfg.Server.PasskeyRPID, "Paca"); ok {
+		if _, err := mfaService.WithPasskeys(passkeyRepo, redisRepo.NewCeremonyStore(redisClient), rp); err != nil {
+			log.Warn("passkeys disabled: invalid relying-party config; accounts with a passkey cannot sign in until it is fixed", "error", err)
+		}
+	} else {
+		log.Warn("PUBLIC_URL not set or invalid: passkeys are disabled; accounts with a passkey cannot sign in until it is set (or an admin resets their MFA)")
+	}
+	authService.WithLoginGate(mfaService)
+	// Wrong-password lockout per username: 10 failures within 15 minutes lock
+	// that name for 15 minutes. Held in Redis, so it covers every API instance.
+	loginThrottle := redisRepo.NewLoginThrottle(redisClient, 10, 15*time.Minute, 15*time.Minute)
+	authService.WithLoginThrottle(loginThrottle)
 	// Reassigned (unlike agentService/environmentService above) because
 	// projectServiceBase is a local var read again below when wiring
 	// ProjectHandler's Jev-config option — WithEncryptor mutates in place,
@@ -250,7 +281,12 @@ func New(cfg *config.Config) (*App, error) {
 	// pointer's provenance obvious at every read site.
 	projectServiceBase = projectServiceBase.WithEncryptor(encryptor)
 	ssoService := ssosvc.New(pgRepo.NewSSORepository(db), redisRepo.NewSSOStateStore(redisClient, 10*time.Minute),
-		userRepo, userService, authService, log).WithEncryptor(encryptor)
+		userRepo, userService, authService, log).WithEncryptor(encryptor).WithIPCheck(mfaService).
+		WithPasswordPolicy(mfaService)
+	// SSO-only mode: turning it on needs an enabled provider, and password
+	// set/reset/change is refused to the accounts it keeps off passwords.
+	mfaService.WithSSOProviders(ssoService)
+	userService.WithPasswordPolicy(mfaService)
 	activityService := tasksvc.NewActivityService(activityLog, taskRepo, projectRepo).
 		WithNotificationService(notificationService).
 		WithAgentTrigger(triggerGate)
@@ -258,27 +294,21 @@ func New(cfg *config.Config) (*App, error) {
 		WithActivityRecorder(activityService)
 	activityConsumer := worker.NewActivityConsumer(redisClient, pgRepo.NewActivityRepository(db), projectRepo, log)
 	environmentConsumer := worker.NewEnvironmentCommandConsumer(redisClient, environmentService, log)
-	docService := docsvc.New(docRepo, projectRepo)
-	docActivityService := docsvc.NewActivityService(activityLog, docRepo)
+	docService := docsvc.New(docRepo, projectRepo).WithRealtime(publisher)
+	docActivityService := docsvc.NewActivityService(activityLog, docRepo).WithAgentTrigger(triggerGate, projectRepo).WithNotificationService(notificationService)
 	automationService := automationsvc.New(automationRepo, taskRepo, projectRepo, publisher)
-	automationConsumer := worker.NewAutomationConsumer(redisClient, automationRepo, taskRepo, taskService, activityService, publisher, log)
+	automationConsumer := worker.NewAutomationConsumer(redisClient, automationRepo, taskRepo, taskService, activityService, publisher, log).WithNotifier(notificationService).WithUserSetRecorder(taskRepo)
 	taskAutofillConsumer := worker.NewTaskAutofillConsumer(redisClient, taskService, taskRepo, projectService, activityService, encryptor, log)
 	taskAutoAssignConsumer := worker.NewTaskAutoAssignConsumer(redisClient, taskService, projectRepo, projectService, activityService, encryptor, log)
 	dueDateScheduler := worker.NewDueDateScheduler(redisClient, automationConsumer, log)
 	cronScheduler := worker.NewCronScheduler(redisClient, automationConsumer, log)
 	waitScheduler := worker.NewWaitScheduler(redisClient, automationConsumer, log)
+	changeReconciler := newChangeReconciler(db, publisher, taskRepo, sprintRepo, log)
+	// Fills the content hash on documents written before the column existed.
+	docHashBackfill := worker.NewDocHashBackfill(docRepo, log)
 
 	// Object storage — defaults to RustFS; switches to AWS S3 when STORAGE_PROVIDER=s3.
-	storageClient, err := storage.NewS3Client(context.Background(), storage.S3Config{
-		Endpoint:        cfg.Storage.Endpoint,
-		PublicURL:       cfg.Storage.PublicURL,
-		Region:          cfg.Storage.Region,
-		Bucket:          cfg.Storage.Bucket,
-		AccessKeyID:     cfg.Storage.AccessKeyID,
-		SecretAccessKey: cfg.Storage.SecretAccessKey,
-		UseSSL:          cfg.Storage.UseSSL,
-		ForcePathStyle:  cfg.Storage.Provider != "s3", // self-hosted S3-compatible stores require path-style
-	})
+	storageClient, err := newStorageClient(context.Background(), cfg)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: storage client: %w", err)
 	}
@@ -340,7 +370,7 @@ func New(cfg *config.Config) (*App, error) {
 	// --- API Key management -------------------------------------------------
 	apiKeyRepo := pgRepo.NewAPIKeyRepository(db)
 	apiKeyService := apikeysvc.New(apiKeyRepo)
-	serviceAccountService := serviceaccountsvc.New(pgRepo.NewServiceAccountRepository(db))
+	serviceAccountService := serviceaccountsvc.New(pgRepo.NewServiceAccountRepository(db)).WithGrantsNotifier(iamNotifier)
 	serviceAccountService.WithAvatarService(attachmentService)
 	// An agent authenticates with its own API key (an api_keys row of its
 	// account) and acts with its own permissions only; there is no shared
@@ -351,11 +381,17 @@ func New(cfg *config.Config) (*App, error) {
 	sqlDB := db.DB
 
 	pluginStore, err := pluginrt.NewStore(context.Background(), pluginrt.StoreConfig{
-		Store:    cfg.Plugins.Store,
-		WASMDir:  cfg.Plugins.WASMDir,
-		S3Bucket: cfg.Storage.Bucket,
-		S3Prefix: cfg.Plugins.S3Prefix,
-		S3Region: cfg.Storage.Region,
+		Store:       cfg.Plugins.Store,
+		WASMDir:     cfg.Plugins.WASMDir,
+		FrontendDir: cfg.Plugins.FrontendDir,
+		MCPDir:      cfg.Plugins.MCPDir,
+		SkillsDir:   cfg.Plugins.SkillsDir,
+		S3Bucket:    cfg.Storage.Bucket,
+		S3Prefix:    cfg.Plugins.S3Prefix,
+		S3Region:    cfg.Storage.Region,
+		// Reuse the attachment storage client so PLUGINS_STORE=s3 honours the
+		// same endpoint and credentials (RustFS or AWS) as the rest of the app.
+		S3Client: storageClient.Raw(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: plugin store: %w", err)
@@ -394,6 +430,14 @@ func New(cfg *config.Config) (*App, error) {
 	// embedded in the user.created event payload every subscriber receives.
 	passwordSetTokenIssuer := pluginrt.PasswordSetTokenIssuerFunc(userService.IssuePasswordSetToken)
 
+	fetchPrivateHosts, rejectedHosts := netguard.NewPrivateHosts(cfg.Plugins.FetchPrivateHosts)
+	for _, entry := range rejectedHosts {
+		log.Warn("PLUGIN_FETCH_PRIVATE_HOSTS: ignoring entry, only exact ASCII hostnames are accepted (punycode for international names, no leading or trailing dot)", "entry", entry)
+	}
+	if !fetchPrivateHosts.Empty() {
+		log.Warn("paca.fetch may reach private network addresses for these hosts", "hosts", fetchPrivateHosts.Names())
+	}
+
 	pluginRuntime := pluginrt.NewRuntime(pluginStore, pluginrt.HostServices{
 		DB:        sqlDB,
 		Log:       log,
@@ -407,8 +451,10 @@ func New(cfg *config.Config) (*App, error) {
 		// already use netguard for their own clients; this one (paca.fetch,
 		// used by every installed plugin's outbound calls) was the one
 		// netguard's own package doc says it was built for but never got
-		// wired up.
-		HTTPClient:             netguard.NewSafeHTTPClient(30 * time.Second),
+		// wired up. PLUGIN_FETCH_PRIVATE_HOSTS relaxes the IP rule for the
+		// listed hosts only, for this client only; the pin stays.
+		HTTPClient:             netguard.NewSafeHTTPClientWithPrivateHosts(30*time.Second, fetchPrivateHosts),
+		FetchPrivateHosts:      fetchPrivateHosts,
 		Authorizer:             authorizer,
 		Cache:                  cacheStore,
 		SettingsReader:         settingsReader,
@@ -424,7 +470,7 @@ func New(cfg *config.Config) (*App, error) {
 	}, log)
 	marketplaceClient := pluginrt.NewMarketplaceClient(cfg.Plugins.MarketplaceCatalogURL, cfg.Plugins.MarketplaceTimeout)
 	installerHTTPClient := &http.Client{Timeout: cfg.Plugins.MarketplaceTimeout}
-	pluginInstaller := pluginrt.NewInstaller(cfg.Plugins.WASMDir, cfg.Plugins.FrontendDir, cfg.Plugins.MCPDir, cfg.Plugins.SkillsDir, installerHTTPClient, log)
+	pluginInstaller := pluginrt.NewInstaller(pluginStore, installerHTTPClient, log)
 
 	pluginService := pluginsvc.New(pluginRepo).WithHostVersion(cfg.Release.Version).WithActionRegistry(authorizer.Registry())
 
@@ -458,8 +504,6 @@ func New(cfg *config.Config) (*App, error) {
 	// creation/update (rejecting unrecognized types), automationConsumer.
 	// WithPluginRuntime dispatches plugin condition/action nodes mid-walk via
 	// the same EvaluateCondition/RunAction WASM bridge HandleRequest uses.
-	automationService.WithPluginNodeResolver(pluginRuntime)
-	automationConsumer.WithPluginRuntime(pluginRuntime)
 	automationConsumer.WithJevProjectService(projectService, encryptor)
 	// trigger_ai_agent starts an agent conversation without ever touching the
 	// task's assignee: task-bound, it dispatches straight to
@@ -481,6 +525,11 @@ func New(cfg *config.Config) (*App, error) {
 	// status — see worker.AgentQueueConsumer's doc comment.
 	agentQueueConsumer := worker.NewAgentQueueConsumer(redisClient, agentRepo, agentService, log)
 
+	// Notifies a conversation's owner when its agent asks them a question
+	// (the ask_user_question MCP tool) — detected from the conversation event
+	// stream, so no agent-facing API is involved.
+	questionConsumer := worker.NewQuestionNotificationConsumer(redisClient, agentRepo, projectRepo, notificationService, log)
+
 	// Forward every recorded activity (task created/updated/deleted, comments,
 	// links, etc.) to subscribed plugins. ActivitySvc appends to the
 	// StreamPluginEvents Valkey stream; this consumer reads it back and
@@ -501,15 +550,44 @@ func New(cfg *config.Config) (*App, error) {
 		WithAvatarService(attachmentService).
 		WithTaskChecker(attachmentsvc.NewTaskOwnerChecker(taskRepo)).
 		WithJevProjectService(projectService, encryptor)
+	// Git integration: linked repositories, webhook ingest and credential
+	// minting. Provider plugins (capability git-provider) are called in-process
+	// through the runtime's internal route, never through the HTTP router.
+	gitService := gitsvc.New(pgRepo.NewGitRepository(db), gitsvc.NewPluginProviders(pluginRepo, gitsvc.DoerFunc(pluginRuntime.CallInternal))).
+		WithPublicURL(cfg.Server.PublicURL).
+		WithWebhookBaseURL(cfg.Server.WebhookPublicURL).
+		WithAgentNamer(gitAgentLookup{repo: agentRepo}).
+		WithAgentDirectory(gitAgentDirectory{repo: agentRepo}).
+		WithAutomationEmitter(gitAutomationEmitter{pub: publisher}).
+		WithTaskGitNotifier(func(ctx context.Context, projectID, taskID uuid.UUID) {
+			events.PublishRealtime(ctx, publisher, events.Event{Topic: "git.task.updated", ProjectID: projectID, TaskID: &taskID,
+				Payload: map[string]any{"task_id": taskID.String()}})
+		})
+	// The Git automation nodes (pull request triggers, state condition, merge
+	// and comment actions) are core's, so they work the same on every Git
+	// platform; the automation engine reaches them next to the plugins' own.
+	automationNodes := gitsvc.NewAutomationRuntime(pluginRuntime, gitService)
+	automationService.WithPluginNodeResolver(automationNodes)
+	automationConsumer.WithPluginRuntime(automationNodes)
+	// A deleted project takes its own Git connections with it.
+	projectServiceBase.WithDeleteHook(func(ctx context.Context, id uuid.UUID) {
+		if err := gitService.PurgeProjectConnections(ctx, id); err != nil {
+			log.Warn("git: purging a deleted project's connections", "project_id", id, "error", err)
+		}
+	})
+	// Routes webhook events to agent runs and keeps run status current.
+	gitRouter := gitsvc.NewRouter(gitService, gitAgentDirectory{repo: agentRepo}, gitRunStarter{agents: agentService}, gitsvc.RouterOptions{}, log)
+	gitHandler := handler.NewGitHandler(gitService).WithAgentLookup(gitAgentLookup{repo: agentRepo}).WithOps(gitService)
 	environmentHandler := handler.NewEnvironmentHandler(environmentService, cfg.AIAgentInternalKey).
 		WithListScoper(authorizer).
-		WithDeploymentConfig(cfg.SSHBastionHost, cfg.PortForwardHost)
+		WithDeploymentConfig(cfg.SSHBastionHost, cfg.PortForwardHost).
+		WithDockerInSandbox(cfg.DockerInSandbox)
 	annotationHandler := handler.NewAnnotationHandler(annotationService).
 		WithAnnotationListScoper(authorizer).
 		WithAvatarService(attachmentService).
 		WithMemberRepo(projectRepo)
 	convHandler := handler.NewConversationHandler(agentService).WithMemberRepo(projectRepo).WithConversationListScoper(authorizer)
-	automationHandler := handler.NewAutomationHandler(automationService).WithPluginRuntime(pluginRuntime).WithAutomationListScoper(authorizer)
+	automationHandler := handler.NewAutomationHandler(automationService).WithPluginRuntime(automationNodes).WithAutomationListScoper(authorizer)
 
 	// --- Handlers -----------------------------------------------------------
 	cookieCfg := handler.CookieConfig{
@@ -519,19 +597,22 @@ func New(cfg *config.Config) (*App, error) {
 		RefreshSessionTTL: cfg.JWT.RefreshSessionTTL,
 	}
 
-	authHandler := handler.NewAuthHandler(authService, cookieCfg)
+	authHandler := handler.NewAuthHandler(authService, cookieCfg).WithPasskeyLogin(authService)
 	deps := router.Deps{
 		TokenManager:        tokenManager,
 		APIKeyAuth:          apiKeyService,
 		IAM:                 authorizer,
 		AgentEnvironments:   httpmw.AgentRepoLookups{Repo: agentRepo},
 		MemberPrincipals:    httpmw.MemberRepoLookup{Repo: projectRepo},
+		ChangeHeads:         publisher,
 		TaskNumbers:         taskRepo,
+		Conversations:       agentRepo,
 		SessionEnvironments: httpmw.AgentRepoLookups{Repo: agentRepo},
 		Health:              handler.NewHealthHandler(),
 		Version:             handler.NewVersionHandler(cfg.Release, cacheStore, log),
 		Auth:                authHandler,
 		SSO:                 handler.NewSSOHandler(ssoService, authHandler, cfg.Server.PublicURL),
+		MFA:                 handler.NewMFAHandler(mfaService, userRepo).WithLoginThrottle(loginThrottle),
 		User:                handler.NewUserHandler(userService, authService).WithAvatarService(attachmentService),
 		Role:                handler.NewRoleHandler(roleService),
 		RoleAttachments:     httpmw.NewRoleServiceAttachments(roleService),
@@ -562,7 +643,8 @@ func New(cfg *config.Config) (*App, error) {
 			handler.WithTaskAssignedProjectService(projectService),
 			handler.WithTaskAvatarService(attachmentService),
 			handler.WithTaskNotificationService(notificationService),
-			handler.WithTaskAutofillRepository(taskRepo)),
+			handler.WithTaskAutofillRepository(taskRepo),
+			handler.WithTaskMemberRepository(projectRepo)),
 		Sprint: handler.NewSprintHandler(sprintService, viewService,
 			handler.WithSprintListScoper(authorizer),
 			handler.WithSprintDefaultTaskTypes(taskService),
@@ -572,16 +654,20 @@ func New(cfg *config.Config) (*App, error) {
 		Attachment: handler.NewAttachmentHandler(attachmentService),
 		Document: handler.NewDocumentHandler(docService, docActivityService).
 			WithDocListScoper(authorizer).
+			WithDocAuthorizer(authorizer).
+			WithDocChanges(docsvc.NewChangesService(docRepo)).
 			WithDocAvatarService(attachmentService).
 			WithDocNotificationService(notificationService),
 		DocFile:            handler.NewDocFileHandler(attachmentService),
 		Notification:       handler.NewNotificationHandler(notificationService, handler.WithNotificationAvatarService(attachmentService)),
 		APIKey:             handler.NewAPIKeyHandler(apiKeyService),
 		ServiceAccount:     handler.NewServiceAccountHandler(serviceAccountService, apiKeyService).WithAvatarService(attachmentService),
-		Skills:             handler.NewSkillsHandler(pluginService, cfg.Plugins.SkillsDir),
+		Skills:             handler.NewSkillsHandler(pluginService, pluginStore),
+		PluginAssets:       handler.NewPluginAssetsHandler(pluginStore),
 		Plugin:             pluginHandler,
 		Agent:              agentHandler,
 		Environment:        environmentHandler,
+		Git:                gitHandler,
 		Annotation:         annotationHandler,
 		Conversation:       convHandler,
 		Automation:         automationHandler,
@@ -592,6 +678,7 @@ func New(cfg *config.Config) (*App, error) {
 		AuthRateLimit:      cfg.Server.AuthRateLimit,
 	}
 
+	httpmw.SetTrustedProxyHops(cfg.Server.TrustedProxyHops)
 	engine := router.New(deps)
 
 	srv := &http.Server{
@@ -602,7 +689,7 @@ func New(cfg *config.Config) (*App, error) {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	return &App{server: srv, publisher: publisher, activityConsumer: activityConsumer, notificationConsumer: notificationConsumer, pluginEventConsumer: pluginEventConsumer, environmentConsumer: environmentConsumer, projectExportConsumer: projectExportConsumer, automationConsumer: automationConsumer, taskAutofillConsumer: taskAutofillConsumer, taskAutoAssignConsumer: taskAutoAssignConsumer, agentQueueConsumer: agentQueueConsumer, dueDateScheduler: dueDateScheduler, cronScheduler: cronScheduler, waitScheduler: waitScheduler, log: log}, nil
+	return &App{server: srv, publisher: publisher, activityConsumer: activityConsumer, notificationConsumer: notificationConsumer, pluginEventConsumer: pluginEventConsumer, environmentConsumer: environmentConsumer, projectExportConsumer: projectExportConsumer, automationConsumer: automationConsumer, taskAutofillConsumer: taskAutofillConsumer, taskAutoAssignConsumer: taskAutoAssignConsumer, agentQueueConsumer: agentQueueConsumer, questionConsumer: questionConsumer, dueDateScheduler: dueDateScheduler, cronScheduler: cronScheduler, changeReconciler: changeReconciler, docHashBackfill: docHashBackfill, waitScheduler: waitScheduler, gitRouter: gitRouter, log: log}, nil
 }
 
 // platformActionsReader lists a user's or agent's effective platform-level
@@ -645,9 +732,17 @@ func (a *App) Run() error {
 	a.taskAutofillConsumer.Start(context.Background())
 	a.taskAutoAssignConsumer.Start(context.Background())
 	a.agentQueueConsumer.Start(context.Background())
+	a.questionConsumer.Start(context.Background())
 	a.dueDateScheduler.Start(context.Background())
 	a.cronScheduler.Start(context.Background())
+	if a.changeReconciler != nil {
+		a.changeReconciler.Start(context.Background())
+	}
+	a.docHashBackfill.Start(context.Background())
 	a.waitScheduler.Start(context.Background())
+	gitCtx, stop := context.WithCancel(context.Background())
+	a.stopGitRouter = stop
+	go a.gitRouter.Run(gitCtx, 0)
 	return a.server.ListenAndServe()
 }
 
@@ -663,9 +758,17 @@ func (a *App) Shutdown(ctx context.Context) error {
 	a.taskAutofillConsumer.Stop()
 	a.taskAutoAssignConsumer.Stop()
 	a.agentQueueConsumer.Stop()
+	a.questionConsumer.Stop()
 	a.dueDateScheduler.Stop()
 	a.cronScheduler.Stop()
+	if a.changeReconciler != nil {
+		a.changeReconciler.Stop()
+	}
+	a.docHashBackfill.Stop()
 	a.waitScheduler.Stop()
+	if a.stopGitRouter != nil {
+		a.stopGitRouter()
+	}
 	if a.publisher != nil {
 		a.publisher.Close()
 	}

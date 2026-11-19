@@ -331,21 +331,63 @@ Limits are configurable via environment variables (see `services/api/.env.exampl
 
 ## Plugin Storage Location
 
-The host reads plugin binaries from a configured path:
+`PLUGINS_STORE` chooses where installed plugins live: backend WASM, `plugin.json`, migrations, and the frontend, MCP and skills bundles. One setting covers all of it.
 
-- **Local (development/self-hosted):** `./plugins/dist/{pluginId}/` directory.
-- **Object storage (production):** S3-compatible bucket, same credentials as attachment storage.
+| | `local` (default) | `s3` |
+|---|---|---|
+| Where | folders: `PLUGINS_WASM_DIR`, `PLUGINS_FRONTEND_DIR`, `PLUGINS_MCP_DIR`, `PLUGINS_SKILLS_DIR` | the `STORAGE_*` bucket (same credentials and endpoint as attachments), under `PLUGINS_S3_PREFIX` (default `plugins`) |
+| Install / uninstall | copy into / delete from the folders | upload to / delete from `{prefix}/<plugin-id>/` |
+| Shared volumes between API and gateway | required | not needed |
+| Gateway serves `/plugins/*`, `/plugins-mcp/*`, `/plugins-skills/*` | from the mounted folders | by forwarding to the API (`/api/v1/plugin-assets/...`), so the bucket stays private |
 
-The server config entry:
-```yaml
-plugins:
-  store: local          # or "s3"
-  local_path: ./plugins/dist
-  s3_bucket: paca-plugins
-  cdn_allowlist:
-    - https://plugins.paca.app
-    - https://cdn.example.com
+Bucket layout in `s3` mode:
+
 ```
+{prefix}/<plugin-id>/backend.wasm | plugin.json | migrations/*.sql
+{prefix}/<plugin-id>/frontend/... | mcp/... | skills/<skill>/SKILL.md
+```
+
+Only `frontend/`, `mcp/` and `skills/` are ever reachable over HTTP; the WASM, manifest and migrations are not.
+
+Set `PLUGINS_STORE` to the same value on the API **and** the gateway (compose and Helm pass it to both; Helm: `api.plugins.store`). Changing the value does not move already-installed plugins by itself. To switch an existing install from `local` to `s3`:
+
+1. Keep the plugin folders mounted and `PLUGINS_STORE=local` until the copy is done.
+2. Run the migration inside the API container, which has the folder settings and the `STORAGE_*` settings it needs. `--dry-run` only lists what would be copied:
+
+   ```bash
+   docker compose exec api /app/api migrate-plugins --dry-run
+   docker compose exec api /app/api migrate-plugins
+   ```
+
+   (Use the API binary's path in your image; Kubernetes: `kubectl exec deploy/<release>-api -- <binary> migrate-plugins`.) It copies backend, migrations, frontend, MCP and skills for every plugin, reads each `backend.wasm` back from the bucket to check it, and prints one line per plugin. It never changes the local folders, so it is safe to re-run, and a plugin that fails does not stop the others.
+3. Set `PLUGINS_STORE=s3` on the API and the gateway and restart them. To roll back, set it to `local` again; the folders are untouched.
+
+With Helm, step 2 needs the plugins volume still mounted, so run it before setting `api.plugins.store=s3` (which removes the volume), from a Pod that still has `store: local`, and then upgrade.
+
+## Outbound Requests
+
+`paca.fetch` checks the request URL against `backend.allowedOutboundDomains`. Matching is exact and case-insensitive; the literal entry `"*"` allows any host. Whatever the manifest says, the URL must be `https` and the host must not resolve to a private or internal address. The address check runs before the request, and again at dial time on the address actually connected to, so a DNS answer that changes in between (rebinding) is still refused.
+
+Redirects are followed. Only the dial-time address check applies to them: a redirect target does not have to be in the manifest and may use `http`, as long as it does not resolve to a private or internal address.
+
+### Hosts on a private network
+
+A self-hosted service on the same LAN or VPN as Paca, such as a GitLab at `gitlab.internal` → `10.0.0.5`, is blocked by that rule. An operator can open it with `PLUGIN_FETCH_PRIVATE_HOSTS` on the API service, a comma-separated list of hostnames. It is empty by default.
+
+```bash
+PLUGIN_FETCH_PRIVATE_HOSTS=gitlab.internal,git.corp.example
+```
+
+A request to a private address then needs all of the following:
+
+- The hostname is in `PLUGIN_FETCH_PRIVATE_HOSTS`. Entries are exact ASCII names: IP literals, wildcards, URLs, `host:port` values, names with a leading or trailing dot and non-ASCII names are ignored, with a warning in the API log at startup. Write an internationalized name in its punycode form (`xn--...`).
+- The plugin's manifest names the host in `allowedOutboundDomains`. `"*"` does not count, because plugins that use it call user-supplied URLs. A plugin whose manifest does not name a listed host cannot call it at all, whatever it resolves to, and the dialer checks the manifest again on new connections. So neither a DNS answer that changes after the first check nor a pooled connection opened for another plugin opens a listed host to a `"*"` plugin.
+- The URL is `https`, and the certificate is trusted by the API container. For an internal CA, mount a bundle holding the system roots and your CA into the `api` service and set `SSL_CERT_FILE` to its path, in a Compose override or the Helm chart's pod spec.
+- The address is in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `fc00::/7`.
+
+A redirect to a listed host must meet the same conditions; redirects to other hosts follow the rule above. Hostnames are compared in the IDNA (punycode) form that is actually dialed, so a Unicode spelling of a listed name counts as that name. The connection stays pinned to the checked address. Everything else stays blocked even for a listed host: loopback, link-local (including `169.254.169.254` and other cloud metadata endpoints), the CGNAT range `100.64.0.0/10`, and IPv6 transition addresses, whatever IPv4 address they carry.
+
+> **Security:** listing a host lets the plugins that name it reach that internal service, and the API sends them its responses. List only hosts those plugins are meant to talk to, keep the list short, and treat a change to it like a firewall change. The list also trusts whoever controls the DNS records of those names: they can point a listed name at any other private address, so use names from DNS you control. Tailscale addresses sit in the CGNAT range and are not reachable this way.
 
 ## Security Considerations
 

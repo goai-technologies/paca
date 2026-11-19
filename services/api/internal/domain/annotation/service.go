@@ -54,8 +54,8 @@ type Service interface {
 
 	// ResolvePortForward turns a raw host port into the project/
 	// environment/port-forward it currently belongs to, scoped to
-	// projects userID is a member of — see Repository.ResolvePortForward.
-	ResolvePortForward(ctx context.Context, userID uuid.UUID, hostPort int) (*PortForwardMatch, error)
+	// projects accountID is a member of — see Repository.ResolvePortForward.
+	ResolvePortForward(ctx context.Context, accountID uuid.UUID, hostPort int) (*PortForwardMatch, error)
 
 	// GetScreenshotURL returns a short-lived presigned GET URL for
 	// annotationID's screenshot. Returns ErrAnnotationScreenshotNotUploaded

@@ -18,7 +18,7 @@ import type {
 	UpdateTaskTypeInput,
 } from "../types/index.js";
 import { formatApiRequestError } from "../utils/index.js";
-import { fetchAllPages, withPaging } from "./paginate.js";
+import { type Page, type PageOptions, toPage, withPaging } from "./paginate.js";
 
 /**
  * Extended API client methods for additional Paca endpoints.
@@ -108,9 +108,20 @@ export class PacaAPIExtendedClient {
 
 	// ==================== Project Members ====================
 
-	async listProjectMembers(projectId: string): Promise<ProjectMember[]> {
-		return fetchAllPages((cursor) =>
-			this.get(withPaging(`/api/v1/projects/${projectId}/members`, cursor)),
+	async listProjectMembers(
+		projectId: string,
+		opts: PageOptions & { search?: string } = {},
+	): Promise<Page<ProjectMember>> {
+		const path = `/api/v1/projects/${projectId}/members`;
+		return toPage<ProjectMember>(
+			await this.get(
+				withPaging(
+					opts.search
+						? `${path}?search=${encodeURIComponent(opts.search)}`
+						: path,
+					opts,
+				),
+			),
 		);
 	}
 
@@ -147,12 +158,21 @@ export class PacaAPIExtendedClient {
 
 	// ==================== Project Roles ====================
 
-	async listProjectRoles(projectId: string): Promise<ProjectRole[]> {
-		const response = await this.get(`/api/v1/projects/${projectId}/roles`);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.roles || response.data || [];
+	async listProjectRoles(
+		projectId: string,
+		opts: PageOptions & { search?: string } = {},
+	): Promise<Page<ProjectRole>> {
+		const path = `/api/v1/projects/${projectId}/roles`;
+		return toPage<ProjectRole>(
+			await this.get(
+				withPaging(
+					opts.search
+						? `${path}?search=${encodeURIComponent(opts.search)}`
+						: path,
+					opts,
+				),
+			),
+		);
 	}
 
 	async createProjectRole(

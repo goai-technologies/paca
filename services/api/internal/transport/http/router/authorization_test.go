@@ -41,19 +41,22 @@ var openRouteGroups = []struct {
 			"GET /api/v1/environments/config",
 			"GET /api/v1/plugins",
 			"GET /api/v1/skills",
+			"GET /api/v1/plugin-assets/{kind}/{name}/*",
 		},
 	},
 	{
 		reason: "credential exchange: the request itself carries the proof " +
-			"(password, refresh token, set-password token, webhook token) or " +
+			"(password, refresh token, set-password token, webhook token, Git webhook signature) or " +
 			"any live session may end itself",
 		routes: []string{
 			"POST /api/v1/auth/login",
+			"POST /api/v1/auth/mfa/verify",
 			"POST /api/v1/auth/refresh",
 			"POST /api/v1/auth/annotation-refresh",
 			"POST /api/v1/auth/password/set",
 			"POST /api/v1/auth/logout",
 			"POST /api/v1/webhooks/automations/{nodeId}",
+			"POST /api/v1/git/webhooks/{endpointKey}",
 		},
 	},
 	{
@@ -95,6 +98,7 @@ var openRouteGroups = []struct {
 			"GET /api/v1/projects/workspace-stats",
 			"GET /api/v1/port-forwards/resolve",
 			"GET /api/v1/projects/{projectId}/members/me/permissions",
+			"POST /api/v1/projects/{projectId}/members/me/permissions/check",
 		},
 	},
 	{
@@ -119,8 +123,6 @@ var openRouteGroups = []struct {
 			"GET /api/v1/agents/skill-templates",
 			"GET /api/v1/agents/me/global-permissions",
 			"GET /api/v1/agents/me/projects",
-			"GET /api/v1/agents/me/conversations/{conversationId}",
-			"GET /api/v1/agents/me/conversations/{conversationId}/events",
 			"POST /api/v1/agents/resolve-auto",
 			"GET /api/v1/agents/{agentId}/chat-sessions",
 			"POST /api/v1/agents/{agentId}/chat-sessions",
@@ -167,6 +169,7 @@ func allRoutes(t *testing.T, authorizer *iam.Authorizer) []routeUnderTest {
 		User:            handler.NewUserHandler(nil),
 		Role:            handler.NewRoleHandler(nil),
 		RoleAttachments: noRoleAttachments{},
+		Conversations:   noConversations{},
 		Project:         handler.NewProjectHandler(nil, authorizer),
 		Task:            handler.NewTaskHandler(nil, nil, nil),
 		Sprint:          handler.NewSprintHandler(nil, nil),
@@ -178,9 +181,11 @@ func allRoutes(t *testing.T, authorizer *iam.Authorizer) []routeUnderTest {
 		APIKey:          handler.NewAPIKeyHandler(nil),
 		ServiceAccount:  handler.NewServiceAccountHandler(nil, nil),
 		Plugin:          handler.NewPluginHandler(nil, nil, nil),
-		Skills:          handler.NewSkillsHandler(nil, ""),
+		Skills:          handler.NewSkillsHandler(nil, nil),
+		PluginAssets:    handler.NewPluginAssetsHandler(nil),
 		Agent:           handler.NewAgentHandler(nil, "", "", ""),
 		Environment:     handler.NewEnvironmentHandler(nil, ""),
+		Git:             handler.NewGitHandler(nil),
 		ProjectExport:   handler.NewProjectExportHandler(nil),
 		Annotation:      handler.NewAnnotationHandler(nil),
 		Conversation:    handler.NewConversationHandler(nil),

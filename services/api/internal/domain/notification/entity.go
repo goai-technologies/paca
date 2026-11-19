@@ -19,13 +19,19 @@ const (
 	NotificationTypeAssigned NotificationType = "assigned"
 	// NotificationTypeMentioned is sent when a user is @mentioned in a comment.
 	NotificationTypeMentioned NotificationType = "mentioned"
+	// NotificationTypeQuestion is sent when an agent asks the owner of its
+	// conversation a question (the ask_user_question tool).
+	NotificationTypeQuestion NotificationType = "question"
+	// NotificationTypeAutomation is sent by an automation's notify action. It
+	// carries a free-text Message and, usually, the task it is about.
+	NotificationTypeAutomation NotificationType = "automation"
 )
 
 // Notification is a single notification entry.
 type Notification struct {
 	ID uuid.UUID
-	// RecipientUserID is the users.id of the user who receives this notification.
-	RecipientUserID uuid.UUID
+	// RecipientAccountID is the users.id of the user who receives this notification.
+	RecipientAccountID uuid.UUID
 	// ActorMemberID is the project_members.id of the user who triggered the
 	// notification.  Nil when the actor account has been deleted.
 	ActorMemberID *uuid.UUID
@@ -55,10 +61,23 @@ type Notification struct {
 	// TaskTitle and TaskNumber are denormalised from the task record.
 	TaskTitle  string
 	TaskNumber int
-	// ProjectID is the project the task belongs to.
+	// DocumentID and DocumentTitle identify the document a mention in a
+	// document comment is about; DocumentTitle is denormalised.
+	DocumentID    *uuid.UUID
+	DocumentTitle string
+	// ConversationID and ConversationTitle identify the agent conversation a
+	// question notification is about; ConversationTitle is denormalised and
+	// may be empty (the conversation is not titled yet).
+	ConversationID    *uuid.UUID
+	ConversationTitle string
+	// ProjectID is the project the task or conversation belongs to;
+	// uuid.Nil for a global-chat conversation.
 	ProjectID uuid.UUID
 	// ProjectName is denormalised from the project record.
 	ProjectName string
+	// Message is the text of an automation notification (empty for every
+	// other type).
+	Message string
 	// ReadAt is nil when the notification has not yet been read.
 	ReadAt    *time.Time
 	CreatedAt time.Time
@@ -66,11 +85,11 @@ type Notification struct {
 
 // CreateNotificationInput carries the data needed to create a notification.
 type CreateNotificationInput struct {
-	RecipientUserID uuid.UUID
-	ActorMemberID   *uuid.UUID
-	Type            NotificationType
-	TaskID          *uuid.UUID
-	ProjectID       uuid.UUID
+	RecipientAccountID uuid.UUID
+	ActorMemberID      *uuid.UUID
+	Type               NotificationType
+	TaskID             *uuid.UUID
+	ProjectID          uuid.UUID
 }
 
 // Repository defines persistence operations for notifications.
@@ -103,15 +122,22 @@ type Service interface {
 	// NotifyMentioned creates notifications for all @mentioned users found in
 	// commentText who are members of the project.
 	NotifyMentioned(ctx context.Context, in NotifyMentionedInput) error
+	// NotifyQuestion creates a notification for the owner of an agent
+	// conversation, telling them the agent asked them a question.
+	NotifyQuestion(ctx context.Context, in NotifyQuestionInput) error
+	// NotifyDocCommentMentioned creates an in-app notification for a person
+	// @mentioned in a document comment. Does nothing for a self-mention or
+	// when the mentioned user is not a member of the project.
+	NotifyDocCommentMentioned(ctx context.Context, in NotifyDocCommentMentionedInput) error
 	// NotifyDocMentioned publishes a plugin event (no in-app row — see the
 	// implementation's doc comment) for a user newly @mentioned in a
-	// document's content. Does nothing if mentionedUserID == actorUserID.
-	NotifyDocMentioned(ctx context.Context, mentionedUserID, actorUserID uuid.UUID, projectID, docID uuid.UUID)
+	// document's content. Does nothing if mentionedUserID == actorID.
+	NotifyDocMentioned(ctx context.Context, mentionedUserID, actorID uuid.UUID, projectID, docID uuid.UUID)
 	// NotifyTaskDescriptionMentioned publishes a plugin event for a user
 	// newly @mentioned in a task's description (as opposed to a comment,
 	// which NotifyMentioned handles). Does nothing if mentionedUserID ==
-	// actorUserID.
-	NotifyTaskDescriptionMentioned(ctx context.Context, mentionedUserID, actorUserID uuid.UUID, projectID, taskID uuid.UUID)
+	// actorID.
+	NotifyTaskDescriptionMentioned(ctx context.Context, mentionedUserID, actorID uuid.UUID, projectID, taskID uuid.UUID)
 	// ListNotifications returns up to limit notifications for the authenticated
 	// user, keyset-paginated via cursorAfter — see Repository.ListForUser.
 	ListNotifications(ctx context.Context, userID uuid.UUID, limit int, cursorAfter *string) (items []*Notification, hasMore bool, err error)
@@ -123,20 +149,49 @@ type Service interface {
 	MarkAllAsRead(ctx context.Context, userID uuid.UUID) error
 }
 
+// NotifyAutomationInput carries data for an automation notification. It is
+// delivered by the concrete service (not part of Service, which has other
+// implementations), through the automation engine's notify action.
+type NotifyAutomationInput struct {
+	// RecipientMemberID is the project_members.id of the person to notify.
+	RecipientMemberID uuid.UUID
+	ProjectID         uuid.UUID
+	TaskID            uuid.UUID
+	Message           string
+}
+
 // NotifyAssignedInput carries data for an assignment notification.
 type NotifyAssignedInput struct {
 	TaskID    uuid.UUID
 	ProjectID uuid.UUID
 	// NewAssigneeMemberID is the project_members.id of the new assignee.
 	NewAssigneeMemberID uuid.UUID
-	// ActorUserID is the users.id of the person who made the assignment.
+	// ActorID is the account id of whoever made the assignment.
 	// Used to resolve the actor to a member and to skip self-assignment.
-	ActorUserID uuid.UUID
-	// ActorAgentID is the agent's id when the assignment was made by an AI
-	// agent (an agent-authenticated API request) rather than a human. When
-	// set, it takes precedence over ActorUserID for resolving the actor's
-	// project member — see projectdom.MemberRepository.FindMemberByActor.
-	ActorAgentID *uuid.UUID
+	ActorID uuid.UUID
+}
+
+// NotifyDocCommentMentionedInput carries data for a document-comment mention.
+type NotifyDocCommentMentionedInput struct {
+	DocumentID uuid.UUID
+	ProjectID  uuid.UUID
+	// ActorMemberID is the project_members.id of the commenter.
+	ActorMemberID uuid.UUID
+	// ActorID is the account id of the commenter (to skip self-mentions).
+	ActorID uuid.UUID
+	// MentionedUserID is the mentioned person's account id.
+	MentionedUserID uuid.UUID
+}
+
+// NotifyQuestionInput carries data for a question notification.
+type NotifyQuestionInput struct {
+	ConversationID uuid.UUID
+	// ProjectID is uuid.Nil for a global-chat conversation.
+	ProjectID uuid.UUID
+	// AgentID is the asking agent (its account id).
+	AgentID uuid.UUID
+	// RecipientAccountID is the conversation's owner.
+	RecipientAccountID uuid.UUID
 }
 
 // NotifyMentionedInput carries data for a mention notification.
@@ -148,8 +203,8 @@ type NotifyMentionedInput struct {
 	CommentText string
 	// ActorMemberID is the project_members.id of the commenter.
 	ActorMemberID uuid.UUID
-	// ActorUserID is the users.id of the commenter (used to exclude self-mention).
-	ActorUserID uuid.UUID
+	// ActorID is the account id of the commenter (used to exclude self-mention).
+	ActorID uuid.UUID
 	// MentionedUserID is an optional direct reference to the mentioned user's ID.
 	// When provided, it takes precedence over username parsing from CommentText.
 	MentionedUserID *uuid.UUID

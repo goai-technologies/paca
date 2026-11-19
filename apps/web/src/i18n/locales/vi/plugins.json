@@ -7,6 +7,7 @@
 			"installed": "Đã cài đặt",
 			"updateAvailable": "Có bản cập nhật",
 			"source": "Nguồn",
+			"official": "Plugin chính thức của Paca",
 			"upgrading": "Đang nâng cấp...",
 			"upgradeTo": "Nâng cấp lên {{version}}",
 			"uninstalling": "Đang gỡ cài đặt...",

@@ -97,11 +97,25 @@ func BuildACPMessage(trigger agent.Trigger, acpProvider string) string {
 	if trigger.TaskID != nil {
 		fmt.Fprintf(&b, "Task ID: %s\n", trigger.TaskID)
 	}
+	if trigger.DocumentID != nil {
+		fmt.Fprintf(&b, "Document ID: %s\n", trigger.DocumentID)
+	}
 	if trigger.CommentID != nil {
 		fmt.Fprintf(&b, "Comment ID: %s\n", trigger.CommentID)
 	}
 	if trigger.ChatSessionID != nil {
 		fmt.Fprintf(&b, "Chat Session ID: %s\n", trigger.ChatSessionID)
+	}
+
+	if trigger.ActorMemberID != nil {
+		// The Paca MCP server an ACP agent runs is the user's own, so it has
+		// no PACA_CONVERSATION_ID to work out whom to @-mention when
+		// ask_user_question posts on a task or document. Hand the agent the
+		// mention in the `name (id: <member id>)` form the API resolves.
+		fmt.Fprintf(&b, "\n## Asking the user\n"+
+			"When you call `ask_user_question` on a task or document (with `taskId`/`docId`), "+
+			"always pass `mention` = `owner (id: %s)` so the person who started this work is "+
+			"notified. Omit `taskId`/`docId` when answering in a chat conversation.\n", trigger.ActorMemberID.String())
 	}
 
 	b.WriteString(agent.FormatAttachedContext(trigger.ContextItems))

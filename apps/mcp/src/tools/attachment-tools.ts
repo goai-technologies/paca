@@ -3,11 +3,13 @@ import { basename, extname } from "node:path";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PacaAPIViewsClient } from "../api/index.js";
+import { moreNotice, pagingFields, pagingProperties } from "../api/paginate.js";
 import { formatFileSize, formatList } from "../utils/index.js";
 
 const ListTaskAttachmentsSchema = z.object({
 	projectId: z.string(),
 	taskId: z.string(),
+	...pagingFields,
 });
 
 const UploadTaskAttachmentSchema = z.object({
@@ -244,7 +246,8 @@ export function getAttachmentTools(): Tool[] {
 		},
 		{
 			name: "list_task_attachments",
-			description: "List all attachments for a task",
+			description:
+				"List the attachments of a task, one page at a time. When more remain the reply gives a cursor to pass to the next call.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -258,6 +261,7 @@ export function getAttachmentTools(): Tool[] {
 						description:
 							"The technical UUID of the task (e.g., '550e8400-e29b-41d4-a716-446655440000'). Use list_tasks to get the task ID.",
 					},
+					...pagingProperties,
 				},
 				required: ["projectId", "taskId"],
 			},
@@ -411,17 +415,18 @@ export async function handleAttachmentTool(
 		}
 
 		case "list_task_attachments": {
-			const { projectId, taskId } = ListTaskAttachmentsSchema.parse(args);
-			const attachments = await viewsClient.listTaskAttachments(
-				projectId,
-				taskId,
-			);
-			const formatted = formatList(attachments, formatAttachment);
+			const { projectId, taskId, cursor, pageSize } =
+				ListTaskAttachmentsSchema.parse(args);
+			const page = await viewsClient.listTaskAttachments(projectId, taskId, {
+				cursor,
+				pageSize,
+			});
+			const formatted = formatList(page.items, formatAttachment);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Attachments:\n\n${formatted}`,
+						text: `Attachments:\n\n${formatted}${moreNotice(page, "list_task_attachments")}`,
 					},
 				],
 			};
@@ -449,11 +454,9 @@ export async function handleAttachmentTool(
 			const { projectId, taskId, attachmentId } =
 				ReadTaskAttachmentSchema.parse(args);
 
-			const attachments = await viewsClient.listTaskAttachments(
-				projectId,
-				taskId,
-			);
-			const attachment = attachments.find((a: any) => a.id === attachmentId);
+			const attachment = await viewsClient
+				.getTaskAttachment(projectId, taskId, attachmentId)
+				.catch(() => null);
 			if (!attachment) {
 				return {
 					content: [

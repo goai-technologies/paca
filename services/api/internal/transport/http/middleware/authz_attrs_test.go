@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	projectdom "github.com/Paca-AI/api/internal/domain/project"
 	taskdom "github.com/Paca-AI/api/internal/domain/task"
 	"github.com/Paca-AI/api/internal/platform/authz/iam"
 )
@@ -107,6 +108,16 @@ func TestRequireRequestAttrs_Tasks(t *testing.T) {
 		{"pull a task in from another sprint", "PATCH", "/projects/{projectId}/tasks/{taskId}", base + "/" + tIn6, `{"sprint_id":"` + s5 + `"}`, change, 403},
 		{"malformed uuid is a 400", "PATCH", "/projects/{projectId}/tasks/{taskId}", base + "/" + tIn5, `{"sprint_id":"nope"}`, change, 400},
 		{"not an object is left to the handler", "PATCH", "/projects/{projectId}/tasks/{taskId}", base + "/" + tIn5, `[1]`, change, 204},
+		// The handler applies what its decoder reads, so the gate must read the
+		// same: no second value it skips, no key spelling it misses.
+		{"a second JSON value after the body is a 400", "PATCH", "/projects/{projectId}/tasks/{taskId}", base + "/" + tIn5, `{"sprint_id":"` + s6 + `"} {}`, change, 400},
+		{"garbage after the body is a 400", "PATCH", "/projects/{projectId}/tasks/{taskId}", base + "/" + tIn5, `{"sprint_id":"` + s6 + `"}x`, change, 400},
+		{"data after a create body is a 400", "POST", "/projects/{projectId}/tasks", base, `{"title":"t","sprint_id":"` + s6 + `"} {}`, create, 400},
+		{"trailing whitespace is fine", "PATCH", "/projects/{projectId}/tasks/{taskId}", base + "/" + tIn5, "{\"sprint_id\":\"" + s5 + "\"}\n\t ", change, 204},
+		{"an upper-case key is still the sprint", "PATCH", "/projects/{projectId}/tasks/{taskId}", base + "/" + tIn5, `{"SPRINT_ID":"` + s6 + `"}`, change, 403},
+		{"a mixed-case key on create is still the sprint", "POST", "/projects/{projectId}/tasks", base, `{"title":"t","Sprint_Id":"` + s6 + `"}`, create, 403},
+		{"a long-s key is still the sprint", "PATCH", "/projects/{projectId}/tasks/{taskId}", base + "/" + tIn5, `{"ſprint_id":"` + s6 + `"}`, change, 403},
+		{"two spellings of one field are a 400", "PATCH", "/projects/{projectId}/tasks/{taskId}", base + "/" + tIn5, `{"sprint_id":"` + s5 + `","Sprint_Id":"` + s6 + `"}`, change, 400},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -198,6 +209,14 @@ func (f fakeTaskNumbers) FindTaskByNumber(_ context.Context, _ uuid.UUID, n int6
 	return &taskdom.Task{ID: id}, nil
 }
 
+func (f fakeTaskNumbers) FindTaskByKey(_ context.Context, _ string, n int64) (*taskdom.Task, error) {
+	id, ok := f[n]
+	if !ok {
+		return nil, taskdom.ErrTaskNotFound
+	}
+	return &taskdom.Task{ID: id}, nil
+}
+
 func TestTaskByNumberResource(t *testing.T) {
 	project, task := uuid.NewString(), uuid.New()
 	lookup := fakeTaskNumbers{7: task}
@@ -215,6 +234,44 @@ func TestTaskByNumberResource(t *testing.T) {
 		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/projects/"+project+"/tasks/by-number/"+c.number, nil))
 		if got != c.want {
 			t.Errorf("number %q: resource %q, want %q", c.number, got, c.want)
+		}
+	}
+}
+
+type fakeTaskKeys struct {
+	projectID uuid.UUID
+	taskID    uuid.UUID
+}
+
+func (f fakeTaskKeys) FindTaskByNumber(_ context.Context, _ uuid.UUID, _ int64) (*taskdom.Task, error) {
+	return nil, taskdom.ErrTaskNotFound
+}
+
+func (f fakeTaskKeys) FindTaskByKey(_ context.Context, prefix string, n int64) (*taskdom.Task, error) {
+	if prefix == "PRJ" && n == 7 {
+		return &taskdom.Task{ID: f.taskID, ProjectID: f.projectID}, nil
+	}
+	return nil, taskdom.ErrTaskNotFound
+}
+
+func TestTaskByKeyResource(t *testing.T) {
+	project, task := uuid.New(), uuid.New()
+	lookup := fakeTaskKeys{projectID: project, taskID: task}
+	cases := []struct{ key, want string }{
+		{"PRJ-7", "project/" + project.String() + "/task/" + task.String()},
+		{"prj-7", "project/" + project.String() + "/task/" + task.String()},
+		{"PRJ-8", "task-key/PRJ-8"},
+		{"invalid", "task-key/invalid"},
+	}
+	for _, c := range cases {
+		r := chi.NewRouter()
+		var got string
+		r.Get("/tasks/by-key/{taskKey}", func(_ http.ResponseWriter, req *http.Request) {
+			got, _ = TaskByKeyResource(lookup, "taskKey")(req)
+		})
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/tasks/by-key/"+c.key, nil))
+		if got != c.want {
+			t.Errorf("key %q: resource %q, want %q", c.key, got, c.want)
 		}
 	}
 }
@@ -255,11 +312,58 @@ func TestViewCreateAndReorderGates(t *testing.T) {
 		{"reorder naming a backlog view", "PUT", pattern + "/positions", base + "/positions", `{"view_ids":["` + vBacklog + `"]}`, reorder, 403},
 		{"reorder naming an unknown view", "PUT", pattern + "/positions", base + "/positions", `{"view_ids":["` + uuid.NewString() + `"]}`, reorder, 403},
 		{"reorder body not the handler's shape", "PUT", pattern + "/positions", base + "/positions", `[1]`, reorder, 204},
+		{"reorder with data after the body", "PUT", pattern + "/positions", base + "/positions", `{"view_ids":["` + vIn5a + `"]} {"view_ids":["` + vIn6 + `"]}`, reorder, 400},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if rec := serveBody(t, c.method, c.pattern, c.path, c.body, c.mw); rec.Code != c.want {
 				t.Fatalf("got %d, want %d: %s", rec.Code, c.want, rec.Body)
 			}
 		})
+	}
+}
+
+// stubMemberRepo serves one member; the embedded interface is never reached.
+type stubMemberRepo struct {
+	projectdom.MemberRepository
+	m *projectdom.ProjectMember
+}
+
+func (s stubMemberRepo) FindMemberByID(context.Context, uuid.UUID) (*projectdom.ProjectMember, error) {
+	return s.m, nil
+}
+
+func TestMemberRepoLookup_UsesAccountID(t *testing.T) {
+	account, user := uuid.New(), uuid.New()
+	for _, tc := range []struct {
+		name string
+		m    *projectdom.ProjectMember
+	}{
+		{"human", &projectdom.ProjectMember{AccountID: account, UserID: account, MemberType: "human"}},
+		{"agent", &projectdom.ProjectMember{AccountID: account, AgentID: &user, MemberType: "agent"}},
+		{"service account (no UserID)", &projectdom.ProjectMember{AccountID: account, MemberType: "service_account"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := MemberRepoLookup{Repo: stubMemberRepo{m: tc.m}}.MemberPrincipalID(t.Context(), uuid.New())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != account.String() {
+				t.Errorf("got %s, want account id %s", got, account)
+			}
+		})
+	}
+}
+
+func TestRequireItemTasks_BodyShape(t *testing.T) {
+	project := uuid.NewString()
+	a := newFakeIAM(&fakeIAMStore{})
+	mw := RequireItemTasks(a, iam.ActionTasksWrite, "projectId")
+	pattern, path := "/projects/{projectId}/views/{viewId}/task-positions", "/projects/"+project+"/views/"+uuid.NewString()+"/task-positions"
+
+	if rec := serveBody(t, "PUT", pattern, path, `[1]`, mw); rec.Code != 204 {
+		t.Fatalf("body not the handler's shape: got %d, want it left to the handler", rec.Code)
+	}
+	if rec := serveBody(t, "PUT", pattern, path, `{"items":[]} {"items":[{"task_id":"`+uuid.NewString()+`"}]}`, mw); rec.Code != 400 {
+		t.Fatalf("data after the body: got %d, want 400", rec.Code)
 	}
 }

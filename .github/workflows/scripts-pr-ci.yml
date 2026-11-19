@@ -6,6 +6,7 @@ on:
       - "scripts/install.sh"
       - "scripts/upgrade.sh"
       - "scripts/install-paca-skills.sh"
+      - "scripts/tests/test_external_valkey.py"
       - "docs/guides/install-skills.md"
       - "deploy/docker-compose.prod.yml"
       - "deploy/caddy/Caddyfile"
@@ -20,6 +21,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  external-valkey:
+    name: External Redis/Valkey install and upgrade
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - name: Check connection preservation and service scaling
+        run: python3 scripts/tests/test_external_valkey.py
+
   # ---------------------------------------------------------------------------
   # 1. Lint — shellcheck (preinstalled on the runner image), fast feedback
   # ---------------------------------------------------------------------------
@@ -774,14 +787,14 @@ jobs:
           mkdir -p "$WORK"
           cd "$WORK"
           git init -q
-          PACA_API_URL="http://127.0.0.1:8933" bash "$GITHUB_WORKSPACE/scripts/install-paca-skills.sh" --platforms=claude,gemini,cursor,agents
+          PACA_API_URL="http://127.0.0.1:8933" bash "$GITHUB_WORKSPACE/scripts/install-paca-skills.sh" --platforms=claude,gemini,cursor,agents,opencode,goose
 
       - name: Verify non-lossy SKILL.md folders were written for every native target
         run: |
           set -euo pipefail
           export HOME="$RUNNER_TEMP/fakehome"
           WORK="$RUNNER_TEMP/fixture-project"
-          for target_dir in "$HOME/.claude/skills" "$HOME/.gemini/skills" "$WORK/.cursor/skills"; do
+          for target_dir in "$HOME/.claude/skills" "$HOME/.gemini/skills" "$WORK/.cursor/skills" "$HOME/.config/opencode/skills" "$HOME/.agents/skills"; do
             for name in paca-fixture-one paca-fixture-two; do
               f="$target_dir/$name/SKILL.md"
               test -f "$f" || { echo "missing $f" >&2; exit 1; }

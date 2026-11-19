@@ -1,34 +1,59 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import {
-	AlertCircle,
-	CheckCircle2,
-	Pencil,
-	Play,
-	Trash2,
-	X,
-} from "lucide-react";
+	useInfiniteQuery,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { AlertCircle, CheckCircle2, Pencil, Play, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { InteractionLayout } from "@/components/projects/interactions/interaction-layout";
 import { SprintFormModal } from "@/components/projects/interactions/sprint-form-modal";
 import { SprintStatusBadge } from "@/components/projects/interactions/sprint-status-badge";
 import { StartSprintModal } from "@/components/projects/interactions/start-sprint-modal";
+import { ReportIssueButton } from "@/components/report-issue-button";
+import { InlineNotice } from "@/components/shared/inline-notice";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
 import { formatDate } from "@/lib/format-date";
 import {
 	completeSprint,
 	deleteSprint,
+	listSprints,
 	sprintQueryOptions,
-	sprintsQueryOptions,
+	sprintsInfiniteQueryOptions,
 	sprintTaskCountQueryOptions,
 	type UpdateSprintPayload,
 	updateSprint,
 } from "@/lib/interaction-api";
 import { taskStatusesQueryOptions } from "@/lib/project-api";
 import { cn } from "@/lib/utils";
+
+/** RadioGroup value standing for "no sprint" (the product backlog). */
+const MOVE_TO_BACKLOG = "__backlog__";
 
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/interactions/sprints/$sprintId",
@@ -61,10 +86,11 @@ function SprintPage() {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 
-	const { data: sprint, isError } = useQuery(
-		sprintQueryOptions(projectId, sprintId),
-	);
-	const { data: allSprints = [] } = useQuery(sprintsQueryOptions(projectId));
+	const {
+		data: sprint,
+		isError,
+		error: sprintError,
+	} = useQuery(sprintQueryOptions(projectId, sprintId));
 	const { data: taskStatuses = [] } = useQuery(
 		taskStatusesQueryOptions(projectId),
 	);
@@ -123,17 +149,33 @@ function SprintPage() {
 	});
 	const incompleteCount = Math.max(0, sprintTaskCount - doneTaskCount);
 
-	const otherSprints = allSprints.filter(
-		(s) => s.id !== sprintId && s.status !== "completed",
-	);
+	// Open sprints the unfinished tasks can move to; paged as the dialog
+	// scrolls. The sprint being completed is dropped client-side.
+	const openSprintsQuery = useInfiniteQuery({
+		...sprintsInfiniteQueryOptions(projectId, {
+			status: ["active", "planned"],
+		}),
+		enabled: completeOpen,
+	});
+	const otherSprints = (
+		openSprintsQuery.data?.pages.flatMap((p) => p.items) ?? []
+	).filter((s) => s.id !== sprintId);
 
 	// Surfaced as a non-blocking warning in the Start Sprint dialog — Scrum
 	// favors one active sprint at a time, but this doesn't prevent starting
-	// a second one.
+	// a second one. At most two active sprints are fetched: enough to find one
+	// other than this sprint.
+	const { data: activeSprints } = useQuery({
+		queryKey: ["projects", projectId, "sprints", "active-pair"],
+		queryFn: () => listSprints(projectId, { status: ["active"], pageSize: 2 }),
+		enabled: startSprintOpen,
+		staleTime: 30_000,
+	});
 	const otherActiveSprint =
-		allSprints.find((s) => s.status === "active" && s.id !== sprintId) ?? null;
+		activeSprints?.items.find((s) => s.id !== sprintId) ?? null;
 
 	const completeSprintMutation = useMutation({
+		meta: { success: "completed", subject: "sprint" },
 		mutationFn: () =>
 			completeSprint(projectId, sprintId, {
 				move_to_sprint_id: moveToSprintId ?? null,
@@ -162,6 +204,7 @@ function SprintPage() {
 	});
 
 	const updateSprintMutation = useMutation({
+		meta: { success: "updated", subject: "sprint" },
 		mutationFn: (payload: UpdateSprintPayload) =>
 			updateSprint(projectId, sprintId, payload),
 		onSuccess: () => {
@@ -176,7 +219,22 @@ function SprintPage() {
 		},
 	});
 
+	// Starting reuses the update endpoint but reports "started", and the start
+	// modal shows its own inline error.
+	const startSprintMutation = useMutation({
+		meta: { success: "started", subject: "sprint", silent: true },
+		mutationFn: (payload: UpdateSprintPayload) =>
+			updateSprint(projectId, sprintId, payload),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ["projects", projectId, "sprints"] });
+			qc.invalidateQueries({
+				queryKey: ["projects", projectId, "sprints", sprintId],
+			});
+		},
+	});
+
 	const deleteSprintMutation = useMutation({
+		meta: { success: "deleted", subject: "sprint" },
 		mutationFn: () => deleteSprint(projectId, sprintId),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ["projects", projectId, "sprints"] });
@@ -205,6 +263,7 @@ function SprintPage() {
 			<div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-muted-foreground">
 				<AlertCircle className="size-8 opacity-40" />
 				<p className="text-sm">{t("layout.sprintDetail.notFound")}</p>
+				{isError && <ReportIssueButton error={sprintError} />}
 			</div>
 		);
 	}
@@ -263,7 +322,7 @@ function SprintPage() {
 											setStartSprintError(null);
 											setStartSprintOpen(true);
 										}}
-										className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600 transition-all duration-150"
+										className="flex items-center gap-1.5 rounded-lg bg-success px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-success transition-all duration-150"
 									>
 										<Play className="size-3.5 shrink-0 fill-white" />
 										{t("layout.sprintDetail.startSprint")}
@@ -293,7 +352,7 @@ function SprintPage() {
 				onOpenChange={setStartSprintOpen}
 				onSubmit={async (_sid, payload) => {
 					try {
-						await updateSprintMutation.mutateAsync(payload);
+						await startSprintMutation.mutateAsync(payload);
 					} catch (err) {
 						setStartSprintError(t("layout.startSprintModal.error"));
 						throw err;
@@ -315,34 +374,13 @@ function SprintPage() {
 				suppressEscape={deleteConfirmOpen}
 			/>
 			{/* Complete Sprint Modal */}
-			{completeOpen && (
-				// biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop
-				<div
-					className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-					onClick={(e) => {
-						if (e.target === e.currentTarget) setCompleteOpen(false);
-					}}
-					onKeyDown={(e) => {
-						if (e.key === "Escape") setCompleteOpen(false);
-					}}
-				>
-					{/* biome-ignore lint/a11y/noStaticElementInteractions: modal panel */}
-					<div
-						className="relative w-full max-w-md rounded-xl border border-border/50 bg-background p-6 shadow-2xl mx-4"
-						onClick={(e) => e.stopPropagation()}
-						onKeyDown={(e) => e.stopPropagation()}
-					>
-						<button
-							type="button"
-							onClick={() => setCompleteOpen(false)}
-							className="absolute right-4 top-4 flex size-7 items-center justify-center rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-muted/60 transition-all"
-						>
-							<X className="size-4" />
-						</button>
-						<h2 className="font-[Syne] text-lg font-bold tracking-tight mb-1">
+			<Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle className="font-[Syne] text-lg font-bold tracking-tight">
 							{t("layout.sprintDetail.completeSprintModal.title")}
-						</h2>
-						<p className="text-sm text-muted-foreground mb-5">
+						</DialogTitle>
+						<DialogDescription>
 							{incompleteCount > 0
 								? t("layout.sprintDetail.completeSprintModal.willBeMovedTo", {
 										count: incompleteCount,
@@ -350,146 +388,117 @@ function SprintPage() {
 								: t(
 										"layout.sprintDetail.completeSprintModal.noIncompleteTasks",
 									)}
-						</p>
+						</DialogDescription>
+					</DialogHeader>
 
-						{incompleteCount > 0 && (
-							<div className="flex flex-col gap-2 mb-5">
-								{/* Backlog option */}
-								<label
+					{incompleteCount > 0 && (
+						<RadioGroup
+							value={moveToSprintId ?? MOVE_TO_BACKLOG}
+							onValueChange={(v) =>
+								setMoveToSprintId(v === MOVE_TO_BACKLOG ? null : String(v))
+							}
+							className="max-h-[50vh] overflow-y-auto"
+						>
+							{/* Backlog option */}
+							<Label
+								className={cn(
+									"flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
+									moveToSprintId === null
+										? "border-primary/50 bg-primary/5"
+										: "border-border/40 hover:bg-muted/30",
+								)}
+							>
+								<RadioGroupItem value={MOVE_TO_BACKLOG} />
+								<div>
+									<p className="text-sm font-semibold">
+										{t(
+											"layout.sprintDetail.completeSprintModal.productBacklog",
+										)}
+									</p>
+									<p className="text-xs font-normal text-muted-foreground">
+										{t(
+											"layout.sprintDetail.completeSprintModal.unassignedHint",
+										)}
+									</p>
+								</div>
+							</Label>
+
+							{/* Other sprints */}
+							{otherSprints.map((s) => (
+								<Label
+									key={s.id}
 									className={cn(
-										"flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-all",
-										moveToSprintId === null
+										"flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
+										moveToSprintId === s.id
 											? "border-primary/50 bg-primary/5"
 											: "border-border/40 hover:bg-muted/30",
 									)}
 								>
-									<input
-										type="radio"
-										name="move-to-sprint"
-										value=""
-										checked={moveToSprintId === null}
-										onChange={() => setMoveToSprintId(null)}
-										className="accent-primary"
-									/>
-									<div>
-										<p className="text-sm font-semibold">
-											{t(
-												"layout.sprintDetail.completeSprintModal.productBacklog",
-											)}
-										</p>
-										<p className="text-xs text-muted-foreground">
-											{t(
-												"layout.sprintDetail.completeSprintModal.unassignedHint",
-											)}
-										</p>
+									<RadioGroupItem value={s.id} />
+									<div className="flex flex-col gap-1">
+										<p className="text-sm font-semibold">{s.name}</p>
+										<SprintStatusBadge status={s.status} />
 									</div>
-								</label>
+								</Label>
+							))}
+							<LoadMoreSentinel
+								hasMore={!!openSprintsQuery.hasNextPage}
+								isLoadingMore={openSprintsQuery.isFetchingNextPage}
+								isError={openSprintsQuery.isFetchNextPageError}
+								onLoadMore={() => void openSprintsQuery.fetchNextPage()}
+							/>
+						</RadioGroup>
+					)}
 
-								{/* Other sprints */}
-								{otherSprints.map((s) => (
-									<label
-										key={s.id}
-										className={cn(
-											"flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-all",
-											moveToSprintId === s.id
-												? "border-primary/50 bg-primary/5"
-												: "border-border/40 hover:bg-muted/30",
-										)}
-									>
-										<input
-											type="radio"
-											name="move-to-sprint"
-											value={s.id}
-											checked={moveToSprintId === s.id}
-											onChange={() => setMoveToSprintId(s.id)}
-											className="accent-primary"
-										/>
-										<div className="flex flex-col gap-1">
-											<p className="text-sm font-semibold">{s.name}</p>
-											<SprintStatusBadge status={s.status} />
-										</div>
-									</label>
-								))}
-							</div>
-						)}
+					{completeSprintError && (
+						<InlineNotice tone="error">{completeSprintError}</InlineNotice>
+					)}
 
-						{completeSprintError && (
-							<p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2 mb-5">
-								{completeSprintError}
-							</p>
-						)}
-
-						<div className="flex justify-end gap-2">
-							<button
-								type="button"
-								onClick={() => setCompleteOpen(false)}
-								className="rounded-lg border border-border/50 bg-muted/20 px-4 py-2 text-sm font-medium hover:bg-muted/40 transition-all"
-							>
-								{t("layout.sprintDetail.completeSprintModal.cancel")}
-							</button>
-							<button
-								type="button"
-								onClick={() => completeSprintMutation.mutate()}
-								disabled={completeSprintMutation.isPending}
-								className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all"
-							>
-								{completeSprintMutation.isPending
-									? t("layout.sprintDetail.completeSprintModal.completing")
-									: t("layout.sprintDetail.completeSprintModal.completeSprint")}
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
+					<DialogFooter>
+						<Button variant="outline" onClick={() => setCompleteOpen(false)}>
+							{t("layout.sprintDetail.completeSprintModal.cancel")}
+						</Button>
+						<Button
+							onClick={() => completeSprintMutation.mutate()}
+							disabled={completeSprintMutation.isPending}
+						>
+							{completeSprintMutation.isPending
+								? t("layout.sprintDetail.completeSprintModal.completing")
+								: t("layout.sprintDetail.completeSprintModal.completeSprint")}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 			{/* Delete Sprint Confirmation Modal */}
-			{deleteConfirmOpen && (
-				// biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop
-				<div
-					className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-					onClick={(e) => {
-						if (e.target === e.currentTarget) setDeleteConfirmOpen(false);
-					}}
-					onKeyDown={(e) => {
-						if (e.key === "Escape") setDeleteConfirmOpen(false);
-					}}
-				>
-					{/* biome-ignore lint/a11y/noStaticElementInteractions: modal panel */}
-					<div
-						className="relative w-full max-w-md rounded-xl border border-border/50 bg-background p-6 shadow-2xl mx-4"
-						onClick={(e) => e.stopPropagation()}
-						onKeyDown={(e) => e.stopPropagation()}
-					>
-						<h2 className="font-[Syne] text-lg font-bold tracking-tight mb-1">
+			<AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle className="font-[Syne] text-lg font-bold tracking-tight">
 							{t("layout.sprintDetail.deleteSprintModal.title")}
-						</h2>
-						<p className="text-sm text-muted-foreground mb-5">
+						</AlertDialogTitle>
+						<AlertDialogDescription>
 							{t("layout.sprintDetail.deleteSprintModal.message", {
 								name: sprint.name,
 							})}
-						</p>
-						<div className="flex justify-end gap-2">
-							<button
-								type="button"
-								onClick={() => setDeleteConfirmOpen(false)}
-								className="rounded-lg border border-border/50 bg-muted/20 px-4 py-2 text-sm font-medium hover:bg-muted/40 transition-all"
-							>
-								{t("layout.sprintDetail.deleteSprintModal.cancel")}
-							</button>
-							<button
-								type="button"
-								onClick={() => deleteSprintMutation.mutate()}
-								disabled={deleteSprintMutation.isPending}
-								className="flex items-center gap-1.5 rounded-lg bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 transition-all"
-							>
-								<Trash2 className="size-3.5 shrink-0" />
-								{deleteSprintMutation.isPending
-									? t("layout.sprintDetail.deleteSprintModal.deleting")
-									: t("layout.sprintDetail.deleteSprintModal.confirm")}
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>
+							{t("layout.sprintDetail.deleteSprintModal.cancel")}
+						</AlertDialogCancel>
+						<AlertDialogAction
+							variant="destructive"
+							onClick={() => deleteSprintMutation.mutate()}
+							disabled={deleteSprintMutation.isPending}
+						>
+							<Trash2 data-icon="inline-start" />
+							{deleteSprintMutation.isPending
+								? t("layout.sprintDetail.deleteSprintModal.deleting")
+								: t("layout.sprintDetail.deleteSprintModal.confirm")}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</>
 	);
 }

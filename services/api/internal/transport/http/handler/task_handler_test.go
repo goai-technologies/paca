@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -36,6 +37,7 @@ type fakeTaskSvc struct {
 	lastFilter            taskdom.TaskFilter
 	customFields          []*taskdom.CustomFieldDefinition
 	lastAssignedMemberIDs []uuid.UUID
+	lastColumnsBy         string
 }
 
 func newFakeTaskSvc() *fakeTaskSvc {
@@ -221,6 +223,20 @@ func (f *fakeTaskSvc) GetTaskByNumber(_ context.Context, projectID uuid.UUID, ta
 	return nil, taskdom.ErrTaskNotFound
 }
 
+func (f *fakeTaskSvc) GetTaskByKey(_ context.Context, prefix string, taskNumber int64) (*taskdom.Task, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if strings.EqualFold(prefix, "PRJ") {
+		for _, t := range f.tasks {
+			if t.TaskNumber == taskNumber {
+				cp := *t
+				return &cp, nil
+			}
+		}
+	}
+	return nil, taskdom.ErrTaskNotFound
+}
+
 func (f *fakeTaskSvc) CreateTask(_ context.Context, in taskdom.CreateTaskInput) (*taskdom.Task, error) {
 	if in.Title == "" {
 		return nil, taskdom.ErrTaskTitleInvalid
@@ -237,6 +253,7 @@ func (f *fakeTaskSvc) CreateTask(_ context.Context, in taskdom.CreateTaskInput) 
 		SprintID:     in.SprintID,
 		StatusID:     in.StatusID,
 		AssigneeIDs:  in.AssigneeIDs,
+		ReporterID:   in.ReporterID,
 		CustomFields: map[string]any{},
 		Tags:         []string{},
 		CreatedAt:    now,
@@ -337,8 +354,12 @@ func (f *fakeTaskSvc) DeleteCustomFieldDefinition(_ context.Context, _, _ uuid.U
 
 // --- TaskLinkService stubs --------------------------------------------------
 
-func (f *fakeTaskSvc) ListTaskLinks(_ context.Context, _, _ uuid.UUID) ([]*taskdom.TaskLink, error) {
-	return []*taskdom.TaskLink{}, nil
+func (f *fakeTaskSvc) ListTaskLinks(_ context.Context, _, _ uuid.UUID, _ *string, _ int) ([]*taskdom.TaskLink, bool, int, error) {
+	return []*taskdom.TaskLink{}, false, 0, nil
+}
+
+func (f *fakeTaskSvc) ListProjectTaskLinks(_ context.Context, _ uuid.UUID, _ taskdom.LinkType, _ *string, _ int) ([]*taskdom.TaskLink, bool, error) {
+	return []*taskdom.TaskLink{}, false, nil
 }
 
 func (f *fakeTaskSvc) CreateTaskLink(_ context.Context, in taskdom.CreateTaskLinkInput) (*taskdom.TaskLink, error) {
@@ -423,7 +444,7 @@ func (f *fakeActivitySvc) AddComment(_ context.Context, in taskdom.AddCommentInp
 	return a, nil
 }
 
-func (f *fakeActivitySvc) UpdateComment(_ context.Context, id uuid.UUID, _ uuid.UUID, actorID uuid.UUID, _ *uuid.UUID, content json.RawMessage) (*taskdom.Activity, error) {
+func (f *fakeActivitySvc) UpdateComment(_ context.Context, id uuid.UUID, _ uuid.UUID, actorID uuid.UUID, content json.RawMessage) (*taskdom.Activity, error) {
 	if fakeIsContentEmpty(content) || !fakeIsContentTypeValid(content) {
 		return nil, taskdom.ErrCommentContentInvalid
 	}
@@ -445,7 +466,7 @@ func (f *fakeActivitySvc) UpdateComment(_ context.Context, id uuid.UUID, _ uuid.
 	return &cp, nil
 }
 
-func (f *fakeActivitySvc) DeleteComment(_ context.Context, id uuid.UUID, _ uuid.UUID, actorID uuid.UUID, _ *uuid.UUID) error {
+func (f *fakeActivitySvc) DeleteComment(_ context.Context, id uuid.UUID, _ uuid.UUID, actorID uuid.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	a, ok := f.activities[id]
@@ -530,6 +551,7 @@ func buildTaskHandlerRouter(svc *fakeTaskSvc) chi.Router {
 func buildTaskHandlerRouterWithActivity(svc *fakeTaskSvc, actSvc *fakeActivitySvc) chi.Router {
 	h := handler.NewTaskHandler(svc, &fakeViewSvcTask{}, actSvc)
 	r := chi.NewRouter()
+	r.Get("/tasks/by-key/{taskKey}", h.GetTaskByKey)
 	r.Route("/projects/{projectId}", func(r chi.Router) {
 		r.Get("/task-types", h.ListTaskTypes)
 		r.Post("/task-types", h.CreateTaskType)
@@ -537,6 +559,7 @@ func buildTaskHandlerRouterWithActivity(svc *fakeTaskSvc, actSvc *fakeActivitySv
 		r.Delete("/task-types/{typeId}", h.DeleteTaskType)
 		r.Get("/tasks", h.ListTasks)
 		r.Get("/tasks/count", h.CountTasks)
+		r.Get("/tasks/columns", h.ListTaskColumns)
 		r.Post("/tasks", h.CreateTask)
 		r.Get("/tasks/by-number/{taskNumber}", h.GetTaskByNumber)
 		r.Get("/tasks/{taskId}", h.GetTask)
@@ -1078,12 +1101,12 @@ func TestTaskHandler_ListAssignedToMe_ResolvesMemberIDsAcrossProjects(t *testing
 			switch projectID {
 			case projectA.ID:
 				return []*projectdom.ProjectMember{
-					{ID: memberInA, ProjectID: projectA.ID, UserID: userID},
-					{ID: uuid.New(), ProjectID: projectA.ID, UserID: uuid.New()},
+					{ID: memberInA, ProjectID: projectA.ID, AccountID: userID},
+					{ID: uuid.New(), ProjectID: projectA.ID, AccountID: uuid.New()},
 				}, nil
 			case projectB.ID:
 				return []*projectdom.ProjectMember{
-					{ID: memberInB, ProjectID: projectB.ID, UserID: userID},
+					{ID: memberInB, ProjectID: projectB.ID, AccountID: userID},
 				}, nil
 			}
 			return nil, nil
@@ -1215,9 +1238,7 @@ func TestTaskHandler_CreateTask_OmitsCreatedBy_UsesAuthActor(t *testing.T) {
 	if actSvc.lastRecorded.ActorID == nil || *actSvc.lastRecorded.ActorID != authActor {
 		t.Fatalf("ActorID = %v, want %s", actSvc.lastRecorded.ActorID, authActor)
 	}
-	if actSvc.lastRecorded.ActorAgentID != nil {
-		t.Fatalf("ActorAgentID = %v, want nil", actSvc.lastRecorded.ActorAgentID)
-	}
+
 	if actSvc.lastRecorded.ActivityType != taskdom.ActivityTypeTaskCreated {
 		t.Fatalf("ActivityType = %q, want task.created", actSvc.lastRecorded.ActivityType)
 	}
@@ -1273,9 +1294,7 @@ func TestTaskHandler_CreateTask_CreatedByUserID_OverridesActor(t *testing.T) {
 	if actSvc.lastRecorded.ActorID == nil || *actSvc.lastRecorded.ActorID != alice {
 		t.Fatalf("ActorID = %v, want attributed user %s (not auth %s)", actSvc.lastRecorded.ActorID, alice, authActor)
 	}
-	if actSvc.lastRecorded.ActorAgentID != nil {
-		t.Fatalf("ActorAgentID = %v, want nil when created_by_user_id is set", actSvc.lastRecorded.ActorAgentID)
-	}
+
 }
 
 func TestTaskHandler_CreateTask_CreatedByUserID_NonMemberReturns404(t *testing.T) {
@@ -1385,9 +1404,7 @@ func TestTaskHandler_CreateTask_CreatedByUserID_ClearsAgentActor(t *testing.T) {
 	if actSvc.lastRecorded == nil || actSvc.lastRecorded.ActorID == nil || *actSvc.lastRecorded.ActorID != alice {
 		t.Fatalf("ActorID = %v, want %s", actSvc.lastRecorded, alice)
 	}
-	if actSvc.lastRecorded.ActorAgentID != nil {
-		t.Fatalf("ActorAgentID = %v, want nil when created_by_user_id overrides agent auth", actSvc.lastRecorded.ActorAgentID)
-	}
+
 }
 
 func TestTaskHandler_CreateTask_EmptyTitleReturns400(t *testing.T) {
@@ -2044,6 +2061,60 @@ func TestTaskHandler_GetTaskByNumber_InvalidNumberReturns400(t *testing.T) {
 	}
 }
 
+func TestTaskHandler_GetTaskByKey_Returns200(t *testing.T) {
+	svc := newFakeTaskSvc()
+	r := buildTaskHandlerRouter(svc)
+	projectID := uuid.New()
+
+	created, err := svc.CreateTask(context.Background(), taskdom.CreateTaskInput{
+		ProjectID: projectID,
+		Title:     "Key Lookup Task",
+	})
+	if err != nil {
+		t.Fatalf("setup CreateTask: %v", err)
+	}
+
+	w := doTaskRequest(r, http.MethodGet, fmt.Sprintf("/tasks/by-key/prj-%d", created.TaskNumber), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Data struct {
+			ID         string `json:"id"`
+			ProjectID  string `json:"project_id"`
+			TaskNumber int64  `json:"task_number"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if env.Data.ID != created.ID.String() || env.Data.ProjectID != projectID.String() {
+		t.Fatalf("got task (%s, %s), want (%s, %s)", env.Data.ID, env.Data.ProjectID, created.ID, projectID)
+	}
+}
+
+func TestTaskHandler_GetTaskByKey_NotFoundReturns404(t *testing.T) {
+	svc := newFakeTaskSvc()
+	r := buildTaskHandlerRouter(svc)
+
+	w := doTaskRequest(r, http.MethodGet, "/tasks/by-key/PRJ-9999", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTaskHandler_GetTaskByKey_InvalidKeyReturns400(t *testing.T) {
+	svc := newFakeTaskSvc()
+	r := buildTaskHandlerRouter(svc)
+
+	for _, bad := range []string{"invalid", "PRJ-0", "PRJ-abc", "TOOLONGPREFIX123-1"} {
+		w := doTaskRequest(r, http.MethodGet, "/tasks/by-key/"+bad, nil)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("key %q: expected 400, got %d: %s", bad, w.Code, w.Body.String())
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers for actor-aware requests
 // ---------------------------------------------------------------------------
@@ -2434,3 +2505,150 @@ func TestTaskHandler_ListTaskActivities_PagedMode(t *testing.T) {
 }
 
 func (f *fakeTaskSvc) PrepareCommitmentsProject(context.Context, uuid.UUID) error { return nil }
+
+// ---------------------------------------------------------------------------
+// Reporter defaulting / validation
+// ---------------------------------------------------------------------------
+
+func buildReporterRouter(svc *fakeTaskSvc, repo *fakeMemberRepo, userID uuid.UUID) chi.Router {
+	h := handler.NewTaskHandler(svc, &fakeViewSvcTask{}, newFakeActivitySvc(),
+		handler.WithTaskMemberRepository(repo))
+	r := chi.NewRouter()
+	r.Use(claimsMiddleware(userID.String()))
+	r.Post("/projects/{projectId}/tasks", h.CreateTask)
+	return r
+}
+
+func TestTaskHandler_CreateTask_DefaultsReporterToCallerMember(t *testing.T) {
+	userID, projectID, memberID := uuid.New(), uuid.New(), uuid.New()
+	svc := newFakeTaskSvc()
+	repo := &fakeMemberRepo{findMember: func(_ context.Context, pid, aid uuid.UUID) (*projectdom.ProjectMember, error) {
+		if pid != projectID || aid != userID {
+			t.Fatalf("unexpected lookup %s/%s", pid, aid)
+		}
+		return &projectdom.ProjectMember{ID: memberID, ProjectID: projectID}, nil
+	}}
+	w := doTaskRequest(buildReporterRouter(svc, repo, userID), http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", projectID), map[string]any{"title": "T"})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), memberID.String()) {
+		t.Fatalf("reporter not defaulted to %s: %s", memberID, w.Body.String())
+	}
+}
+
+func TestTaskHandler_CreateTask_NonMemberCallerGetsNoReporter(t *testing.T) {
+	repo := &fakeMemberRepo{findMember: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
+		return nil, projectdom.ErrMemberNotFound
+	}}
+	w := doTaskRequest(buildReporterRouter(newFakeTaskSvc(), repo, uuid.New()), http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", uuid.New()), map[string]any{"title": "T"})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTaskHandler_CreateTask_MemberLookupFailureSurfaces(t *testing.T) {
+	repo := &fakeMemberRepo{findMember: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
+		return nil, errors.New("db down")
+	}}
+	w := doTaskRequest(buildReporterRouter(newFakeTaskSvc(), repo, uuid.New()), http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", uuid.New()), map[string]any{"title": "T"})
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTaskHandler_CreateTask_ReporterFromOtherProjectReturns400(t *testing.T) {
+	repo := &fakeMemberRepo{findMemberByID: func(_ context.Context, id uuid.UUID) (*projectdom.ProjectMember, error) {
+		return &projectdom.ProjectMember{ID: id, ProjectID: uuid.New()}, nil
+	}}
+	w := doTaskRequest(buildReporterRouter(newFakeTaskSvc(), repo, uuid.New()), http.MethodPost,
+		fmt.Sprintf("/projects/%s/tasks", uuid.New()),
+		map[string]any{"title": "T", "reporter_id": uuid.New().String()})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func (f *fakeTaskSvc) ListGroupColumns(_ context.Context, _ uuid.UUID, filter taskdom.TaskFilter, by string) ([]taskdom.GroupColumn, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastColumnsBy, f.lastFilter = by, filter
+	if by == "assignee" {
+		// One more than the cap: the list was cut short.
+		cols := make([]taskdom.GroupColumn, taskdom.MaxGroupColumns+1)
+		for i := range cols {
+			cols[i] = taskdom.GroupColumn{Key: fmt.Sprint(i), Label: fmt.Sprint(i)}
+		}
+		return cols, nil
+	}
+	return []taskdom.GroupColumn{{Key: "a", Label: "a", Count: 2}}, nil
+}
+
+func TestTaskHandler_ListTasks_ParsesGroup(t *testing.T) {
+	svc := newFakeTaskSvc()
+	svc.customFields = []*taskdom.CustomFieldDefinition{{FieldKey: "size", FieldType: "select"}}
+	r := buildTaskHandlerRouter(svc)
+	projectID := uuid.New()
+
+	w := doTaskRequest(r, http.MethodGet, fmt.Sprintf("/projects/%s/tasks?group_by=size&group_key=S", projectID), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if g := svc.lastFilter.Group; g == nil || g.By != "size" || g.Key != "S" || g.FieldType != "select" {
+		t.Fatalf("group = %+v; want size/S with the field's type resolved server-side", g)
+	}
+
+	for _, q := range []string{"group_by=tags", "group_by=nope&group_key=x"} {
+		w := doTaskRequest(r, http.MethodGet, fmt.Sprintf("/projects/%s/tasks?%s", projectID, q), nil)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400, got %d: %s", q, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestTaskHandler_ListTaskColumns(t *testing.T) {
+	svc := newFakeTaskSvc()
+	r := buildTaskHandlerRouter(svc)
+	projectID := uuid.New()
+
+	w := doTaskRequest(r, http.MethodGet, fmt.Sprintf("/projects/%s/tasks/columns?column_by=tags&search=x", projectID), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"key":"a"`) || !strings.Contains(w.Body.String(), `"count":2`) {
+		t.Fatalf("unexpected body %s", w.Body.String())
+	}
+	if svc.lastColumnsBy != "tags" || svc.lastFilter.Search == nil || *svc.lastFilter.Search != "x" {
+		t.Fatalf("by=%q filter=%+v; want tags narrowed by the search", svc.lastColumnsBy, svc.lastFilter)
+	}
+
+	for _, q := range []string{"", "column_by=status", "column_by=importance", "column_by=nope"} {
+		w := doTaskRequest(r, http.MethodGet, fmt.Sprintf("/projects/%s/tasks/columns?%s", projectID, q), nil)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%q: expected 400, got %d: %s", q, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestTaskHandler_ListTaskColumns_CustomFieldAndTruncation(t *testing.T) {
+	svc := newFakeTaskSvc()
+	svc.customFields = []*taskdom.CustomFieldDefinition{{FieldKey: "pts", FieldType: "number"}}
+	r := buildTaskHandlerRouter(svc)
+	projectID := uuid.New()
+
+	w := doTaskRequest(r, http.MethodGet, fmt.Sprintf("/projects/%s/tasks/columns?column_by=pts", projectID), nil)
+	if w.Code != http.StatusOK || svc.lastColumnsBy != "pts" || !strings.Contains(w.Body.String(), `"truncated":false`) {
+		t.Fatalf("custom field: code %d by=%q body %s", w.Code, svc.lastColumnsBy, w.Body.String())
+	}
+
+	w = doTaskRequest(r, http.MethodGet, fmt.Sprintf("/projects/%s/tasks/columns?column_by=assignee", projectID), nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"truncated":true`) {
+		t.Fatalf("expected truncated list, got %d: %s", w.Code, w.Body.String())
+	}
+	if n := strings.Count(w.Body.String(), `"key"`); n != taskdom.MaxGroupColumns {
+		t.Errorf("returned %d columns, want %d", n, taskdom.MaxGroupColumns)
+	}
+}

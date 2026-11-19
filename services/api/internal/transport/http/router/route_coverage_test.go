@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Paca-AI/api/internal/config"
+	agentdom "github.com/Paca-AI/api/internal/domain/agent"
+	taskdom "github.com/Paca-AI/api/internal/domain/task"
 	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	jwttoken "github.com/Paca-AI/api/internal/platform/token"
 	"github.com/Paca-AI/api/internal/transport/http/handler"
@@ -38,7 +40,7 @@ import (
 // listings), credential exchange (/auth/* login/refresh/password-set/logout,
 // automation webhooks), the plugin proxy (gated per-manifest inside the
 // handler), self-service /users/me/*, handler-scoped listings (/projects,
-// workspace-stats, port-forward resolve, members/me/permissions) and the
+// workspace-stats, port-forward resolve, members/me/permissions and its batch check) and the
 // global-agent chat surface.
 
 // routeGates is one walked route and the gates declared on it.
@@ -56,6 +58,8 @@ func coverageDeps(iamAuth *iam.Authorizer) Deps {
 		TokenManager:        jwttoken.New("test-secret", 15*time.Minute, 24*time.Hour),
 		IAM:                 iamAuth,
 		AgentEnvironments:   noEnvironment{},
+		Conversations:       noConversations{},
+		TaskNumbers:         noTaskNumbers{},
 		SessionEnvironments: noEnvironment{},
 		Health:              handler.NewHealthHandler(),
 		Version:             handler.NewVersionHandler(config.ReleaseConfig{}, nil, log),
@@ -74,15 +78,18 @@ func coverageDeps(iamAuth *iam.Authorizer) Deps {
 		APIKey:              handler.NewAPIKeyHandler(nil),
 		ServiceAccount:      handler.NewServiceAccountHandler(nil, nil),
 		Plugin:              handler.NewPluginHandler(nil, nil, nil),
-		Skills:              handler.NewSkillsHandler(nil, ""),
+		Skills:              handler.NewSkillsHandler(nil, nil),
+		PluginAssets:        handler.NewPluginAssetsHandler(nil),
 		Agent:               handler.NewAgentHandler(nil, "", "", ""),
 		Environment:         handler.NewEnvironmentHandler(nil, ""),
+		Git:                 handler.NewGitHandler(nil),
 		ProjectExport:       handler.NewProjectExportHandler(nil),
 		Annotation:          handler.NewAnnotationHandler(nil),
 		Conversation:        handler.NewConversationHandler(nil),
 		Automation:          handler.NewAutomationHandler(nil),
 		Settings:            handler.NewSettingsHandler(nil),
 		SSO:                 handler.NewSSOHandler(nil, nil, ""),
+		MFA:                 handler.NewMFAHandler(nil, nil),
 		Log:                 log,
 	}
 }
@@ -133,6 +140,37 @@ var ssoOpenRoutes = []string{
 	"GET /api/v1/auth/sso/{slug}/callback",
 }
 
+// mfaOpenRoutes extends openRouteGroups with the MFA routes registered only
+// when Deps.MFA is set (coverageDeps sets it; the admin login-security routes
+// carry a gate and so are covered there).
+var mfaOpenRoutes = []string{
+	// The login page reads whether the instance is SSO-only before anyone is
+	// signed in; it carries nothing but that flag.
+	"GET /api/v1/auth/login-options",
+	// Pre-login enrollment: the account's password is the credential, since
+	// policy can require MFA before the account is able to sign in.
+	"POST /api/v1/auth/mfa/setup",
+	"POST /api/v1/auth/mfa/setup/confirm",
+	"POST /api/v1/auth/mfa/setup/passkey/options",
+	"POST /api/v1/auth/mfa/setup/passkey/finish",
+	// Self-service on the caller's own account, like the other /users/me routes.
+	"GET /api/v1/users/me/mfa",
+	"POST /api/v1/users/me/mfa/enroll",
+	"POST /api/v1/users/me/mfa/confirm",
+	"POST /api/v1/users/me/mfa/disable",
+	"POST /api/v1/users/me/mfa/recovery-codes",
+	// Passkey login, the twin of POST /auth/mfa/verify: the request carries
+	// the login challenge token and the authenticator's signed assertion.
+	"POST /api/v1/auth/mfa/passkey/options",
+	"POST /api/v1/auth/mfa/passkey/verify",
+	// Passkey self-service on the caller's own account, like /users/me/mfa.
+	"GET /api/v1/users/me/passkeys",
+	"POST /api/v1/users/me/passkeys/register/options",
+	"POST /api/v1/users/me/passkeys/register/finish",
+	"POST /api/v1/users/me/passkeys/verify/options",
+	"DELETE /api/v1/users/me/passkeys/{passkeyId}",
+}
+
 // gatesOf returns the guards gates among a route's middlewares.
 func gatesOf(mws []func(http.Handler) http.Handler) []gateHandler {
 	stub := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
@@ -179,6 +217,9 @@ func openRoutes() map[string]bool {
 	for _, r := range ssoOpenRoutes {
 		open[r] = true
 	}
+	for _, r := range mfaOpenRoutes {
+		open[r] = true
+	}
 	return open
 }
 
@@ -200,6 +241,8 @@ func TestRouteCoverage_EveryNonOpenRouteDeclaresAGate(t *testing.T) {
 // every route on one environment, and using one project agent (chat
 // sessions). Changing it is a deliberate policy change.
 var iamResourceRoutes = mergeRoutes(roleRoutes, map[string]string{
+	"GET /api/v1/agents/me/conversations/{conversationId}":                                                                                    resConversationByID,
+	"GET /api/v1/agents/me/conversations/{conversationId}/events":                                                                             resConversationByID,
 	"GET /api/v1/projects/{projectId}/agents/{agentId}/chat-sessions":                                                                         resAgent,
 	"POST /api/v1/projects/{projectId}/agents/{agentId}/chat-sessions":                                                                        resAgent,
 	"POST /api/v1/projects/{projectId}/agents/{agentId}/chat-sessions/{sessionId}/messages":                                                   resAgent,
@@ -242,7 +285,7 @@ var iamResourceRoutes = mergeRoutes(roleRoutes, map[string]string{
 // act on tasks, not on the view, and stay project-gated.
 func entityRouteResource(pattern string) (string, bool) {
 	switch {
-	case strings.Contains(pattern, "/tasks/{taskId}"), strings.Contains(pattern, "/task-positions/{taskId}"), strings.Contains(pattern, "/tasks/by-number/"):
+	case strings.Contains(pattern, "/tasks/{taskId}"), strings.Contains(pattern, "/task-positions/{taskId}"), strings.Contains(pattern, "/tasks/by-number/"), strings.Contains(pattern, "/tasks/by-key/"):
 		return resTask, true
 	case strings.Contains(pattern, "/projects/{projectId}/agents/{agentId}"):
 		return resAgent, true
@@ -354,6 +397,24 @@ func isAssignGate(resource string) bool {
 
 // noEnvironment is a lookup for agents and sessions that have no environment.
 type noEnvironment struct{}
+
+// noConversations resolves every conversation as missing.
+type noConversations struct{}
+
+func (noConversations) FindConversationByID(context.Context, uuid.UUID) (*agentdom.AgentConversation, error) {
+	return nil, agentdom.ErrConversationNotFound
+}
+
+// noTaskNumbers resolves every task number or key as missing.
+type noTaskNumbers struct{}
+
+func (noTaskNumbers) FindTaskByNumber(context.Context, uuid.UUID, int64) (*taskdom.Task, error) {
+	return nil, taskdom.ErrTaskNotFound
+}
+
+func (noTaskNumbers) FindTaskByKey(context.Context, string, int64) (*taskdom.Task, error) {
+	return nil, taskdom.ErrTaskNotFound
+}
 
 func (noEnvironment) DefaultEnvironmentID(context.Context, uuid.UUID, uuid.UUID) (*uuid.UUID, error) {
 	return nil, nil
@@ -581,6 +642,40 @@ func TestRouteCoverage_RoleHelpersAreAuthenticatedOnly(t *testing.T) {
 	}
 }
 
+func TestRouteCoverage_IssueListRequiresGitRead(t *testing.T) {
+	token := issueAccessTokenForRouterTests(t)
+	pid := uuid.NewString()
+	key := "GET /api/v1/projects/{projectId}/git/repositories/{repositoryId}/issues"
+	call := func(grants []iam.Grant, authenticated bool) int {
+		for _, rt := range walkGates(t, coverageDeps(newTestIAM(&iamUserStore{grants: grants}))) {
+			if rt.key() != key {
+				continue
+			}
+			req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/projects/"+pid+"/git/repositories/"+uuid.NewString()+"/issues", nil)
+			if authenticated {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			rec := httptest.NewRecorder()
+			rt.handler.ServeHTTP(rec, req)
+			return rec.Code
+		}
+		t.Fatal("issue list route not registered")
+		return 0
+	}
+	if got := call(nil, false); got != http.StatusUnauthorized {
+		t.Fatalf("anonymous: %d", got)
+	}
+	if got := call(nil, true); got != http.StatusForbidden {
+		t.Fatalf("no permission: %d", got)
+	}
+	if got := call([]iam.Grant{projectRole(pid, allow([]string{"git:read"}, "project/"+pid+"/*"))}, true); got != http.StatusNoContent {
+		t.Fatalf("git:read: %d", got)
+	}
+	if got := call([]iam.Grant{projectRole(pid, allow([]string{"git:write"}, "project/"+pid+"/*"))}, true); got != http.StatusForbidden {
+		t.Fatalf("git:write only: %d", got)
+	}
+}
+
 // The project mirror of the role editor helpers: each is gated on
 // roles:read on project/{projectId} (pinned individually), and the simulation
 // additionally goes through the principal guard (not a marked gate, so it is
@@ -677,14 +772,19 @@ func TestEntityRoutesHonourPerEntityPolicy(t *testing.T) {
 			allow([]string{c.actionRead, c.actionWrite}, "project/"+project),
 			allow([]string{c.actionRead, c.actionWrite, "conversations:read", "conversations:write"}, "project/"+project+"/"+c.kind+"/*"),
 			deny([]string{c.actionRead, c.actionWrite, "conversations:read", "conversations:write"}, "project/"+project+"/"+c.kind+"/"+blocked),
-		)}
+		),
+			// A few entity routes (an agent's Git identity) also need a
+			// workspace-level action; the entity policy is what varies here.
+			platformRole(allow([]string{"git.identities:manage"}, "git_identity/*")),
+		}
+		grants = append(grants, projectRole(project, allow([]string{"git:read", "git:write"}, "project/"+project)))
 		routes := walkGates(t, coverageDeps(newTestIAM(&iamUserStore{grants: grants})))
 		checked := 0
 		for _, rt := range routes {
 			res, ok := entityRouteResource(rt.pattern)
 			// (by-number is covered in the middleware tests: its number
 			// resolves to an id through a lookup.)
-			if !ok || !strings.Contains(res, "/"+c.kind+"/") || strings.Contains(rt.pattern, "by-number") {
+			if !ok || !strings.Contains(res, "/"+c.kind+"/") || strings.Contains(rt.pattern, "by-number") || strings.Contains(rt.pattern, "by-key") {
 				continue
 			}
 			for id, want := range map[string]int{blocked: http.StatusForbidden, other: http.StatusNoContent} {
@@ -722,7 +822,9 @@ func TestAnnotationRoutesNestedUnderPortForwardHonourPerAnnotationPolicy(t *test
 	project, env, blocked, other := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	acts := []string{"annotations:read", "annotations:write", "annotations:resolve", "tasks:write"}
 	grants := []iam.Grant{projectRole(project,
-		allow(acts, "project/"+project, "project/"+project+"/environment/"+env, "project/"+project+"/annotation/*"),
+		allow(acts, "project/"+project, "project/"+project+"/environment/"+env, "project/"+project+"/annotation/*",
+			// create-task also authorizes the task it would create
+			"project/"+project+"/task/*"),
 		deny(acts, "project/"+project+"/annotation/"+blocked),
 	)}
 	checked := 0
@@ -828,6 +930,77 @@ func TestRouteCoverage_ViewAttrGates(t *testing.T) {
 		}
 	}
 	for k := range viewAttrGates {
+		if !seen[k] {
+			t.Errorf("%q is not a registered route", k)
+		}
+	}
+}
+
+// The repository picker lists what a credential can see on the platform, so it
+// needs git:write like linking does; git:read alone must not reach it.
+func TestRouteCoverage_RepositoryPickerRequiresGitWrite(t *testing.T) {
+	token := issueAccessTokenForRouterTests(t)
+	pid := uuid.NewString()
+	key := "GET /api/v1/projects/{projectId}/git/connections/{identityId}/repositories"
+	call := func(grants []iam.Grant, authenticated bool) int {
+		for _, rt := range walkGates(t, coverageDeps(newTestIAM(&iamUserStore{grants: grants}))) {
+			if rt.key() != key {
+				continue
+			}
+			req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/projects/"+pid+"/git/connections/"+uuid.NewString()+"/repositories", nil)
+			if authenticated {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			rec := httptest.NewRecorder()
+			rt.handler.ServeHTTP(rec, req)
+			return rec.Code
+		}
+		t.Fatal("repository picker route not registered")
+		return 0
+	}
+	if got := call(nil, false); got != http.StatusUnauthorized {
+		t.Fatalf("anonymous: %d", got)
+	}
+	if got := call(nil, true); got != http.StatusForbidden {
+		t.Fatalf("no permission: %d", got)
+	}
+	if got := call([]iam.Grant{projectRole(pid, allow([]string{"git:read"}, "project/"+pid+"/*"))}, true); got != http.StatusForbidden {
+		t.Fatalf("git:read only: %d", got)
+	}
+	if got := call([]iam.Grant{projectRole(pid, allow([]string{"git:write"}, "project/"+pid+"/*"))}, true); got != http.StatusNoContent {
+		t.Fatalf("git:write: %d", got)
+	}
+}
+
+// Every route that creates or changes a task authorizes the sprint, status,
+// type and assignees its body names, so a role conditioned on them (the
+// Analyst's Refinement-only grant) cannot be side-stepped by another route.
+var taskAttrGateRoutes = map[string]bool{
+	"POST /api/v1/projects/{projectId}/tasks/":          true,
+	"PATCH /api/v1/projects/{projectId}/tasks/{taskId}": true,
+	"POST /api/v1/projects/{projectId}/environments/{environmentId}/port-forwards/{portForwardId}/annotations/{annotationId}/create-task": true,
+}
+
+func TestRouteCoverage_TaskAttrGates(t *testing.T) {
+	seen := map[string]bool{}
+	for _, rt := range walkGates(t, coverageDeps(newTestIAM(&iamUserStore{}))) {
+		n := 0
+		for _, g := range rt.gates {
+			if g.resource == resTaskAttrs {
+				n++
+			}
+		}
+		switch {
+		case taskAttrGateRoutes[rt.key()] && n != 1:
+			t.Errorf("%s: %d task attribute gates, want 1", rt.key(), n)
+		case !taskAttrGateRoutes[rt.key()] && n > 0:
+			t.Errorf("%s: unexpected task attribute gate", rt.key())
+		}
+		if taskAttrGateRoutes[rt.key()] {
+			seen[rt.key()] = true
+		}
+	}
+	for k := range taskAttrGateRoutes {
 		if !seen[k] {
 			t.Errorf("%q is not a registered route", k)
 		}

@@ -139,7 +139,7 @@ func (m *Manager) createAndStartEnvironmentContainer(ctx context.Context, image,
 
 	containerCfg := &container.Config{
 		Image: image,
-		Cmd:   []string{"serve", "--host", "0.0.0.0", "--port", fmt.Sprintf("%d", sandbox.GooseServePort)},
+		Cmd:   []string{"serve", "--host", sandbox.GooseServeHost, "--port", fmt.Sprintf("%d", sandbox.GooseServePort)},
 		Env:   env,
 		Labels: map[string]string{
 			labelEnvID:   cfg.EnvironmentID,
@@ -507,17 +507,20 @@ func (m *Manager) recreateEnvironmentIfMissingEnv(ctx context.Context, backendRe
 // legitimately differ between one StartEnvironment call and the next.
 // PACA_API_URL/PACA_GATEWAY_URL are deployment-level; PACA_API_KEY is the
 // agent's own key, stable for that agent until it is revoked. PACA_WORKDIR/PACA_ACTOR_USER_ID/
-// PACA_REPO_PLUGIN_IDS are conversation-scoped instead — trigger.Workdir,
-// trigger.ActorUserID, and trigger.RepoPluginIDs, none of which describe
+// PACA_REPO_PLUGIN_IDS/PACA_OWNER_MEMBER_ID are conversation-scoped instead —
+// trigger.Workdir, trigger.ActorAccountID, trigger.RepoPluginIDs and
+// trigger.ActorMemberID, none of which describe
 // this environment's own identity, unlike PACA_AGENT_ID/PACA_PROJECT_ID
 // (deliberately excluded from this list — see below) — but they need the
 // exact same treatment: Goose's EnvKeys lookup resolves each against the
 // container's own OS env, which is fixed at ContainerCreate time, so a
 // container created (or last recreated) while one conversation's trigger
 // fields were in scope has no way to pick up a later conversation whose
-// trigger fields differ. Unlike GOOSE_PROVIDER/GOOSE_MODEL/the LLM API key
-// (frozen forever to whichever agent's conversation first attached — see
-// recreateEnvironmentIfMissingEnv's doc comment), ensureEnvironmentInfraEnv
+// trigger fields differ. Unlike GOOSE_PROVIDER (frozen forever to whichever
+// agent's conversation first attached — see
+// recreateEnvironmentIfMissingEnv's doc comment; GOOSE_MODEL, OPENAI_HOST
+// and the model key var DO follow a same-provider agent, see
+// infraEnvKeysFor), ensureEnvironmentInfraEnv
 // keeps all of these in sync on every StartEnvironment call instead of
 // baking them in once and never again — for any of these four that means a
 // recreate each time a conversation's trigger fields differ from what the
@@ -541,7 +544,7 @@ func (m *Manager) recreateEnvironmentIfMissingEnv(ctx context.Context, backendRe
 // instead of surfacing as the caller bug it actually is.
 var pacaInfraEnvKeys = []string{
 	"PACA_API_KEY", "PACA_API_URL", "PACA_GATEWAY_URL",
-	"PACA_WORKDIR", "PACA_REPO_PLUGIN_IDS",
+	"PACA_WORKDIR", "PACA_REPO_PLUGIN_IDS", "PACA_OWNER_MEMBER_ID",
 	// GOOSE_PATH_ROOT is deployment-level fixed, like the PACA_API_* trio
 	// above, not conversation-scoped — included here (rather than getting
 	// its own GOOSE_PROVIDER-style one-time backfill) purely so a container
@@ -552,20 +555,27 @@ var pacaInfraEnvKeys = []string{
 	"GOOSE_PATH_ROOT",
 }
 
-// infraEnvKeysFor is pacaInfraEnvKeys plus GOOSE_MODEL when cfg targets the
-// same GOOSE_PROVIDER the container already has baked in. GOOSE_PROVIDER
-// stays frozen to whichever agent attached first (see
-// recreateEnvironmentIfMissingEnv), but the model is per-agent config the
-// user edits after the fact (e.g. a provider_cli agent's cli_model) — left
-// frozen too, an edit never reaches a static environment, so a bad model
-// can't be fixed and a wrong one silently keeps working. Gated on a
-// matching provider because a model id from a different provider's agent
-// is meaningless to the provider the container is frozen to.
+// infraEnvKeysFor is pacaInfraEnvKeys plus the LLM keys that follow the
+// attaching agent: GOOSE_MODEL, OPENAI_HOST and the agent's own model key
+// var (cfg.LLMKeyEnvVar). GOOSE_PROVIDER stays frozen to whichever agent
+// attached first (see recreateEnvironmentIfMissingEnv), and these three are
+// gated on a matching provider because a model id or base URL from a
+// different provider's agent is meaningless to the provider the container
+// is frozen to. Under that gate they must be reconciled, not frozen: the
+// model is per-agent config a user edits after the fact, the base URL
+// follows the provider, and a rotated or replaced API key otherwise never
+// reaches the container — which is exactly how a static environment ends up
+// failing every attach with "Authentication required" against a credential
+// the agent row no longer holds.
 func infraEnvKeysFor(cfg sandbox.EnvironmentConfig, existing map[string]string) []string {
 	if cfg.Env["GOOSE_PROVIDER"] == "" || cfg.Env["GOOSE_PROVIDER"] != existing["GOOSE_PROVIDER"] {
 		return pacaInfraEnvKeys
 	}
-	return append(append([]string(nil), pacaInfraEnvKeys...), "GOOSE_MODEL")
+	keys := append(append([]string(nil), pacaInfraEnvKeys...), "GOOSE_MODEL", "OPENAI_HOST")
+	if cfg.LLMKeyEnvVar != "" {
+		keys = append(keys, cfg.LLMKeyEnvVar)
+	}
+	return keys
 }
 
 // ensureEnvironmentInfraEnv keeps pacaInfraEnvKeys in sync with this
@@ -1122,11 +1132,11 @@ func (m *Manager) waitForEnvironmentReady(ctx context.Context, containerID, secr
 		if err != nil {
 			return "", err
 		}
-		candidates = []string{fmt.Sprintf("http://%s:%d", ip, sandbox.GooseServePort)}
+		candidates = []string{sandbox.GooseURL(ip, sandbox.GooseServePort)}
 	} else {
 		candidates = []string{fmt.Sprintf("http://localhost:%d", hostPort)}
 		if ip, err := m.containerIP(ctx, containerID, ""); err == nil {
-			candidates = append([]string{fmt.Sprintf("http://%s:%d", ip, sandbox.GooseServePort)}, candidates...)
+			candidates = append([]string{sandbox.GooseURL(ip, sandbox.GooseServePort)}, candidates...)
 		}
 	}
 	return sandbox.WaitForReady(ctx, candidates, secretKey)

@@ -5,7 +5,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { ShortcutHelpDialog } from "@/components/shortcuts/shortcut-help-dialog";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
-import { sprintsQueryOptions } from "@/lib/interaction-api";
+import { listSprints } from "@/lib/interaction-api";
 import { useShortcutHelpStore } from "./help-dialog-store";
 import { useHoveredTaskStore } from "./hovered-task-store";
 import { matchShortcut, type ShortcutActionId } from "./keymap";
@@ -37,17 +37,18 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
 		!!projectId &&
 		(hasPermission("sprints:read") || hasProjectPermission("sprints:read"));
 
-	const { data: sprints = [] } = useQuery({
-		...sprintsQueryOptions(projectId ?? ""),
+	// Only the first open sprint is needed (the "go to sprint" shortcut).
+	const { data: activeSprints } = useQuery({
+		queryKey: ["projects", projectId, "sprints", "first-active"],
+		queryFn: () =>
+			listSprints(projectId ?? "", { status: ["active"], pageSize: 1 }),
 		enabled: !!projectId && canViewSprints,
+		staleTime: 30_000,
 	});
 
 	const openSprints = useMemo(
-		() =>
-			sprints
-				.filter((s) => s.status === "active")
-				.sort((a, b) => a.name.localeCompare(b.name)),
-		[sprints],
+		() => activeSprints?.items ?? [],
+		[activeSprints],
 	);
 
 	const helpOpen = useShortcutHelpStore((s) => s.open);

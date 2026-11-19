@@ -129,6 +129,57 @@ The following host components become **aware** of extension points after impleme
 | Project settings page | `project.settings.tab` |
 | View selector / board area | `view` |
 
+### Deep-linking to a settings tab
+
+The project settings page keeps its open tab in the URL hash, so a tab can be linked to and survives a reload. A plugin can send the browser back to its own tab after leaving the app (an external setup flow, for example):
+
+| Hash | Opens |
+|---|---|
+| `#general`, `#roles`, `#task-statuses`, … | that built-in tab |
+| `#plugin:<pluginId>:<component>` | one specific `project.settings.tab` component |
+| `#plugin:<pluginId>` | the plugin's first settings tab |
+
+A hash that names nothing the member can see (an unknown id, a tab they lack permission for, a plugin that isn't loaded) is ignored and the default tab opens. Build the link from `window.location` with only the hash replaced, so it stays on the current project.
+
+### Plugin pages and callbacks
+
+A plugin can own whole pages, not just fragments. A page is a component registered at a page extension point plus a `navItems` entry that gives it a slug:
+
+| `navItems[].scope` | Extension point | Route | Listed in |
+|---|---|---|---|
+| `project` | `project.page` | `/projects/:projectId/plugins/:pluginId/:slug` | project sidebar |
+| `admin` | `admin.page` | `/admin/plugins/:pluginId/:slug` | admin sidebar |
+| `app` | `app.page` | `/plugin-pages/:pluginId/:slug` | nowhere (reached by URL) |
+
+The prefix is `/plugin-pages/`, not `/plugins/`: the gateway reserves `/plugins/*` for the plugins' static frontend assets (`/plugins/<id>/assets/remoteEntry.js`), so a page under it would never reach the web app.
+
+An `app` page exists for **callbacks**: an external service (a GitHub App manifest/installation, an OAuth provider) sends the browser back to a URL, and that URL has to be a page on the Paca origin. Pointing the service at a plugin *backend* route instead does not work for a browser redirect — the redirect carries no `Authorization` header and the short-lived access-token cookie may have expired during the detour, so the host answers with a bare `AUTH_UNAUTHENTICATED` JSON document.
+
+An `app` page avoids that because it lives under the authenticated layout:
+
+1. If the access token expired, the host refreshes it from the refresh cookie before the page mounts.
+2. If the session is gone entirely, the host sends the user to sign in with `?redirect=<this URL>` and returns them here afterwards, with the callback's query string intact. Only same-origin paths are honoured as redirect targets.
+3. The plugin component then calls **its own backend** through the injected `api` client — as the signed-in user, through the same route gates (`requireActions`, …) as any other call — and navigates on with the result.
+
+Declare a `requiredPermission` on the nav item: without one, any signed-in user can open the page. Treat the query string as untrusted input and have the backend validate it (a one-time `state` bound to the user who started the flow, for example).
+
+```json
+{
+  "frontend": {
+    "extensionPoints": [{ "point": "app.page", "component": "CallbackPage" }],
+    "navItems": [
+      {
+        "scope": "app",
+        "slug": "callback",
+        "label": "Setup callback",
+        "component": "CallbackPage",
+        "requiredPermission": "myplugin:manage"
+      }
+    ]
+  }
+}
+```
+
 ### Drag-to-Reorder
 
 Extension point registrations include an `order` field. The **super admin** can reorder plugin panels within a surface (e.g., reorder task detail sections) from the admin settings UI. The order is persisted as a system-wide setting via `PATCH /api/v1/admin/plugin-extension-settings` and applied for all users on load.

@@ -8,7 +8,14 @@ import (
 
 // SprintRepository defines persistence operations for sprints.
 type SprintRepository interface {
-	ListSprints(ctx context.Context, projectID uuid.UUID) ([]*Sprint, error)
+	// ListSprints returns one page of the project's sprints in filter.Sort
+	// order. cursorAfter is the opaque cursor from EncodeCursor (nil for the
+	// first page); hasMore reports whether more follow and total counts every
+	// sprint matching the filter.
+	ListSprints(ctx context.Context, projectID uuid.UUID, filter SprintFilter, cursorAfter *string, limit int) (sprints []*Sprint, hasMore bool, total int, err error)
+	// ListAllSprints returns every sprint of the project, oldest first. For
+	// internal jobs such as exports; not exposed over the API.
+	ListAllSprints(ctx context.Context, projectID uuid.UUID) ([]*Sprint, error)
 	FindSprintByID(ctx context.Context, id uuid.UUID) (*Sprint, error)
 	CreateSprint(ctx context.Context, s *Sprint) error
 	// UpdateSprintAtomic loads sprint id under a row lock, calls decide to
@@ -63,15 +70,15 @@ type ViewRepository interface {
 	// GetUserViewConfigs returns a user's personal config overrides for the
 	// given views, keyed by view ID.  Views without an override are absent
 	// from the returned map.
-	GetUserViewConfigs(ctx context.Context, userID uuid.UUID, viewIDs []uuid.UUID) (map[uuid.UUID]ViewConfig, error)
+	GetUserViewConfigs(ctx context.Context, accountID uuid.UUID, viewIDs []uuid.UUID) (map[uuid.UUID]ViewConfig, error)
 
 	// UpsertUserViewConfig stores (or replaces) a user's personal config for a
 	// single view.
-	UpsertUserViewConfig(ctx context.Context, viewID, userID uuid.UUID, cfg ViewConfig) error
+	UpsertUserViewConfig(ctx context.Context, viewID, accountID uuid.UUID, cfg ViewConfig) error
 
 	// DeleteUserViewConfig removes a user's personal override for a view, if
 	// one exists. Deleting a nonexistent override is not an error.
-	DeleteUserViewConfig(ctx context.Context, viewID, userID uuid.UUID) error
+	DeleteUserViewConfig(ctx context.Context, viewID, accountID uuid.UUID) error
 }
 
 // ViewReorderItem carries the new position for a single view.

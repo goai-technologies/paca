@@ -12,7 +12,6 @@ import {
 	FolderKanban,
 	GitMerge,
 	Layers,
-	Loader2,
 	Plus,
 	Users,
 	Zap,
@@ -44,6 +43,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { usePermissions } from "@/hooks/use-permissions";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
@@ -115,6 +115,7 @@ function CreateProjectDialog({
 	};
 
 	const mutation = useMutation({
+		meta: { success: "created", subject: "project" },
 		mutationFn: () => {
 			if (!name.trim()) throw new Error("name_required");
 			return createProject({
@@ -295,7 +296,7 @@ function CreateProjectDialog({
 						className="gap-1.5 shadow-sm shadow-primary/20"
 					>
 						{mutation.isPending ? (
-							<Loader2 className="size-3.5 animate-spin" />
+							<Spinner aria-hidden="true" className="size-3.5" />
 						) : (
 							<Plus className="size-3.5" />
 						)}
@@ -626,7 +627,7 @@ function HomePage() {
 									onClick={() => fetchNextPage()}
 								>
 									{isFetchingNextPage ? (
-										<Loader2 className="size-3.5 animate-spin" />
+										<Spinner aria-hidden="true" className="size-3.5" />
 									) : null}
 									{isFetchingNextPage
 										? t("home.projectsSection.loadingMore")

@@ -3,6 +3,7 @@ package postgres
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -100,7 +101,7 @@ func TestRoleRepository_CRUDAndNameScopes(t *testing.T) {
 	}
 
 	// listings
-	plat, err := repo.ListPlatform(t.Context())
+	plat, _, _, err := repo.ListPlatform(t.Context(), roledom.RoleFilter{}, nil, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestRoleRepository_CRUDAndNameScopes(t *testing.T) {
 			t.Fatalf("ListPlatform returned a project role: %+v", r)
 		}
 	}
-	forP1, err := repo.ListForProject(t.Context(), p1)
+	forP1, _, _, err := repo.ListForProject(t.Context(), p1, roledom.RoleFilter{}, nil, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,13 +350,13 @@ func TestRoleRepository_AgentPrincipalAndListAttached(t *testing.T) {
 		t.Fatalf("project attached = %+v err=%v", inProject, err)
 	}
 	// counts: platform listing counts all scopes, project listing only the project
-	listed, _ := repo.ListPlatform(t.Context())
+	listed, _, _, _ := repo.ListPlatform(t.Context(), roledom.RoleFilter{}, nil, 100)
 	for _, r := range listed {
 		if r.ID == r1.ID && r.AttachmentCount != 1 {
 			t.Fatalf("platform count = %d", r.AttachmentCount)
 		}
 	}
-	forProject, _ := repo.ListForProject(t.Context(), p)
+	forProject, _, _, _ := repo.ListForProject(t.Context(), p, roledom.RoleFilter{}, nil, 100)
 	for _, r := range forProject {
 		if (r.ID == own.ID && r.AttachmentCount != 1) || (r.ID == r1.ID && r.AttachmentCount != 0) {
 			t.Fatalf("project-context count for %s = %d", r.Name, r.AttachmentCount)
@@ -589,5 +590,116 @@ func TestRoleRepository_ProjectTemplateIsNeverAttachedPlatformWide(t *testing.T)
 		AccountID: user, ProjectID: &p, RoleIDs: []uuid.UUID{tmpl.ID},
 	}); err != nil {
 		t.Fatalf("project-scoped attach of a template: %v", err)
+	}
+}
+
+func TestRoleRepository_ListPaginates(t *testing.T) {
+	db := newIAMPGTestDB(t)
+	fx := newIAMFx(t, db)
+	repo := NewRoleRepository(db)
+	project := fx.project()
+	other := fx.project()
+	mk := func(name string, projectID *uuid.UUID) uuid.UUID {
+		r := &roledom.Role{ID: uuid.New(), Name: name, Description: "d " + name, Policy: []byte(`{"version":"2026-10-01","statements":[]}`), ProjectID: projectID}
+		if err := repo.Create(t.Context(), r); err != nil {
+			t.Fatal(err)
+		}
+		return r.ID
+	}
+	// Platform roles sort by lowercase name; a project lists its own roles
+	// first, then the platform roles attached inside it.
+	pa, pb, pc := mk("alpha-plat", nil), mk("Bravo-plat", nil), mk("charlie-plat", nil)
+	oa, ob := mk("zeta-own", &project), mk("Eta-own", &project)
+	mk("other-own", &other)
+	fx.attach(pb, fx.user(false), &project)
+
+	walk := func(list func(cursor *string) ([]*roledom.Role, bool, int, error)) (ids []uuid.UUID, total int) {
+		var cursor *string
+		for range 10 {
+			got, hasMore, tot, err := list(cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			total = tot
+			for _, r := range got {
+				ids = append(ids, r.ID)
+			}
+			if !hasMore {
+				return ids, total
+			}
+			c := roledom.EncodeCursor(got[len(got)-1])
+			cursor = &c
+		}
+		t.Fatal("did not terminate")
+		return
+	}
+	same := func(label string, got, want []uuid.UUID) {
+		t.Helper()
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("%s = %v, want %v", label, got, want)
+		}
+	}
+
+	var platformIDs []uuid.UUID
+	for _, r := range func() []*roledom.Role {
+		l, _, _, _ := repo.ListPlatform(t.Context(), roledom.RoleFilter{}, nil, 100)
+		return l
+	}() {
+		platformIDs = append(platformIDs, r.ID)
+	}
+	got, total := walk(func(c *string) ([]*roledom.Role, bool, int, error) {
+		return repo.ListPlatform(t.Context(), roledom.RoleFilter{}, c, 2)
+	})
+	same("platform paged", got, platformIDs)
+	if total != len(platformIDs) {
+		t.Fatalf("platform total = %d, want %d", total, len(platformIDs))
+	}
+	got, _ = walk(func(c *string) ([]*roledom.Role, bool, int, error) {
+		return repo.ListPlatform(t.Context(), roledom.RoleFilter{Search: "BRAVO"}, c, 2)
+	})
+	same("platform search", got, []uuid.UUID{pb})
+	got, _ = walk(func(c *string) ([]*roledom.Role, bool, int, error) {
+		return repo.ListPlatform(t.Context(), roledom.RoleFilter{IDs: []uuid.UUID{pc, pa}}, c, 2)
+	})
+	same("platform ids", got, []uuid.UUID{pa, pc})
+
+	// Own roles (by name), then the attached platform role.
+	got, total = walk(func(c *string) ([]*roledom.Role, bool, int, error) {
+		return repo.ListForProject(t.Context(), project, roledom.RoleFilter{}, c, 1)
+	})
+	same("project paged", got, []uuid.UUID{ob, oa, pb})
+	if total != 3 {
+		t.Fatalf("project total = %d, want 3", total)
+	}
+
+	bad := "!!"
+	if _, _, _, err := repo.ListPlatform(t.Context(), roledom.RoleFilter{}, &bad, 5); !errors.Is(err, roledom.ErrInvalidCursor) {
+		t.Fatalf("bad cursor err = %v", err)
+	}
+}
+
+func TestRoleRepository_ListByPageNumber(t *testing.T) {
+	db := newIAMPGTestDB(t)
+	repo := NewRoleRepository(db)
+	for _, name := range []string{"pg-a", "pg-b", "pg-c", "pg-d", "pg-e"} {
+		r := &roledom.Role{ID: uuid.New(), Name: name, Policy: []byte(`{"version":"2026-10-01","statements":[]}`)}
+		if err := repo.Create(t.Context(), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, _, total, err := repo.ListPlatform(t.Context(), roledom.RoleFilter{Search: "pg-"}, nil, 100)
+	if err != nil || len(all) != 5 || total != 5 {
+		t.Fatalf("all = %d total=%d err=%v", len(all), total, err)
+	}
+	// Page 2 of size 2 is the 3rd and 4th role, with more to follow; the
+	// cursor is ignored in page mode.
+	bad := "!!"
+	page, hasMore, total, err := repo.ListPlatform(t.Context(), roledom.RoleFilter{Search: "pg-", Offset: 2}, &bad, 2)
+	if err != nil || total != 5 || !hasMore || len(page) != 2 || page[0].ID != all[2].ID || page[1].ID != all[3].ID {
+		t.Fatalf("page 2 = %v hasMore=%v total=%d err=%v", page, hasMore, total, err)
+	}
+	last, hasMore, _, err := repo.ListPlatform(t.Context(), roledom.RoleFilter{Search: "pg-", Offset: 4}, nil, 2)
+	if err != nil || hasMore || len(last) != 1 || last[0].ID != all[4].ID {
+		t.Fatalf("last page = %v hasMore=%v err=%v", last, hasMore, err)
 	}
 }

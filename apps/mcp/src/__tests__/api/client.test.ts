@@ -114,6 +114,24 @@ describe("PacaAPIClient – request headers", () => {
 // ---------------------------------------------------------------------------
 
 describe("PacaAPIClient – SuccessEnvelope unwrapping", () => {
+	it("issue_list preserves cursors through the real API client", async () => {
+		const fetchMock = mockFetchOk({ items: [], next_cursor: "next" });
+		vi.stubGlobal("fetch", fetchMock);
+		const { handleGitTool } = await import("../../tools/git-tools.js");
+		const res = await handleGitTool(
+			"issue_list",
+			{ projectId: "p", repoId: "r", state: "all", cursor: "a+b&x" },
+			makeClient(),
+		);
+		expect(fetchMock.mock.calls[0][0]).toBe(
+			"http://api.test/api/v1/projects/p/git/repositories/r/issues?state=all&cursor=a%2Bb%26x",
+		);
+		expect(JSON.parse(res.content[0].text)).toEqual({
+			items: [],
+			next_cursor: "next",
+		});
+	});
+
 	it("extracts .data from a SuccessEnvelope response", async () => {
 		const project = { id: "proj-1", name: "Test Project" };
 		vi.stubGlobal("fetch", mockFetchOk(project));
@@ -133,7 +151,7 @@ describe("PacaAPIClient – SuccessEnvelope unwrapping", () => {
 		);
 		const client = makeClient();
 		const result = await client.listProjects();
-		expect(result).toEqual(raw);
+		expect(result.items).toEqual(raw);
 	});
 });
 
@@ -168,37 +186,54 @@ describe("PacaAPIClient – error handling", () => {
 // ---------------------------------------------------------------------------
 
 describe("PacaAPIClient – listProjects", () => {
-	it("calls the correct endpoint", async () => {
-		vi.stubGlobal("fetch", mockFetchOk([]));
+	const projectsPage = (items: unknown[], total: number) =>
+		({
+			ok: true,
+			json: async () => ({
+				success: true,
+				data: { items, total, page: 1, page_size: 2 },
+			}),
+		}) as unknown as Response;
+
+	it("asks for one page only", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(projectsPage([], 0));
+		vi.stubGlobal("fetch", fetchMock);
 		await makeClient().listProjects();
-		expect((fetch as any).mock.calls[0][0]).toBe(
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock.mock.calls[0][0]).toBe(
 			"http://api.test/api/v1/projects?page=1&page_size=50",
 		);
 	});
 
-	it("accepts custom page and pageSize", async () => {
-		vi.stubGlobal("fetch", mockFetchOk([]));
-		await makeClient().listProjects(2, 10);
-		expect((fetch as any).mock.calls[0][0]).toContain("page=2&page_size=10");
+	it("hands back the next page number as the cursor, without fetching it", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(projectsPage([{ id: "p1" }, { id: "p2" }], 3));
+		vi.stubGlobal("fetch", fetchMock);
+		const page = await makeClient().listProjects({ pageSize: 2 });
+		expect(page).toEqual({
+			items: [{ id: "p1" }, { id: "p2" }],
+			nextCursor: "2",
+			total: 3,
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("returns an empty array when response.items is missing", async () => {
+	it("resumes at the page the cursor names and ends on the last page", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(projectsPage([{ id: "p3" }], 3));
+		vi.stubGlobal("fetch", fetchMock);
+		const page = await makeClient().listProjects({ cursor: "2", pageSize: 2 });
+		expect(fetchMock.mock.calls[0][0]).toContain("page=2&page_size=2");
+		expect(page.nextCursor).toBeNull();
+	});
+
+	it("returns an empty page when response.items is missing", async () => {
 		vi.stubGlobal("fetch", mockFetchOk({}));
-		const result = await makeClient().listProjects();
-		expect(result).toEqual([]);
-	});
-
-	it("returns items when response has .items", async () => {
-		const items = [{ id: "p1" }];
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ success: true, data: { items } }),
-			} as unknown as Response),
-		);
-		const result = await makeClient().listProjects();
-		expect(result).toEqual(items);
+		const page = await makeClient().listProjects();
+		expect(page.items).toEqual([]);
+		expect(page.nextCursor).toBeNull();
 	});
 });
 
@@ -389,6 +424,33 @@ describe("PacaAPIClient – updateTask", () => {
 		});
 		expect(markdownToBlocknote).toHaveBeenCalledWith("**Update**");
 	});
+
+	it("sends sprint_id null to move the task to the backlog", async () => {
+		vi.stubGlobal("fetch", mockFetchOk({ id: "t1" }));
+		await makeClient().updateTask("proj-1", "t1", { sprint_id: null });
+		const [, options] = (fetch as any).mock.calls[0] as [string, RequestInit];
+		expect(JSON.parse(options.body as string)).toEqual({ sprint_id: null });
+	});
+
+	it("sends assignee_ids [] when assignee_id is null, to unassign", async () => {
+		vi.stubGlobal("fetch", mockFetchOk({ id: "t1" }));
+		await makeClient().updateTask("proj-1", "t1", { assignee_id: null });
+		const [, options] = (fetch as any).mock.calls[0] as [string, RequestInit];
+		expect(JSON.parse(options.body as string)).toEqual({ assignee_ids: [] });
+	});
+
+	it("sends start_date and due_date null so the dates are cleared", async () => {
+		vi.stubGlobal("fetch", mockFetchOk({ id: "t1" }));
+		await makeClient().updateTask("proj-1", "t1", {
+			start_date: null,
+			due_date: null,
+		});
+		const [, options] = (fetch as any).mock.calls[0] as [string, RequestInit];
+		expect(JSON.parse(options.body as string)).toEqual({
+			start_date: null,
+			due_date: null,
+		});
+	});
 });
 
 describe("PacaAPIClient – deleteTask", () => {
@@ -410,11 +472,29 @@ describe("PacaAPIClient – deleteTask", () => {
 
 describe("PacaAPIClient – listSprints", () => {
 	it("calls GET /api/v1/projects/:id/sprints", async () => {
-		vi.stubGlobal("fetch", mockFetchOk([]));
+		vi.stubGlobal("fetch", mockFetchOk({ items: [], next_cursor: null }));
 		await makeClient().listSprints("proj-1");
 		expect((fetch as any).mock.calls[0][0]).toBe(
-			"http://api.test/api/v1/projects/proj-1/sprints",
+			"http://api.test/api/v1/projects/proj-1/sprints?page_size=50",
 		);
+	});
+
+	it("reads one page and reports where the next one starts", async () => {
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				success: true,
+				data: { items: [{ id: "s1" }], next_cursor: "c2", total_count: 4 },
+			}),
+		} as unknown as Response);
+		vi.stubGlobal("fetch", fetchMock);
+		const page = await makeClient().listSprints("proj-1", {
+			cursor: "c1",
+			pageSize: 1,
+		});
+		expect(page).toEqual({ items: [{ id: "s1" }], nextCursor: "c2", total: 4 });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(fetchMock.mock.calls[0][0]).toContain("page_size=1&cursor=c1");
 	});
 });
 
@@ -465,6 +545,13 @@ describe("PacaAPIClient – updateSprint", () => {
 			name: "Sprint 1 Updated",
 		});
 	});
+
+	it("sends goal null to clear the goal", async () => {
+		vi.stubGlobal("fetch", mockFetchOk({ id: "sprint-1" }));
+		await makeClient().updateSprint("proj-1", "sprint-1", { goal: null });
+		const [, options] = (fetch as any).mock.calls[0] as [string, RequestInit];
+		expect(JSON.parse(options.body as string)).toEqual({ goal: null });
+	});
 });
 
 describe("PacaAPIClient – deleteSprint", () => {
@@ -507,14 +594,25 @@ describe("PacaAPIClient – listDocuments", () => {
 		vi.stubGlobal("fetch", mockFetchOk([]));
 		await makeClient().listDocuments("proj-1");
 		expect((fetch as any).mock.calls[0][0]).toBe(
-			"http://api.test/api/v1/projects/proj-1/docs?page_size=100",
+			"http://api.test/api/v1/projects/proj-1/docs?page_size=50",
 		);
 	});
 
 	it("appends folder_id query param when provided", async () => {
 		vi.stubGlobal("fetch", mockFetchOk([]));
-		await makeClient().listDocuments("proj-1", "folder-1");
+		await makeClient().listDocuments("proj-1", { folderId: "folder-1" });
 		expect((fetch as any).mock.calls[0][0]).toContain("folder_id=folder-1");
+	});
+
+	it("looks a document up by exact title", async () => {
+		vi.stubGlobal("fetch", mockFetchOk([]));
+		await makeClient().listDocuments("proj-1", {
+			folderId: "null",
+			title: "API Design",
+		});
+		const url = (fetch as any).mock.calls[0][0] as string;
+		expect(url).toContain("folder_id=null");
+		expect(url).toContain("title=API+Design");
 	});
 });
 

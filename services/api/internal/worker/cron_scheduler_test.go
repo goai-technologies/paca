@@ -110,7 +110,7 @@ func (f *fakeCronTaskReader) FindTaskStatusByID(context.Context, uuid.UUID) (*ta
 func (f *fakeCronTaskReader) ListChildTasks(context.Context, uuid.UUID, uuid.UUID) ([]*taskdom.Task, error) {
 	return nil, nil
 }
-func (f *fakeCronTaskReader) ListTaskLinks(context.Context, uuid.UUID) ([]*taskdom.TaskLink, error) {
+func (f *fakeCronTaskReader) ListAllTaskLinks(context.Context, uuid.UUID) ([]*taskdom.TaskLink, error) {
 	return nil, nil
 }
 

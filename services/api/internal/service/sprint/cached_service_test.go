@@ -15,7 +15,6 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	sprintdom "github.com/Paca-AI/api/internal/domain/sprint"
-	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	"github.com/Paca-AI/api/internal/platform/cache"
 	sprintsvc "github.com/Paca-AI/api/internal/service/sprint"
 )
@@ -41,7 +40,6 @@ func newCacheStore(t *testing.T) *cache.Store {
 // ---------------------------------------------------------------------------
 
 type stubSprintSvc struct {
-	listSprints    func(ctx context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error)
 	getSprint      func(ctx context.Context, projectID, id uuid.UUID) (*sprintdom.Sprint, error)
 	createSprint   func(ctx context.Context, in sprintdom.CreateSprintInput) (*sprintdom.Sprint, error)
 	updateSprint   func(ctx context.Context, projectID, id uuid.UUID, in sprintdom.UpdateSprintInput) (*sprintdom.Sprint, error)
@@ -52,11 +50,13 @@ type stubSprintSvc struct {
 	getCalls  int
 }
 
-func (s *stubSprintSvc) ListSprints(ctx context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error) {
+func (s *stubSprintSvc) ListSprints(_ context.Context, projectID uuid.UUID, _ sprintdom.SprintFilter, _ *string, _ int) ([]*sprintdom.Sprint, bool, int, error) {
 	s.listCalls++
-	if s.listSprints != nil {
-		return s.listSprints(ctx, projectID)
-	}
+	return []*sprintdom.Sprint{{ID: uuid.New(), ProjectID: projectID, Name: "Sprint 1"}}, false, 1, nil
+}
+
+func (s *stubSprintSvc) ListAllSprints(_ context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error) {
+	s.listCalls++
 	return []*sprintdom.Sprint{{ID: uuid.New(), ProjectID: projectID, Name: "Sprint 1"}}, nil
 }
 
@@ -100,88 +100,21 @@ func (s *stubSprintSvc) CompleteSprint(ctx context.Context, projectID, id uuid.U
 // CachedSprintService – ListSprints
 // ---------------------------------------------------------------------------
 
-func TestCachedSprint_ListSprints_CacheMissPopulatesCache(t *testing.T) {
+// Pages are filtered and cursor-addressed, so they are never cached.
+func TestCachedSprint_ListSprints_IsNotCached(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 	stub := &stubSprintSvc{}
 	svc := sprintsvc.NewCachedSprintService(stub, newCacheStore(t), 2*time.Minute, discardLogger())
 
-	// First call: miss.
-	sprints, err := svc.ListSprints(ctx, projectID)
-	if err != nil {
-		t.Fatalf("ListSprints (miss): %v", err)
-	}
-	if len(sprints) == 0 {
-		t.Fatal("expected at least one sprint")
-	}
-	if stub.listCalls != 1 {
-		t.Fatalf("expected 1 stub call, got %d", stub.listCalls)
-	}
-
-	// Second call: hit.
-	if _, err := svc.ListSprints(ctx, projectID); err != nil {
-		t.Fatalf("ListSprints (hit): %v", err)
-	}
-	if stub.listCalls != 1 {
-		t.Fatalf("cache hit: stub called again; got %d calls", stub.listCalls)
-	}
-}
-
-// A scoped list belongs to one caller: it must neither be served from nor be
-// stored in the per-project cache entry other callers read.
-func TestCachedSprint_ListSprints_RestrictedScopeBypassesCache(t *testing.T) {
-	projectID := uuid.New()
-	stub := &stubSprintSvc{}
-	svc := sprintsvc.NewCachedSprintService(stub, newCacheStore(t), 2*time.Minute, discardLogger())
-
-	restricted := iam.WithScope(context.Background(), "sprint", iam.False())
-	for i := 0; i < 2; i++ {
-		if _, err := svc.ListSprints(restricted, projectID); err != nil {
-			t.Fatal(err)
+	for range 2 {
+		sprints, _, total, err := svc.ListSprints(ctx, projectID, sprintdom.SprintFilter{}, nil, 30)
+		if err != nil || len(sprints) != 1 || total != 1 {
+			t.Fatalf("ListSprints = %v total=%d err=%v", sprints, total, err)
 		}
 	}
 	if stub.listCalls != 2 {
-		t.Fatalf("restricted calls must reach the service; got %d", stub.listCalls)
-	}
-	// Nothing was stored: the next unrestricted call is a miss, then a hit.
-	for i := 0; i < 2; i++ {
-		if _, err := svc.ListSprints(iam.WithScope(context.Background(), "sprint", iam.True()), projectID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if stub.listCalls != 3 {
-		t.Fatalf("unrestricted scope should use the cache; got %d calls", stub.listCalls)
-	}
-}
-
-func TestCachedSprint_ListSprints_ZeroTTLBypassesCache(t *testing.T) {
-	ctx := context.Background()
-	stub := &stubSprintSvc{}
-	svc := sprintsvc.NewCachedSprintService(stub, newCacheStore(t), 0, discardLogger())
-
-	for i := 0; i < 3; i++ {
-		if _, err := svc.ListSprints(ctx, uuid.New()); err != nil {
-			t.Fatalf("call %d: %v", i, err)
-		}
-	}
-	if stub.listCalls != 3 {
-		t.Fatalf("TTL=0 should bypass cache; want 3 calls, got %d", stub.listCalls)
-	}
-}
-
-func TestCachedSprint_ListSprints_ServiceErrorPropagated(t *testing.T) {
-	ctx := context.Background()
-	sentinel := errors.New("db failure")
-	stub := &stubSprintSvc{
-		listSprints: func(_ context.Context, _ uuid.UUID) ([]*sprintdom.Sprint, error) {
-			return nil, sentinel
-		},
-	}
-	svc := sprintsvc.NewCachedSprintService(stub, newCacheStore(t), 2*time.Minute, discardLogger())
-
-	_, err := svc.ListSprints(ctx, uuid.New())
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("expected sentinel error, got %v", err)
+		t.Fatalf("expected every list to reach the service, got %d calls", stub.listCalls)
 	}
 }
 
@@ -232,72 +165,40 @@ func TestCachedSprint_GetSprint_CacheHit_ProjectMismatchReturnsNotFound(t *testi
 // CachedSprintService – write invalidation
 // ---------------------------------------------------------------------------
 
-func TestCachedSprint_CreateSprint_InvalidatesList(t *testing.T) {
-	ctx := context.Background()
-	projectID := uuid.New()
-	stub := &stubSprintSvc{}
-	svc := sprintsvc.NewCachedSprintService(stub, newCacheStore(t), 2*time.Minute, discardLogger())
-
-	if _, err := svc.ListSprints(ctx, projectID); err != nil {
-		t.Fatalf("ListSprints: %v", err)
-	}
-	if _, err := svc.CreateSprint(ctx, sprintdom.CreateSprintInput{ProjectID: projectID, Name: "S2"}); err != nil {
-		t.Fatalf("CreateSprint: %v", err)
-	}
-	if _, err := svc.ListSprints(ctx, projectID); err != nil {
-		t.Fatalf("ListSprints after Create: %v", err)
-	}
-	if stub.listCalls != 2 {
-		t.Fatalf("expected 2 stub calls, got %d", stub.listCalls)
-	}
-}
-
-func TestCachedSprint_UpdateSprint_InvalidatesListAndItem(t *testing.T) {
+func TestCachedSprint_UpdateSprint_InvalidatesItem(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 	sprintID := uuid.New()
 	stub := &stubSprintSvc{}
 	svc := sprintsvc.NewCachedSprintService(stub, newCacheStore(t), 2*time.Minute, discardLogger())
 
-	// Populate both caches.
-	if _, err := svc.ListSprints(ctx, projectID); err != nil {
-		t.Fatalf("ListSprints: %v", err)
-	}
+	// Populate the cache.
 	if _, err := svc.GetSprint(ctx, projectID, sprintID); err != nil {
 		t.Fatalf("GetSprint: %v", err)
 	}
 
-	// Update evicts both keys.
+	// Update evicts the cached sprint.
 	name := "Updated"
 	if _, err := svc.UpdateSprint(ctx, projectID, sprintID, sprintdom.UpdateSprintInput{Name: name}); err != nil {
 		t.Fatalf("UpdateSprint: %v", err)
 	}
 
-	if _, err := svc.ListSprints(ctx, projectID); err != nil {
-		t.Fatalf("ListSprints after Update: %v", err)
-	}
 	if _, err := svc.GetSprint(ctx, projectID, sprintID); err != nil {
 		t.Fatalf("GetSprint after Update: %v", err)
 	}
 
-	if stub.listCalls != 2 {
-		t.Fatalf("ListSprints: expected 2 stub calls, got %d", stub.listCalls)
-	}
 	if stub.getCalls != 2 {
 		t.Fatalf("GetSprint: expected 2 stub calls, got %d", stub.getCalls)
 	}
 }
 
-func TestCachedSprint_DeleteSprint_InvalidatesListAndItem(t *testing.T) {
+func TestCachedSprint_DeleteSprint_InvalidatesItem(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 	sprintID := uuid.New()
 	stub := &stubSprintSvc{}
 	svc := sprintsvc.NewCachedSprintService(stub, newCacheStore(t), 2*time.Minute, discardLogger())
 
-	if _, err := svc.ListSprints(ctx, projectID); err != nil {
-		t.Fatalf("ListSprints: %v", err)
-	}
 	if _, err := svc.GetSprint(ctx, projectID, sprintID); err != nil {
 		t.Fatalf("GetSprint: %v", err)
 	}
@@ -306,31 +207,22 @@ func TestCachedSprint_DeleteSprint_InvalidatesListAndItem(t *testing.T) {
 		t.Fatalf("DeleteSprint: %v", err)
 	}
 
-	if _, err := svc.ListSprints(ctx, projectID); err != nil {
-		t.Fatalf("ListSprints after Delete: %v", err)
-	}
 	if _, err := svc.GetSprint(ctx, projectID, sprintID); err != nil {
 		t.Fatalf("GetSprint after Delete: %v", err)
 	}
 
-	if stub.listCalls != 2 {
-		t.Fatalf("ListSprints: expected 2 stub calls, got %d", stub.listCalls)
-	}
 	if stub.getCalls != 2 {
 		t.Fatalf("GetSprint: expected 2 stub calls, got %d", stub.getCalls)
 	}
 }
 
-func TestCachedSprint_CompleteSprint_InvalidatesListAndItem(t *testing.T) {
+func TestCachedSprint_CompleteSprint_InvalidatesItem(t *testing.T) {
 	ctx := context.Background()
 	projectID := uuid.New()
 	sprintID := uuid.New()
 	stub := &stubSprintSvc{}
 	svc := sprintsvc.NewCachedSprintService(stub, newCacheStore(t), 2*time.Minute, discardLogger())
 
-	if _, err := svc.ListSprints(ctx, projectID); err != nil {
-		t.Fatalf("ListSprints: %v", err)
-	}
 	if _, err := svc.GetSprint(ctx, projectID, sprintID); err != nil {
 		t.Fatalf("GetSprint: %v", err)
 	}
@@ -339,16 +231,10 @@ func TestCachedSprint_CompleteSprint_InvalidatesListAndItem(t *testing.T) {
 		t.Fatalf("CompleteSprint: %v", err)
 	}
 
-	if _, err := svc.ListSprints(ctx, projectID); err != nil {
-		t.Fatalf("ListSprints after Complete: %v", err)
-	}
 	if _, err := svc.GetSprint(ctx, projectID, sprintID); err != nil {
 		t.Fatalf("GetSprint after Complete: %v", err)
 	}
 
-	if stub.listCalls != 2 {
-		t.Fatalf("ListSprints: expected 2 stub calls, got %d", stub.listCalls)
-	}
 	if stub.getCalls != 2 {
 		t.Fatalf("GetSprint: expected 2 stub calls, got %d", stub.getCalls)
 	}

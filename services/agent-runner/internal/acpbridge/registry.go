@@ -347,7 +347,7 @@ func (r *Registry) broadcastEviction(ctx context.Context, agentID uuid.UUID, win
 // publishStatus is best-effort — a failure here shouldn't fail the
 // register/unregister it's part of. projectID nil is a global-scope ACP
 // agent; its bridge status has no single project room to route to (see
-// PublishRealtime's own doc comment on project_id/actor_user_id routing),
+// PublishRealtime's own doc comment on project_id/actor_account_id routing),
 // a known best-effort gap for global agents carried over unchanged from
 // acp_bridge.py's _publish_status.
 func (r *Registry) publishStatus(ctx context.Context, agentID uuid.UUID, projectID *uuid.UUID, connected bool) {

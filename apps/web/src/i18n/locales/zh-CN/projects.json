@@ -10,6 +10,7 @@
 				"taskStatuses": "任务状态",
 				"taskTypes": "任务类型",
 				"customFields": "自定义字段",
+				"git": "Git",
 				"jev": "Jev AI",
 				"dangerZone": "危险区域",
 				"plugins": "插件",
@@ -20,6 +21,195 @@
 					"title": "您没有权限查看此标签页",
 					"description": "请项目所有者或管理员为您授予访问 {{pluginName}} 的权限。"
 				}
+			}
+		},
+		"git": {
+			"title": "Git 仓库",
+			"description": "此项目的智能体可通过下方连接访问并处理的仓库。",
+			"empty": {
+				"title": "尚未关联仓库",
+				"description": "关联仓库后，本项目的智能体即可读取代码、创建拉取请求并回复提及。",
+				"readOnly": "需要本项目的 Git 写入权限才能关联仓库。",
+				"noConnection": "请先添加连接，然后通过它关联仓库。"
+			},
+			"noProviders": "尚未安装 Git 提供方。请联系管理员安装。",
+			"link": {
+				"platform": "平台",
+				"repository": "仓库",
+				"placeholder": "owner/name 或仓库 URL",
+				"button": "关联",
+				"open": "关联仓库",
+				"cancel": "取消",
+				"help": "粘贴仓库 URL，或输入 所有者/名称。",
+				"noConnection": "关联仓库之前，请先在上方添加 {{provider}} 连接。",
+				"connection": "连接",
+				"anyConnection": "任何能看到该仓库的连接",
+				"connectionHelp": "当多个连接（例如两个组织）都能看到该仓库时，请选择其中一个。",
+				"description": "描述（可选）",
+				"descriptionPlaceholder": "例如：产品的网页客户端",
+				"descriptionHelp": "告诉智能体此仓库的用途，以便选择正确的仓库。最多 1000 个字符。",
+				"title": "关联仓库",
+				"dialogDescription": "选择此项目的智能体要使用的平台和仓库。"
+			},
+			"picker": {
+				"browse": "浏览仓库",
+				"unsupported": "此连接无法列出仓库。请关闭此窗口，手动输入路径或 URL。",
+				"error": "无法加载列表。请关闭此窗口，手动输入路径或 URL。",
+				"empty": "未找到仓库。",
+				"linked": "已关联",
+				"private": "私有",
+				"title": "浏览仓库",
+				"description": "滚动浏览此连接可见的全部仓库，然后选择一个填入仓库字段。"
+			},
+			"unlink": {
+				"button": "取消关联",
+				"confirm": "确认取消",
+				"cancel": "取消"
+			},
+			"resumed": "欢迎回来。现在关联 {{repository}}。",
+			"access": {
+				"title": "此连接看不到该仓库",
+				"description": "{{provider}} 应用只能看到其所安装账号下的仓库。请将其安装到 {{owner}}（您会前往平台并返回此处），然后重新关联。",
+				"descriptionNoOwner": "{{provider}} 应用只能看到其所安装账号下的仓库。请选择安装位置（您会前往平台并返回此处），然后重新关联。",
+				"button": "安装到 {{owner}}",
+				"buttonNoOwner": "选择安装位置",
+				"connection": "要安装的连接",
+				"choose": "选择一个连接"
+			},
+			"errors": {
+				"generic": "出了点问题，请重试。",
+				"setupInvalid": "此链接无效、已过期或已被使用。请重新开始。",
+				"identityExists": "此处已有身份。",
+				"publicUrlRequired": "实例的公开 URL（PUBLIC_URL）未配置。",
+				"providerUnavailable": "Git 提供方插件不可用。",
+				"providerRejected": "平台拒绝了该请求。",
+				"providerDetail": "来自平台的详细信息：{{message}}",
+				"notFound": "未找到。",
+				"accessNotGranted": "该连接看不到此仓库。",
+				"noIdentity": "此平台暂无可用连接。请在“连接”中添加一个。",
+				"alreadyLinked": "此仓库已关联到该项目。",
+				"identityRequired": "有多个连接都能看到该仓库，请选择要使用的连接。",
+				"notVisible": "此项目的所有连接都看不到该仓库。请添加一个有权访问它的连接（GitLab 上为该项目或其群组的令牌），然后重试。",
+				"descriptionTooLong": "描述过长（最多 1000 个字符）。"
+			},
+			"triggerKinds": {
+				"mention": {
+					"label": "被提及",
+					"description": "有人在评论、评审或描述中提及机器人。"
+				},
+				"own_cr_feedback": {
+					"label": "对其拉取请求的反馈",
+					"description": "该智能体创建的拉取请求收到评审或评论。"
+				},
+				"ci_failure": {
+					"label": "其拉取请求的 CI 失败",
+					"description": "该智能体创建的拉取请求的最新提交上检查失败(最多尝试几次)。"
+				},
+				"review_request": {
+					"label": "被请求评审",
+					"description": "机器人被请求为评审者(平台支持时)。"
+				},
+				"assignment": {
+					"label": "被指派",
+					"description": "机器人被指派到议题或拉取请求(平台支持时)。"
+				},
+				"label": {
+					"label": "标签",
+					"description": "议题或拉取请求被添加了标签“paca”(或“paca:<智能体标识>”)。"
+				},
+				"auto_review": {
+					"label": "评审每个拉取请求",
+					"description": "自动评审每个新的拉取请求。开启前默认关闭;草稿和智能体自己的拉取请求会被跳过。"
+				}
+			},
+			"repositories": {
+				"title": "仓库",
+				"description": "本项目的智能体可以处理这些仓库。",
+				"mention": "在评论中提及：",
+				"noDescription": "无描述",
+				"addDescription": "添加描述",
+				"editDescription": "编辑描述",
+				"saveDescription": "保存",
+				"cancelDescription": "取消",
+				"descriptionLabel": "仓库描述"
+			},
+			"automation": {
+				"title": "自动化",
+				"description": "设置 Git 活动如何启动你的智能体。",
+				"locked": "请先关联仓库。这些设置适用于本项目已关联的仓库。",
+				"responder": {
+					"label": "默认回复智能体",
+					"none": "无默认回复智能体",
+					"help": "处理未指定智能体的提及、标签和评审请求。在提及中加入“agent:<handle>”可指定其他智能体。",
+					"warning": "没有默认回复智能体时，未指定智能体的提及会被忽略。"
+				},
+				"minPermission": {
+					"label": "启动智能体所需的最低权限",
+					"help": "权限低于此级别的人仍可评论，但不会触发智能体。"
+				},
+				"permission": {
+					"read": "读取",
+					"triage": "分类",
+					"write": "写入",
+					"maintain": "维护",
+					"admin": "管理员"
+				},
+				"paused": {
+					"label": "暂停自动化",
+					"help": "暂停期间，Git 活动不会启动智能体。已在运行的任务会继续完成。"
+				},
+				"save": "保存",
+				"saved": "已保存。",
+				"advanced": "高级"
+			},
+			"usage": {
+				"title": "使用方法",
+				"description": "在 Git 平台上启动智能体的三种方式。",
+				"mention": {
+					"title": "提及机器人",
+					"description": "在 issue 或拉取请求中评论，由默认回复智能体作答。"
+				},
+				"pick": {
+					"title": "指定智能体",
+					"description": "在提及中加入 agent:<handle> 以选择回复的智能体。"
+				},
+				"label": {
+					"title": "添加标签",
+					"description": "为 issue 或拉取请求添加“paca”标签。"
+				},
+				"automatic": "智能体也可以自行启动，例如跟进自己的拉取请求或评审每个新拉取请求。可在各智能体的 Git 标签页中开启。"
+			},
+			"connections": {
+				"title": "连接",
+				"description": "Paca 用来访问您仓库的 GitHub 应用和访问令牌。一个项目可以拥有来自不同组织的多个连接；每个连接要么由所有项目共享，要么仅限此项目使用。",
+				"add": "添加 {{provider}}",
+				"empty": {
+					"title": "尚无连接",
+					"description": "添加一个连接，让 Paca 能够访问您的仓库。可使用应用；如果您的平台没有应用，也可粘贴访问令牌。",
+					"noPermission": "请让有权管理 Git 连接的人添加一个。"
+				},
+				"scope": {
+					"shared": "所有项目",
+					"project": "此项目"
+				},
+				"expires": "{{date}} 到期",
+				"expired": "已过期",
+				"remove": "移除"
+			},
+			"webhook": {
+				"title": "此仓库的事件尚未到达 Paca",
+				"description": "Paca 未能通过此连接在此仓库上注册 Webhook。",
+				"permissionHint": "最常见的原因是令牌缺少管理 Webhook 的权限（GitLab 需要 Maintainer 角色，GitHub 需要 Webhooks 权限）。请为令牌授予该权限（在 GitLab 上，创建具有 Maintainer 角色的新令牌并将其添加为连接），然后重试。",
+				"retry": "重试",
+				"descriptionNotTried": "Paca 尚未在此仓库上注册 Webhook(例如,它是从旧版本的插件迁移而来)。注册后即可开始接收事件。",
+				"register": "注册 Webhook",
+				"failed": "仍无法注册 Webhook。"
+			},
+			"reconnect": {
+				"title": "此仓库没有连接",
+				"description": "它的连接已被删除，因此无法使用。请通过能看到它的连接重新连接。",
+				"noConnection": "它的连接已被删除。请先添加一个能看到它的连接，然后重新连接。",
+				"button": "重新连接"
 			}
 		}
 	},
@@ -61,6 +251,7 @@
 			"acpProviderCodex": "Codex",
 			"acpProviderGeminiCli": "Gemini CLI",
 			"acpProviderGoose": "Goose",
+			"acpProviderOpenCode": "OpenCode",
 			"acpProviderCustom": "自定义…",
 			"acpCommandLabel": "命令",
 			"acpCommandPlaceholder": "npx -y my-acp-server",
@@ -154,6 +345,7 @@
 			"stepSkillMcpDescription": "生成一次该代理自己的 MCP 密钥，然后运行下面的两个命令 — 这样工具调用会记录为代理的活动，而非您的活动。",
 			"stepSkillMcpSkillLabel": "安装技能：",
 			"stepSkillMcpConnectLabel": "连接 MCP 服务器：",
+			"stepSkillMcpConnectLabelConfig": "将以下内容添加到 {{file}}（如已有 \"{{section}}\" 部分，请合并）：",
 			"step3NotAvailable": "自动安装目前适用于 Claude Code、Gemini CLI 和 Codex。{{provider}} 尚无已知的自定义提示词安装程序 — 即使没有它，下方的 Paca MCP 工具仍然可以使用。",
 			"step3ViewContent": "查看技能说明",
 			"step4NoKeyYet": "生成密钥以显示设置命令。",
@@ -173,7 +365,8 @@
 				"skills": "技能",
 				"envVars": "环境变量",
 				"globalRole": "全局角色",
-				"activity": "动态"
+				"activity": "动态",
+				"git": "Git"
 			},
 			"globalRole": {
 				"title": "全局角色",
@@ -244,6 +437,7 @@
 				"acpProviderCodex": "Codex",
 				"acpProviderGeminiCli": "Gemini CLI",
 				"acpProviderGoose": "Goose",
+				"acpProviderOpenCode": "OpenCode",
 				"acpProviderCustom": "自定义…",
 				"acpCommandLabel": "命令",
 				"acpCommandHint": "用于启动您的 ACP 服务器的、以空格分隔的命令。",
@@ -373,6 +567,69 @@
 			},
 			"system": {
 				"badge": "系统"
+			},
+			"git": {
+				"title": "Git 身份",
+				"description": "默认情况下，此智能体使用工作区共享的 Git 身份。为它设置专属身份后，它的提交、拉取请求和评论会以独立机器人的名义显示，并可将该身份安装到它所处理仓库所属的账户和组织。",
+				"providersUnavailable": "无法加载此项目的 Git 提供方。",
+				"noProviders": {
+					"title": "没有可用的 Git 平台",
+					"description": "请让工作区管理员安装并连接 Git 提供方插件，之后智能体即可处理仓库。"
+				},
+				"ownIdentity": "专属身份",
+				"usesShared": "使用共享身份",
+				"singleIdentity": "此平台每个主机只有一个身份，因此使用共享身份。",
+				"remove": "移除",
+				"create": {
+					"title": "为此智能体创建独立身份",
+					"description": "其提交、拉取请求和评论将以独立机器人显示，也可以按名称提及。你在平台上批准后即可立即安装。",
+					"button": "创建身份"
+				},
+				"askAdmin": "请联系工作区管理员创建。",
+				"install": {
+					"label": "安装到其他账户或组织",
+					"placeholder": "账户或组织（可选）",
+					"button": "安装",
+					"help": "将打开平台的安装页面。名称留空则在平台上选择账户。",
+					"title": "安装到其他账号或组织"
+				},
+				"triggers": {
+					"title": "Git 触发器",
+					"description": "哪些 Git 事件会启动该智能体。仅列出已安装的 Git 提供方能够送达的事件。",
+					"filters": {
+						"branches": "仅限这些目标分支",
+						"authors": "仅限这些作者",
+						"help": "用逗号分隔。留空表示全部匹配。机器人作者必须列出才会被评审。",
+						"save": "保存过滤条件"
+					},
+					"unsupported": "已连接的 Git 平台不支持。",
+					"groups": {
+						"requests": {
+							"title": "响应请求",
+							"description": "有人请求该智能体时启动。"
+						},
+						"followUp": {
+							"title": "跟进自己的拉取请求",
+							"description": "该智能体创建的拉取请求有动态时启动。"
+						},
+						"proactive": {
+							"title": "自主行动",
+							"description": "无需任何人请求即可启动。默认关闭。"
+						}
+					}
+				},
+				"identity": {
+					"title": "身份",
+					"description": "此智能体在各 Git 平台上使用的账号。"
+				},
+				"own": {
+					"description": "该智能体有自己的机器人，其提交、拉取请求和评论会以独立的名称显示。",
+					"mention": "提及方式："
+				},
+				"shared": {
+					"description": "该智能体与其他智能体一样，通过工作区共享的机器人工作。"
+				},
+				"permissions": "该智能体在 Git 上能做什么取决于它在项目中的角色：读写权限来自角色的 Git 权限；批准和合并拉取请求默认不授予。"
 			}
 		},
 		"conversationView": {
@@ -465,8 +722,24 @@
 				"contextTypeAutomation": "自动化",
 				"contextTypeAnnotation": "评论",
 				"noContextResults": "未找到结果",
-				"contextSearchMinChars": "请输入至少2个字符进行搜索"
+				"contextSearchMinChars": "请输入至少2个字符进行搜索",
+				"dialogDescription": "搜索并选择要与智能体共享的项目。它们将随你的下一条消息一起发送。",
+				"done": "完成",
+				"attachedCount": "已附加 {{count}} 项"
 			}
+		},
+		"acpModelEffort": {
+			"modelLabel": "模型",
+			"modelPlaceholder": "例如 claude-sonnet-4-5",
+			"modelHint": "可选的模型名称，将按输入内容原样发送给提供方。留空则使用提供方的默认值。",
+			"effortLabel": "推理强度",
+			"effortDefault": "提供方默认",
+			"effort_low": "低",
+			"effort_medium": "中",
+			"effort_high": "高",
+			"effort_xhigh": "超高",
+			"effort_max": "最大",
+			"effortHint": "可选。仅当提供方支持所选级别时才会应用。"
 		}
 	},
 	"environments": {
@@ -730,6 +1003,15 @@
 			"deleted": "删除了该文档",
 			"moved": "移动了该文档",
 			"contentChangeDiff": "内容更改差异"
+		},
+		"managedCopy": {
+			"copyOf": "{{repository}} 中 {{path}} 的副本",
+			"copyOfAtCommit": "{{repository}} 中 {{path}} 的副本（{{commit}}）",
+			"locked": "已锁定：请在仓库中编辑该文件并推送。",
+			"unlocked": "除非合并到文件中，否则在此处所做的编辑会被下一次推送覆盖。",
+			"lock": "锁定",
+			"unlock": "解锁",
+			"editNotSaved": "你最后的编辑未保存。"
 		}
 	},
 	"roles": {
@@ -893,6 +1175,26 @@
 			"projectExport": {
 				"label": "导出项目数据",
 				"description": "导出此项目的任务（含评论和活动）和文档"
+			},
+			"gitRead": {
+				"label": "查看 Git",
+				"description": "查看项目已关联的仓库"
+			},
+			"gitWrite": {
+				"label": "管理 Git",
+				"description": "关联和取消关联仓库、授予仓库访问权限,并允许智能体推送更改"
+			},
+			"gitApprove": {
+				"label": "批准变更请求",
+				"description": "批准拉取请求和合并请求,这可能满足必需的评审。评论和请求更改只需要“管理 Git”。"
+			},
+			"gitMerge": {
+				"label": "合并变更请求",
+				"description": "将拉取请求和合并请求合并到目标分支。平台上的分支保护仍然有效。"
+			},
+			"gitConnectionsManage": {
+				"label": "管理 Git 连接",
+				"description": "添加和移除仅此项目使用的 GitHub 应用和访问令牌。关联仓库仍需要 Git 写入权限。"
 			}
 		},
 		"permissionGroups": {
@@ -908,7 +1210,8 @@
 			"environments": "环境",
 			"annotations": "Annotations",
 			"workflows": "自动化",
-			"plugins": "插件"
+			"plugins": "插件",
+			"git": "Git"
 		}
 	},
 	"settings": {
@@ -1032,7 +1335,8 @@
 				"displayName": "显示名称",
 				"fieldKey": "字段键",
 				"type": "类型",
-				"required": "必填"
+				"required": "必填",
+				"useInSearch": "用于搜索"
 			},
 			"yes": "是",
 			"no": "否",
@@ -1054,6 +1358,8 @@
 			"noColor": "无颜色",
 			"requiredLabel": "必填",
 			"requiredHint": "用户在创建或编辑任务时必须填写此字段。",
+			"useInSearchLabel": "用于搜索",
+			"useInSearchHint": "任务搜索也会匹配此字段的值。",
 			"fieldTypes": {
 				"text": "文本",
 				"number": "数字",
@@ -1061,7 +1367,8 @@
 				"checkbox": "复选框",
 				"select": "单选",
 				"multiSelect": "多选",
-				"url": "URL"
+				"url": "URL",
+				"longText": "长文本"
 			},
 			"createDialog": {
 				"title": "创建自定义字段",
@@ -1092,7 +1399,9 @@
 			"noPermission": {
 				"title": "You don't have permission to view custom fields",
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
-			}
+			},
+			"rowsLabel": "可见行数",
+			"rowsHint": "编辑时显示的行数（{{min}}–{{max}}）。"
 		},
 		"jev": {
 			"title": "Jev AI",
@@ -1376,7 +1685,8 @@
 		"common": {
 			"empty": "空",
 			"dash": "—",
-			"unassigned": "未分配"
+			"unassigned": "未分配",
+			"none": "无"
 		},
 		"notFound": {
 			"title": "未找到任务",
@@ -1504,7 +1814,8 @@
 				"checkbox": "复选框",
 				"select": "单选",
 				"multiSelect": "多选",
-				"url": "URL"
+				"url": "URL",
+				"longText": "长文本"
 			}
 		},
 		"addTaskLinkModal": {
@@ -1538,7 +1849,8 @@
 				"datePlaceholder": "日期",
 				"clearDate": "清除日期",
 				"startDate": "开始日期",
-				"dueDate": "截止日期"
+				"dueDate": "截止日期",
+				"clearDates": "清除日期"
 			},
 			"storyPointsEditor": {
 				"decrease": "减少故事点",
@@ -1641,6 +1953,66 @@
 			"projectClear": "清除项目",
 			"projectEmpty": "没有可选择的项目",
 			"projectUnknown": "未知项目"
+		},
+		"git": {
+			"branches": "分支",
+			"pullRequests": "拉取请求",
+			"linkBranch": "关联分支",
+			"newBranch": "新建分支",
+			"linkPullRequest": "关联拉取请求",
+			"noBranches": "尚未关联任何分支。",
+			"noPullRequests": "尚未关联任何拉取请求。",
+			"by": "作者:{{author}}",
+			"unlink": "取消关联",
+			"unlinkPullRequest": "取消关联拉取请求 {{name}}",
+			"unlinkBranch": "取消关联分支 {{name}}",
+			"copyCheckout": "复制 checkout 命令",
+			"copy": "复制",
+			"copied": "已复制",
+			"state": {
+				"open": "打开",
+				"draft": "草稿",
+				"merged": "已合并",
+				"closed": "已关闭"
+			},
+			"ci": {
+				"passing": "CI 通过",
+				"failing": "CI 失败",
+				"pending": "CI 运行中",
+				"failingNames": "失败:{{names}}",
+				"counts": "{{total}} 项检查中 {{passed}} 项通过"
+			},
+			"forms": {
+				"selectRepository": "选择仓库…",
+				"cancel": "取消",
+				"pullRequest": "拉取请求",
+				"pullRequestHint": "粘贴拉取请求的链接,或输入其编号。",
+				"willLink": "将关联 {{repository}} 的 {{what}}",
+				"repository": "仓库",
+				"linkPullRequest": "关联拉取请求",
+				"existingBranch": "已有分支",
+				"branchHint": "输入分支名称,或粘贴其链接。",
+				"linkBranch": "关联分支",
+				"branchType": "类型",
+				"branchName": "分支名称",
+				"branchFrom": "基于",
+				"branchFromHint": "可选 — 默认使用仓库的默认分支。",
+				"createBranch": "创建分支",
+				"orLocally": "或在本地创建"
+			},
+			"errors": {
+				"notFound": "在该仓库中未找到。",
+				"rejected": "Git 平台拒绝了对该仓库的请求。",
+				"unavailable": "Git 提供方暂时不可用,请重试。",
+				"noIdentity": "没有可在该仓库上操作的 Git 身份。",
+				"forbidden": "你没有权限执行此操作。",
+				"generic": "出错了,请重试。",
+				"repoNotLinked": "“{{repository}}”未关联到此项目。",
+				"selectRepository": "请选择仓库。",
+				"invalidNumber": "请输入编号或粘贴链接。",
+				"branchRequired": "请输入分支名称或粘贴链接。",
+				"createRefused": "平台无法创建该分支(名称可能已存在或无效)。"
+			}
 		}
 	},
 	"portForwardDetail": {
@@ -1812,6 +2184,19 @@
 		"backlog": {
 			"title": "产品待办列表",
 			"description": "所有未分配到冲刺的工作项。"
+		},
+		"subtasks": {
+			"expand": "展开 {{n}} 个子任务",
+			"collapse": "收起 {{n}} 个子任务",
+			"progress": "{{n}} 个子任务中已完成 {{done}} 个",
+			"loading": "正在加载子任务",
+			"loadError": "无法加载子任务。",
+			"retry": "重试",
+			"matching": "{{total}} 个子任务中有 {{n}} 个符合当前筛选条件",
+			"noMatch": "没有符合当前筛选条件的子任务",
+			"loadMore": "加载更多子任务",
+			"add": "添加子任务",
+			"addPlaceholder": "子任务标题"
 		}
 	},
 	"conversationsPage": {
@@ -1881,6 +2266,7 @@
 			"deleteView": "删除视图",
 			"searchTasksPlaceholder": "搜索任务…",
 			"pluginNotAvailable": "插件不可用",
+			"columnsTruncated": "仅显示前 {{max}} 列；部分任务不在任何列中。请使用筛选器缩小视图范围以查看其余任务。",
 			"viewErrors": {
 				"isLastView": "这是最后一个视图，无法删除。",
 				"deleteFailed": "删除视图失败，请重试。",
@@ -1954,9 +2340,21 @@
 			"tagsFilter": {
 				"addTag": "添加标签",
 				"addTagPlaceholder": "添加标签..."
-			}
+			},
+			"subtasksLabel": "子任务",
+			"subtasksCollapsed": "嵌套，已折叠",
+			"subtasksExpanded": "嵌套，已展开",
+			"subtasksHidden": "隐藏（平铺列表）",
+			"ganttDependenciesLabel": "依赖箭头",
+			"ganttDependenciesShown": "显示",
+			"ganttDependenciesHidden": "隐藏",
+			"unsavedBadge": "未保存的更改",
+			"unsavedTitle": "放弃未保存的更改？",
+			"unsavedDescription": "你修改了此视图的设置但尚未保存。请保存，或放弃以恢复到上次保存的设置。",
+			"keepEditing": "继续编辑",
+			"discard": "放弃"
 		},
-		"roadmap": {
+		"gantt": {
 			"taskColumnLabel": "任务",
 			"noTasksToDisplay": "没有可显示的任务",
 			"noDatesSet": "未设置日期",
@@ -1964,7 +2362,24 @@
 			"startDateTooltip": "开始：{{date}}",
 			"dueDateTooltip": "截止：{{date}}",
 			"loading": "正在加载…",
-			"viewMore": "查看更多"
+			"viewMore": "查看更多",
+			"zoomLabel": "缩放",
+			"zoom": {
+				"day": "日",
+				"week": "周",
+				"month": "月",
+				"quarter": "季度",
+				"year": "年"
+			},
+			"today": "今天",
+			"jumpToToday": "跳转到今天",
+			"quarterLabel": "Q{{n}}",
+			"startsBeforeBlocker": "在“{{title}}”结束前开始",
+			"resizeStart": "拖动以更改开始日期",
+			"resizeEnd": "拖动以更改截止日期",
+			"rescheduled": "已重新安排“{{title}}”",
+			"undo": "撤销",
+			"rescheduleFailed": "无法重新安排任务"
 		},
 		"newViewPopover": {
 			"addView": "添加视图",
@@ -1978,7 +2393,7 @@
 			"layouts": {
 				"board": "看板",
 				"table": "表格",
-				"roadmap": "路线图",
+				"gantt": "甘特图",
 				"plugin": "插件"
 			}
 		},
@@ -2004,7 +2419,7 @@
 		},
 		"timeline": {
 			"title": "时间线",
-			"description": "在路线图上展示史诗和长期规划。"
+			"description": "在甘特图上展示史诗和长期规划。"
 		},
 		"sprintDetail": {
 			"notFound": "未找到冲刺或访问被拒绝。",
@@ -2080,7 +2495,8 @@
 			"assignee": "负责人",
 			"importance": "重要程度",
 			"type": "类型",
-			"reporter": "报告人"
+			"reporter": "报告人",
+			"tags": "标签"
 		},
 		"sortBy": {
 			"manual": "手动",
@@ -2171,7 +2587,14 @@
 			"triggerGroups": {
 				"taskEvents": "任务事件",
 				"sprintEvents": "冲刺事件",
-				"scheduleWebhook": "定时计划和 Webhook"
+				"scheduleWebhook": "定时计划和 Webhook",
+				"taskActivity": "活动与子任务"
+			},
+			"git": "Git",
+			"actionGroups": {
+				"taskActions": "任务",
+				"flowActions": "流程与集成",
+				"sprintActions": "冲刺"
 			}
 		},
 		"nodeKind": {
@@ -2196,7 +2619,12 @@
 			"sprint_created": "冲刺创建时",
 			"sprint_started": "冲刺开始时",
 			"sprint_completed": "冲刺完成时",
-			"sprint_deleted": "冲刺删除时"
+			"sprint_deleted": "冲刺删除时",
+			"field_changed": "字段已更改",
+			"comment_added": "已添加评论",
+			"link_added": "已添加链接",
+			"attachment_added": "已添加附件",
+			"child_changed": "子任务已变更"
 		},
 		"actionTypes": {
 			"update_task": "更新任务",
@@ -2204,7 +2632,11 @@
 			"call_api": "调用 API",
 			"wait": "等待",
 			"update_sprint": "更新冲刺",
-			"complete_sprint": "完成冲刺"
+			"complete_sprint": "完成冲刺",
+			"create_task": "创建子任务",
+			"link_task": "关联任务",
+			"add_comment": "添加评论",
+			"notify": "发送通知"
 		},
 		"nodeConfig": {
 			"save": "保存",
@@ -2245,7 +2677,24 @@
 				"tokenShownOnceWarning": "请立即复制此令牌 — 之后将不再显示。",
 				"copy": "复制",
 				"copied": "已复制",
-				"noTokenYet": "尚未生成令牌"
+				"noTokenYet": "尚未生成令牌",
+				"fieldLabel": "监视字段",
+				"fieldPlaceholder": "选择字段…",
+				"fieldChangedHint": "当任务的该字段被编辑时运行。",
+				"childChangedHint": "当子任务被创建或状态变化时，在其父任务上运行。可对子任务添加条件，例如仅在全部完成时执行。",
+				"childStatusLabel": "当子任务进入",
+				"changedFields": {
+					"sprint": "冲刺",
+					"due_date": "截止日期",
+					"start_date": "开始日期",
+					"title": "标题",
+					"story_points": "故事点",
+					"reporter": "报告人",
+					"task_type": "任务类型",
+					"parent_task": "父任务",
+					"description": "描述",
+					"custom_fields": "自定义字段"
+				}
 			},
 			"condition": {
 				"branchesTitle": "分支",
@@ -2280,8 +2729,14 @@
 					"sprint_status": "冲刺状态",
 					"sprint_goal": "冲刺目标",
 					"sprint_start_date": "冲刺开始日期",
-					"sprint_end_date": "冲刺结束日期"
-				}
+					"sprint_end_date": "冲刺结束日期",
+					"child_count": "子任务数量"
+				},
+				"dateMode": {
+					"fixed": "指定日期",
+					"relative": "相对于今天"
+				},
+				"relativeHint": "距今天的天数：0 = 现在，3 = 3 天后，-1 = 昨天。“早于”配合 0 表示已逾期。"
 			},
 			"action": {
 				"memberLabel": "负责人",
@@ -2336,7 +2791,58 @@
 				"pluginConditionLabel": "插件条件",
 				"pluginConditionHint": "将此分支的匹配委托给插件提供的条件，而不是比较任务字段。",
 				"selectPluginPlaceholder": "选择插件条件…",
-				"addCustomField": "添加自定义字段…"
+				"addCustomField": "添加自定义字段…",
+				"createTaskHint": "在下方所选任务下创建一个新的子任务。可添加任意字段，每个字段可以是固定值，也可以从触发任务或其父任务复制。如果父任务已有标题完全相同的子任务，则不会创建。",
+				"createTitlePlaceholder": "{{task.title}} - 评审",
+				"descriptionLabel": "描述",
+				"ops": {
+					"set": "设为",
+					"replace": "替换为",
+					"add": "添加",
+					"remove": "移除",
+					"clear": "清空",
+					"task": "从此任务复制",
+					"parent": "从父任务复制",
+					"now": "今天"
+				},
+				"clearHint": "清空此字段。",
+				"dynamicFieldLabel": "复制此字段",
+				"offsetDaysLabel": "偏移（天）",
+				"offsetDaysHint": "正数表示推迟，负数表示提前。",
+				"dynamicHint": {
+					"task": "运行时从触发自动化的任务复制。若其没有值，则该字段保持不变。",
+					"parent": "从触发任务的父任务复制。若无父任务或无值，则该字段保持不变。",
+					"now": "运行时的当天日期，按上面的天数偏移。"
+				},
+				"addMember": "添加成员…",
+				"removeMember": "移除成员",
+				"commentHint": "由自动化在任务上发表评论。",
+				"commentTextLabel": "评论",
+				"commentPlaceholder": "例如：所有子任务已完成。",
+				"notifyHint": "向下列人员发送关于该任务的应用内通知。",
+				"notifyRecipientsLabel": "通知对象",
+				"notifyRecipients": {
+					"assignees": "负责人",
+					"reporter": "报告人",
+					"parent_assignees": "父任务的负责人"
+				},
+				"notifyMembersLabel": "同时通知",
+				"notifyMessageLabel": "消息",
+				"notifyMessagePlaceholder": "例如：已可供审核。",
+				"linkHint": "将任务关联到另一个任务。方向以此任务为准。",
+				"linkTypeLabel": "链接类型",
+				"linkTypes": {
+					"blocks": "阻塞",
+					"is_blocked_by": "被阻塞于",
+					"relates_to": "相关于",
+					"duplicates": "重复",
+					"is_duplicated_by": "被重复于"
+				},
+				"linkToLabel": "关联到",
+				"createLinkLabel": "关联到父任务",
+				"createLinkNone": "不关联",
+				"createLinkHint": "可选地将新任务关联到其父任务，方向以新任务为准（例如“阻塞”＝子任务阻塞父任务）。",
+				"opsLabel": "此字段的应用方式"
 			},
 			"target": {
 				"label": "作用对象",
@@ -2344,6 +2850,7 @@
 					"self": "此任务",
 					"parent": "父任务",
 					"children": "子任务",
+					"siblings": "同级任务（父任务的其他子任务）",
 					"blocks": "阻塞的任务",
 					"is_blocked_by": "被阻塞的任务",
 					"relates_to": "相关任务",
@@ -2371,7 +2878,12 @@
 				"cronSchedule": "运行时间：{{expression}}",
 				"webhookReady": "已配置 Webhook",
 				"callApiSummary": "{{method}} {{host}}",
-				"jevNoulTrue": "是"
+				"jevNoulTrue": "是",
+				"pluginField": "{{field}}:{{value}}",
+				"waitMinutes": "等待 {{minutes}} 分钟",
+				"createTaskSummary": "创建：{{title}}",
+				"commentSummary": "评论：{{text}}",
+				"notifySummary": "通知：{{message}}"
 			},
 			"jev": {
 				"answerTypeLabel": "回答类型",
@@ -2397,7 +2909,8 @@
 				"confidenceThresholdLabel": "置信度阈值",
 				"trueThresholdLabel": "“真”阈值",
 				"thresholdHint": "低于此值时，工作流将走 Else 分支，而不采信该答案。"
-			}
+			},
+			"noConfigNeeded": "此节点无需配置——自动化执行到该节点时会立即生效。"
 		},
 		"runHistory": {
 			"title": "运行历史",

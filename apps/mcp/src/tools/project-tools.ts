@@ -1,6 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PacaAPIClient } from "../api/index.js";
+import { moreNotice, pagingFields, pagingProperties } from "../api/paginate.js";
 import { formatList, formatProject } from "../utils/index.js";
 
 const GetProjectSchema = z.object({
@@ -26,14 +27,17 @@ const DeleteProjectSchema = z.object({
  * Returns all project-related MCP tools.
  * @returns Array of project tools
  */
+const ListProjectsSchema = z.object({ ...pagingFields });
+
 export function getProjectTools(): Tool[] {
 	return [
 		{
 			name: "list_projects",
-			description: "List all projects accessible to the authenticated user",
+			description:
+				"List the projects accessible to the authenticated user, one page at a time. When more remain, the reply says so and gives a cursor to pass to the next call.",
 			inputSchema: {
 				type: "object",
-				properties: {},
+				properties: { ...pagingProperties },
 			},
 		},
 		{
@@ -124,13 +128,14 @@ export async function handleProjectTool(
 ): Promise<any> {
 	switch (toolName) {
 		case "list_projects": {
-			const projects = await client.listProjects();
-			const formatted = formatList(projects, formatProject);
+			const { cursor, pageSize } = ListProjectsSchema.parse(args ?? {});
+			const page = await client.listProjects({ cursor, pageSize });
+			const formatted = formatList(page.items, formatProject);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Projects:\n\n${formatted}`,
+						text: `Projects:\n\n${formatted}${moreNotice(page, "list_projects")}`,
 					},
 				],
 			};

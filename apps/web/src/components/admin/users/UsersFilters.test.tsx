@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -6,7 +7,7 @@ import { UsersFilters } from "./UsersFilters";
 
 function setup(over: Partial<React.ComponentProps<typeof UsersFilters>> = {}) {
 	const props = {
-		roles: [],
+		canFilterByRole: false,
 		selectedRole: "",
 		isFetching: false,
 		isFiltering: false,
@@ -16,7 +17,11 @@ function setup(over: Partial<React.ComponentProps<typeof UsersFilters>> = {}) {
 		onClear: vi.fn(),
 		...over,
 	};
-	render(<UsersFilters {...props} />);
+	render(
+		<QueryClientProvider client={new QueryClient()}>
+			<UsersFilters {...props} />
+		</QueryClientProvider>,
+	);
 	return props;
 }
 
@@ -63,14 +68,18 @@ describe("UsersFilters", () => {
 		expect(props.onClear).toHaveBeenCalled();
 	});
 
-	it("hides the result row when not filtering and the role menu without roles", () => {
+	it("hides the result row when not filtering and the role menu without roles:read", () => {
 		setup();
 		expect(screen.queryByText(/Results:/)).not.toBeInTheDocument();
-		expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: /all roles/i }),
+		).not.toBeInTheDocument();
 	});
 
-	it("renders the role menu when roles exist", () => {
-		setup({ roles: ["ADMIN", "USER"] });
-		expect(screen.getByRole("combobox")).toBeInTheDocument();
+	it("renders the role menu when the viewer may read roles", () => {
+		setup({ canFilterByRole: true });
+		expect(
+			screen.getByRole("button", { name: /all roles/i }),
+		).toBeInTheDocument();
 	});
 });

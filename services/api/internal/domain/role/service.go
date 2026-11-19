@@ -32,10 +32,12 @@ type SimulateInput struct {
 // projectID selects the scope: nil addresses platform roles, otherwise the
 // roles owned by that project.
 type Service interface {
-	ListPlatform(ctx context.Context) ([]*Role, error)
-	// ListForProject returns the project's own roles and the platform roles
-	// attached inside it.
-	ListForProject(ctx context.Context, projectID uuid.UUID) ([]*Role, error)
+	// ListPlatform returns one page of the platform roles; see
+	// Repository.ListPlatform for the paging contract.
+	ListPlatform(ctx context.Context, filter RoleFilter, cursorAfter *string, limit int) ([]*Role, bool, int, error)
+	// ListForProject returns one page of the project's own roles and the
+	// platform roles attached inside it.
+	ListForProject(ctx context.Context, projectID uuid.UUID, filter RoleFilter, cursorAfter *string, limit int) ([]*Role, bool, int, error)
 	// Get returns a role of the scope; with a project scope, platform roles
 	// are readable too.
 	Get(ctx context.Context, projectID *uuid.UUID, id uuid.UUID) (*Role, error)

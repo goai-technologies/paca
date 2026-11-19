@@ -22,7 +22,11 @@ type FileRepository interface {
 
 // TaskAttachmentRepository defines persistence operations for task attachments.
 type TaskAttachmentRepository interface {
-	ListTaskAttachments(ctx context.Context, taskID uuid.UUID) ([]*TaskAttachment, error)
+	// ListTaskAttachments returns one page of the task's attachments with their
+	// file metadata, ordered by created_at then id ascending. cursorAfter is the
+	// cursor from EncodeCursor (nil for the first page); hasMore reports whether
+	// more follow and total counts every attachment of the task.
+	ListTaskAttachments(ctx context.Context, taskID uuid.UUID, cursorAfter *string, limit int) (attachments []*TaskAttachment, hasMore bool, total int, err error)
 	FindTaskAttachmentByID(ctx context.Context, id uuid.UUID) (*TaskAttachment, error)
 	CreateTaskAttachment(ctx context.Context, a *TaskAttachment) error
 	DeleteTaskAttachment(ctx context.Context, id uuid.UUID) error

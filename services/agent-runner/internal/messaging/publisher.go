@@ -56,17 +56,17 @@ func (p *Publisher) PublishEvent(
 	return nil
 }
 
-// PublishRealtime is the actual live-UI-update path — mirrors
-// core/streams.py's publish_realtime field-for-field. Called both per
+// PublishRealtime is the actual live-UI-update path (it replaced the Python
+// publish_realtime this mirrored field-for-field). Called both per
 // individual conversation event (so the UI streams tool calls/messages as
 // they happen) and on every status transition (started/finished/failed/
 // paused/stopped).
 //
 // projectID zero (uuid.Nil) is a global-chat conversation and is omitted
 // from the payload entirely, matching Python's `if project_id is not
-// None:` — not sent as an empty string. actorUserID is nil for a
+// None:` — not sent as an empty string. actorAccountID is nil for a
 // project-scoped conversation; services/realtime's routeEvent needs at
-// least one of project_id/actor_user_id present to know which room to
+// least one of project_id/actor_account_id present to know which room to
 // fan this out to (see the Python doc comment this mirrors).
 //
 // conversationID zero (uuid.Nil), unlike projectID, is sent as a literal
@@ -80,7 +80,7 @@ func (p *Publisher) PublishRealtime(
 	conversationID uuid.UUID,
 	eventType string,
 	extraPayload map[string]any,
-	actorUserID *uuid.UUID,
+	actorAccountID *uuid.UUID,
 ) error {
 	conversationIDStr := conversationID.String()
 	if conversationID == uuid.Nil {
@@ -90,14 +90,18 @@ func (p *Publisher) PublishRealtime(
 	if projectID != uuid.Nil {
 		payload["project_id"] = projectID.String()
 	}
-	if actorUserID != nil {
-		payload["actor_user_id"] = actorUserID.String()
+	if actorAccountID != nil {
+		payload["actor_account_id"] = actorAccountID.String()
 	}
 	for k, v := range extraPayload {
 		payload[k] = v
 	}
 
-	message, err := json.Marshal(map[string]any{"type": eventType, "payload": payload})
+	envelope := map[string]any{"type": eventType, "payload": payload}
+	if authz, ok := conversationAuthz(projectID, conversationID, actorAccountID); ok {
+		envelope["authz"] = authz
+	}
+	message, err := json.Marshal(envelope)
 	if err != nil {
 		return fmt.Errorf("messaging: marshal realtime event: %w", err)
 	}
@@ -105,6 +109,24 @@ func (p *Publisher) PublishRealtime(
 		return fmt.Errorf("messaging: publish realtime event for conversation %s: %w", conversationID, err)
 	}
 	return nil
+}
+
+// conversationAuthz is what IAM must allow before a client sees a project
+// conversation's event: conversations:read on that conversation, in the same
+// terms the API's events.AuthzFor uses for its own events, so services/realtime
+// checks each viewer on the conversation instead of trusting the room. It is
+// absent where the event is not a project-shared conversation's: a global
+// chat or an owner-private conversation (actor_account_id set) goes to its
+// owner's own room, and an event with no project or no conversation (the ACP
+// bridge status) has no conversation to check.
+func conversationAuthz(projectID, conversationID uuid.UUID, actorAccountID *uuid.UUID) (map[string]string, bool) {
+	if projectID == uuid.Nil || conversationID == uuid.Nil || actorAccountID != nil {
+		return nil, false
+	}
+	return map[string]string{
+		"action":   "conversations:read",
+		"resource": "project/" + projectID.String() + "/conversation/" + conversationID.String(),
+	}, true
 }
 
 // PublishConversationStatus durably records that conversationID reached a

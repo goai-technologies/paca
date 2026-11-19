@@ -50,7 +50,7 @@ Request body for create and update (`name` is trimmed, 1 to 100 characters; `des
 
 | Method | Path | Auth | Function |
 |---|---|---|---|
-| `GET` | `/admin/roles` | `roles:read` | List platform roles (`project_id` null). |
+| `GET` | `/admin/roles` | `roles:read` | List platform roles (`project_id` null), cursor-paginated: `{items, page_size, next_cursor, total_count}` with `cursor`, `page_size` (≤ 100), `search` and `ids` (≤ 100). |
 | `POST` | `/admin/roles` | `roles:write` | Create a platform role. `201` with the role. |
 | `GET` | `/admin/roles/:roleId` | `roles:read` on the role | Get a role. |
 | `PUT` | `/admin/roles/:roleId` | `roles:write` on the role | Replace name, description and policy. |
@@ -104,7 +104,7 @@ The same four exist per project at `/projects/:projectId/roles/actions`, `/attri
 }
 ```
 
-`resource_kind` is empty for the generic keys `principal.id`, `principal.type` and `resource.id`. Built-in keys: `task.sprint_id`, `task.status_id`, `task.type_id`, `task.assignee_id`, `view.sprint_id`, `doc.folder_id`, `doc.ancestor_folder_ids`, `agent.environment_id`, `environment.type` (`docker` or `kubernetes`), `conversation.environment_id`.
+`resource_kind` is empty for the generic keys `principal.id`, `principal.type` and `resource.id`. Built-in keys: `task.sprint_id`, `task.status_id`, `task.type_id`, `task.assignee_id`, `view.sprint_id`, `doc.folder_id`, `doc.ancestor_folder_ids`, `agent.environment_id`, `environment.type` (`docker` or `kubernetes`), `conversation.environment_id`, `conversation.agent_id`.
 
 `POST /roles/validate` always answers `200`; problems with the policy are the result, not a request failure:
 
@@ -171,6 +171,7 @@ These report the caller's effective IAM actions so the UI can show or hide featu
 |---|---|---|---|
 | `GET` | `/users/me/global-permissions` | any authenticated user | The caller's platform-level actions. |
 | `GET` | `/projects/:projectId/members/me/permissions` | any authenticated caller | The caller's effective actions in the project. |
+| `POST` | `/projects/:projectId/members/me/permissions/check` | any authenticated caller | Whether the caller may perform each `{action, resource}` pair (resources inside the project); `{"allowed": [...]}`. Used by realtime to authorize each event. |
 | `GET` | `/agents/me/global-permissions` | the agent's own API key | The calling agent's own platform-level actions. |
 
 ```json

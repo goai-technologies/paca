@@ -25,11 +25,10 @@ func TestFanout_TakesActorFromRequestContext(t *testing.T) {
 		ctx        context.Context
 		wantOrigin string
 		wantActor  string
-		wantAgent  string
 	}{
-		{"no request actor", context.Background(), "system", "", ""},
-		{"human", WithRequestActor(context.Background(), user, nil), "user", user.String(), ""},
-		{"agent", WithRequestActor(context.Background(), user, &agent), "agent", user.String(), agent.String()},
+		{"no request actor", context.Background(), "system", ""},
+		{"human", WithRequestActor(context.Background(), user, OriginUser), "user", user.String()},
+		{"agent", WithRequestActor(context.Background(), agent, OriginAgent), "agent", agent.String()},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -42,16 +41,13 @@ func TestFanout_TakesActorFromRequestContext(t *testing.T) {
 			if got, _ := f["actor_id"].(string); got != tc.wantActor {
 				t.Errorf("actor_id = %q, want %q", got, tc.wantActor)
 			}
-			if got, _ := f["actor_agent_id"].(string); got != tc.wantAgent {
-				t.Errorf("actor_agent_id = %q, want %q", got, tc.wantAgent)
-			}
 		})
 	}
 }
 
 func TestFanout_ExplicitAttributionWins(t *testing.T) {
 	sink := &captureSink{}
-	ctx := WithRequestActor(context.Background(), uuid.New(), nil)
+	ctx := WithRequestActor(context.Background(), uuid.New(), OriginUser)
 	FanoutTo(ctx, sink, Event{Topic: "task.updated", ProjectID: uuid.New(), Payload: map[string]any{}, Origin: OriginAutomation})
 	if f := sink.fields[0]; f["origin"] != "automation" || f["actor_id"] != nil {
 		t.Errorf("an explicit origin must not be overridden by the request actor, got %v", f)

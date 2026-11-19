@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../utils/index.js", () => ({
 	blocknoteToMarkdown: vi.fn(() => "mocked markdown"),
+	markdownToBlocknote: vi.fn((md: string) => [
+		{ type: "paragraph", content: [{ type: "text", text: md }] },
+	]),
 }));
 
 import {
@@ -33,15 +36,41 @@ const DOC_IN_NESTED = {
 	position: 0,
 };
 
-/** Create mock API client. Builds tree from folders + docs arrays. */
+/** Slices `all` the way the API pages: an offset-style cursor stands in for the opaque one. */
+function pageOf<T>(all: T[], opts: { cursor?: string; pageSize?: number }) {
+	const start = opts.cursor ? Number(opts.cursor) : 0;
+	const size = opts.pageSize ?? 50;
+	const items = all.slice(start, start + size);
+	const more = start + size < all.length;
+	return { items, nextCursor: more ? String(start + size) : null };
+}
+
+/** Mock API client serving the documents the way the list endpoint filters them. */
 function makeApiClient(
 	opts: { folders?: any[]; documents?: any[]; getDocumentContent?: any } = {},
 ) {
-	const _folders = opts.folders ?? [FOLDER_ROOT, FOLDER_NESTED];
 	const documents = opts.documents ?? [DOC_ROOT, DOC_IN_FOLDER, DOC_IN_NESTED];
 
 	return {
-		listDocuments: vi.fn().mockResolvedValue(documents),
+		listDocuments: vi.fn().mockImplementation(
+			async (
+				_pid: string,
+				o: {
+					folderId?: string;
+					title?: string;
+					cursor?: string;
+					pageSize?: number;
+				} = {},
+			) => {
+				const wanted = o.folderId === "null" ? null : (o.folderId ?? null);
+				const matches = documents.filter(
+					(d) =>
+						(d.folder_id ?? null) === wanted &&
+						(!o.title || d.title.toLowerCase() === o.title.toLowerCase()),
+				);
+				return pageOf(matches, o);
+			},
+		),
 		getDocument: vi.fn().mockResolvedValue({
 			id: "d1",
 			title: "README",
@@ -54,11 +83,33 @@ function makeApiClient(
 	} as any;
 }
 
-function makeDocClient(opts: { folders?: any[] } = {}) {
+/** The doc client of a server without the by-path routes (the folder walk is
+ *  used), unless `byPath` supplies those methods. */
+function makeDocClient(opts: { folders?: any[]; byPath?: any } = {}) {
 	const folders = opts.folders ?? [FOLDER_ROOT, FOLDER_NESTED];
 
 	return {
-		listFolders: vi.fn().mockResolvedValue(folders),
+		getByPath: vi.fn().mockResolvedValue({ status: "unsupported" }),
+		putByPath: vi.fn().mockResolvedValue({ status: "unsupported" }),
+		...opts.byPath,
+		listFolders: vi.fn().mockImplementation(
+			async (
+				_pid: string,
+				o: {
+					parentId?: string | null;
+					name?: string;
+					cursor?: string;
+					pageSize?: number;
+				} = {},
+			) => {
+				const matches = folders.filter(
+					(f) =>
+						(f.parent_id ?? null) === (o.parentId ?? null) &&
+						(!o.name || f.name.toLowerCase() === o.name.toLowerCase()),
+				);
+				return pageOf(matches, o);
+			},
+		),
 		createFolder: vi.fn().mockImplementation((_pid: string, input: any) =>
 			Promise.resolve({
 				id: "fnew",
@@ -75,8 +126,8 @@ function makeDocClient(opts: { folders?: any[] } = {}) {
 // ── Tool definitions ───────────────────────────────────────────────────────────
 
 describe("getFilesystemDocTools", () => {
-	it("returns 5 tools", () => {
-		expect(getFilesystemDocTools()).toHaveLength(5);
+	it("returns 7 tools", () => {
+		expect(getFilesystemDocTools()).toHaveLength(7);
 	});
 
 	it("includes all expected tool names", () => {
@@ -87,6 +138,8 @@ describe("getFilesystemDocTools", () => {
 			"write_doc",
 			"delete_doc",
 			"move_doc",
+			"grep_docs",
+			"edit_doc",
 		]) {
 			expect(names).toContain(n);
 		}
@@ -468,5 +521,354 @@ describe("handleFilesystemDocTool – unknown tool", () => {
 				makeDocClient(),
 			),
 		).rejects.toThrow("Unknown filesystem doc tool");
+	});
+});
+
+// ── Paging: one page per call, and a cursor to continue ───────────────────────
+
+describe("handleFilesystemDocTool – paging", () => {
+	const folders = Array.from({ length: 5 }, (_, i) => ({
+		id: `pf${i}`,
+		parent_id: null,
+		name: `Folder ${i}`,
+		position: i,
+	}));
+	const docs = Array.from({ length: 3 }, (_, i) => ({
+		id: `pd${i}`,
+		folder_id: null,
+		title: `Doc ${i}`,
+		position: i,
+	}));
+
+	it("lists one page of folders and hands back a cursor instead of reading on", async () => {
+		const apiClient = makeApiClient({ documents: docs });
+		const docClient = makeDocClient({ folders });
+		const result = await handleFilesystemDocTool(
+			"list_docs",
+			{ projectId: "p1", pageSize: 2 },
+			apiClient,
+			docClient,
+		);
+		const text = result.content[0].text;
+		expect(text).toContain("Folder 0/");
+		expect(text).toContain("Folder 1/");
+		expect(text).not.toContain("Folder 2/");
+		expect(text).toMatch(/call list_docs again with cursor="[^"]+"/);
+		expect(docClient.listFolders).toHaveBeenCalledTimes(1);
+		// Documents wait until the folders are done.
+		expect(apiClient.listDocuments).not.toHaveBeenCalled();
+	});
+
+	it("follows the cursor through the folders, then into the documents", async () => {
+		const apiClient = makeApiClient({ documents: docs });
+		const docClient = makeDocClient({ folders });
+		const seen: string[] = [];
+		let cursor: string | undefined;
+		for (let i = 0; i < 10; i++) {
+			const result = await handleFilesystemDocTool(
+				"list_docs",
+				{ projectId: "p1", pageSize: 2, cursor },
+				apiClient,
+				docClient,
+			);
+			const text: string = result.content[0].text;
+			seen.push(...(text.match(/(?:📁|📄) [^\n]+/g) ?? []));
+			cursor = text.match(/cursor="([^"]+)"/)?.[1];
+			if (!cursor) break;
+		}
+		expect(seen).toEqual([
+			"📁 Folder 0/",
+			"📁 Folder 1/",
+			"📁 Folder 2/",
+			"📁 Folder 3/",
+			"📁 Folder 4/",
+			"📄 Doc 0",
+			"📄 Doc 1",
+			"📄 Doc 2",
+		]);
+	});
+
+	it("rejects a cursor that did not come from list_docs", async () => {
+		await expect(
+			handleFilesystemDocTool(
+				"list_docs",
+				{ projectId: "p1", cursor: "not-a-cursor" },
+				makeApiClient(),
+				makeDocClient(),
+			),
+		).rejects.toThrow(/cursor/i);
+	});
+
+	it("resolves a path with exact-name lookups, never listing a whole level", async () => {
+		const apiClient = makeApiClient();
+		const docClient = makeDocClient();
+		await handleFilesystemDocTool(
+			"read_doc",
+			{ projectId: "p1", path: "Architecture/API/Endpoints" },
+			apiClient,
+			docClient,
+		);
+		for (const [, o] of docClient.listFolders.mock.calls) {
+			expect(o.name).toBeDefined();
+			expect(o.pageSize).toBe(1);
+		}
+		for (const [, o] of apiClient.listDocuments.mock.calls) {
+			expect(o.title).toBeDefined();
+			expect(o.pageSize).toBe(1);
+		}
+	});
+});
+
+// ── by-path (a server with GET/PUT /docs/by-path) ──────────────────────────────
+
+describe("handleFilesystemDocTool – by-path server", () => {
+	const DOC = {
+		id: "d7",
+		title: "Endpoints",
+		content: [{ type: "paragraph" }],
+		updated_at: "2026-01-01T00:00:00Z",
+	};
+
+	it("write_doc sends a note, a task and the PACA_CLIENT label", async () => {
+		vi.stubEnv("PACA_CLIENT", "claude-code/s1");
+		try {
+			const putByPath = vi.fn().mockResolvedValue({
+				status: "written",
+				doc: DOC,
+				created: false,
+				changed: true,
+			});
+			const docClient = makeDocClient({ byPath: { putByPath } });
+			await handleFilesystemDocTool(
+				"write_doc",
+				{
+					projectId: "p1",
+					path: "API/Endpoints",
+					content: "# Hi",
+					note: "add the auth section",
+					task: "PACA-88",
+				},
+				makeApiClient(),
+				docClient,
+			);
+			expect(putByPath).toHaveBeenCalledWith(
+				"p1",
+				expect.objectContaining({
+					path: "API/Endpoints",
+					note: "add the auth section",
+					task: "PACA-88",
+					client: "claude-code/s1",
+				}),
+			);
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("write_doc sends no note fields when none are given", async () => {
+		vi.stubEnv("PACA_CLIENT", "");
+		try {
+			const putByPath = vi.fn().mockResolvedValue({
+				status: "written",
+				doc: DOC,
+				created: true,
+				changed: true,
+			});
+			await handleFilesystemDocTool(
+				"write_doc",
+				{ projectId: "p1", path: "Endpoints", content: "x" },
+				makeApiClient(),
+				makeDocClient({ byPath: { putByPath } }),
+			);
+			const input = putByPath.mock.calls[0][1];
+			expect(input).not.toHaveProperty("note");
+			expect(input).not.toHaveProperty("task");
+			expect(input).not.toHaveProperty("client");
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("read_doc resolves a nested path in one request", async () => {
+		const apiClient = makeApiClient();
+		const docClient = makeDocClient({
+			byPath: {
+				getByPath: vi
+					.fn()
+					.mockResolvedValue({ status: "found", doc: DOC, etag: '"h-m"' }),
+			},
+		});
+		const result = await handleFilesystemDocTool(
+			"read_doc",
+			{ projectId: "p1", path: "Architecture/API/Endpoints" },
+			apiClient,
+			docClient,
+		);
+		expect(result.isError).toBeUndefined();
+		expect(result.content[0].text).toContain("📄 Endpoints");
+		expect(docClient.getByPath).toHaveBeenCalledWith(
+			"p1",
+			"Architecture/API/Endpoints",
+		);
+		expect(docClient.listFolders).not.toHaveBeenCalled();
+		expect(apiClient.listDocuments).not.toHaveBeenCalled();
+		expect(apiClient.getDocument).not.toHaveBeenCalled();
+	});
+
+	it("read_doc reports a missing document and a folder", async () => {
+		const missing = makeDocClient({
+			byPath: { getByPath: vi.fn().mockResolvedValue({ status: "not_found" }) },
+		});
+		const r1 = await handleFilesystemDocTool(
+			"read_doc",
+			{ projectId: "p1", path: "Nope" },
+			makeApiClient(),
+			missing,
+		);
+		expect(r1.isError).toBe(true);
+		expect(r1.content[0].text).toContain("Not found");
+
+		const folder = makeDocClient({
+			byPath: { getByPath: vi.fn().mockResolvedValue({ status: "folder" }) },
+		});
+		const r2 = await handleFilesystemDocTool(
+			"read_doc",
+			{ projectId: "p1", path: "Architecture" },
+			makeApiClient(),
+			folder,
+		);
+		expect(r2.isError).toBe(true);
+		expect(r2.content[0].text).toContain("is a folder");
+		expect(folder.listFolders).not.toHaveBeenCalled();
+	});
+
+	it("write_doc creates, updates or leaves a document in one request", async () => {
+		const putByPath = vi
+			.fn()
+			.mockResolvedValueOnce({
+				status: "written",
+				doc: DOC,
+				created: true,
+				changed: true,
+			})
+			.mockResolvedValueOnce({
+				status: "written",
+				doc: DOC,
+				created: false,
+				changed: true,
+			})
+			.mockResolvedValueOnce({
+				status: "written",
+				doc: DOC,
+				created: false,
+				changed: false,
+			});
+		const apiClient = makeApiClient();
+		const docClient = makeDocClient({ byPath: { putByPath } });
+		const args = { projectId: "p1", path: "New/Folder/Doc", content: "# Hi" };
+
+		const texts: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			const r = await handleFilesystemDocTool(
+				"write_doc",
+				args,
+				apiClient,
+				docClient,
+			);
+			texts.push(r.content[0].text);
+		}
+		expect(texts).toEqual([
+			"Created document: New/Folder/Doc",
+			"Updated document: New/Folder/Doc",
+			"Unchanged document: New/Folder/Doc",
+		]);
+		expect(putByPath.mock.calls[0][1]).toEqual({
+			path: "New/Folder/Doc",
+			content: [
+				{ type: "paragraph", content: [{ type: "text", text: "# Hi" }] },
+			],
+		});
+		expect(docClient.createFolder).not.toHaveBeenCalled();
+		expect(docClient.listFolders).not.toHaveBeenCalled();
+		expect(apiClient.createDocument).not.toHaveBeenCalled();
+		expect(apiClient.updateDocument).not.toHaveBeenCalled();
+	});
+
+	it("write_doc falls back to the folder walk on an older server", async () => {
+		const apiClient = makeApiClient();
+		const docClient = makeDocClient(); // putByPath answers unsupported
+		const r = await handleFilesystemDocTool(
+			"write_doc",
+			{ projectId: "p1", path: "Architecture/Overview", content: "x" },
+			apiClient,
+			docClient,
+		);
+		expect(r.content[0].text).toBe("Updated document: Architecture/Overview");
+		expect(docClient.putByPath).toHaveBeenCalledTimes(1);
+		expect(apiClient.updateDocument).toHaveBeenCalledWith("p1", "d2", {
+			content: "x",
+		});
+	});
+
+	it("delete_doc deletes a document found by path, and walks for a folder", async () => {
+		const apiClient = makeApiClient();
+		const docClient = makeDocClient({
+			byPath: {
+				getByPath: vi.fn().mockResolvedValue({ status: "found", doc: DOC }),
+			},
+		});
+		const r = await handleFilesystemDocTool(
+			"delete_doc",
+			{ projectId: "p1", path: "Architecture/API/Endpoints" },
+			apiClient,
+			docClient,
+		);
+		expect(r.content[0].text).toBe(
+			"Deleted document: Architecture/API/Endpoints",
+		);
+		expect(apiClient.deleteDocument).toHaveBeenCalledWith("p1", "d7");
+		expect(docClient.listFolders).not.toHaveBeenCalled();
+
+		const folderClient = makeDocClient({
+			byPath: { getByPath: vi.fn().mockResolvedValue({ status: "folder" }) },
+		});
+		const r2 = await handleFilesystemDocTool(
+			"delete_doc",
+			{ projectId: "p1", path: "Architecture" },
+			makeApiClient(),
+			folderClient,
+		);
+		expect(r2.content[0].text).toBe("Deleted folder: Architecture");
+		expect(folderClient.deleteFolder).toHaveBeenCalledWith("p1", "f1");
+	});
+
+	it("move_doc finds the source by path and keeps creating the destination folders", async () => {
+		const apiClient = makeApiClient();
+		const docClient = makeDocClient({
+			byPath: {
+				getByPath: vi.fn().mockResolvedValue({ status: "found", doc: DOC }),
+			},
+		});
+		const r = await handleFilesystemDocTool(
+			"move_doc",
+			{
+				projectId: "p1",
+				sourcePath: "Architecture/API/Endpoints",
+				destPath: "Elsewhere/Renamed",
+			},
+			apiClient,
+			docClient,
+		);
+		expect(r.content[0].text).toBe(
+			"Moved document: Architecture/API/Endpoints → Elsewhere/Renamed",
+		);
+		expect(docClient.createFolder).toHaveBeenCalledWith("p1", {
+			name: "Elsewhere",
+			parent_id: undefined,
+		});
+		expect(apiClient.updateDocument).toHaveBeenCalledWith("p1", "d7", {
+			title: "Renamed",
+			folder_id: "fnew",
+		});
 	});
 });

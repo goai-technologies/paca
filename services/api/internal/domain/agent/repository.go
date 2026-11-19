@@ -248,8 +248,8 @@ type ChatSessionRepository interface {
 	CreateChatSession(ctx context.Context, s *AgentChatSession) error
 	UpdateChatSession(ctx context.Context, s *AgentChatSession) error
 	// ListGlobalChatSessions is ListChatSessions' sibling for global chat
-	// sessions, keyed by actor_user_id instead of member_id.
-	ListGlobalChatSessions(ctx context.Context, agentID, actorUserID uuid.UUID) ([]*AgentChatSession, error)
+	// sessions, keyed by actor_account_id instead of member_id.
+	ListGlobalChatSessions(ctx context.Context, agentID, actorAccountID uuid.UUID) ([]*AgentChatSession, error)
 }
 
 // ListConversationsFilter carries optional filters for listing conversations.
@@ -261,11 +261,11 @@ type ListConversationsFilter struct {
 	// conversations" endpoint. Mutually exclusive with ProjectID; callers
 	// should set at most one.
 	GlobalOnly bool
-	// ActorUserID, when set, restricts the listing to conversations with
-	// this actor_user_id — used by ListGlobalConversations to scope the
+	// ActorAccountID, when set, restricts the listing to conversations with
+	// this actor_account_id — used by ListGlobalConversations to scope the
 	// "my global conversations" endpoint to the caller only, since global
 	// chat has no project-team visibility to share it with.
-	ActorUserID *uuid.UUID
+	ActorAccountID *uuid.UUID
 	// ViewerMemberID, when set, is the caller's project_members.id. It makes
 	// the listing include owner-private conversations only when the caller is
 	// that conversation's chat-session owner (audience is enforced in SQL so

@@ -36,7 +36,8 @@
 			"changeRoleAction": "Changer le rôle",
 			"deleteAction": "Supprimer l'utilisateur",
 			"pwdResetHint": "Cet utilisateur doit définir un nouveau mot de passe à sa prochaine connexion",
-			"columnActions": "Actions"
+			"columnActions": "Actions",
+			"securityAction": "Sécurité"
 		},
 		"formDialog": {
 			"createdTitle": "Utilisateur créé",
@@ -110,6 +111,7 @@
 			"errors": {
 				"userNotFound": "Cet utilisateur n'existe plus.",
 				"forbidden": "Vous n'avez pas la permission de réinitialiser le mot de passe de cet utilisateur.",
+				"passwordLoginDisabled": "La connexion par mot de passe est désactivée (connexion SSO uniquement) : le mot de passe de cet utilisateur ne peut donc pas être réinitialisé. Il se connecte avec l'authentification unique.",
 				"internalError": "Une erreur s'est produite. Veuillez réessayer.",
 				"generic": "Une erreur s'est produite."
 			}
@@ -142,6 +144,24 @@
 			"title": "Aucun utilisateur ne correspond",
 			"description": "Essayez une autre recherche ou un autre filtre de rôle.",
 			"clear": "Effacer les filtres"
+		},
+		"security": {
+			"title": "Protections de connexion de {{name}}",
+			"description": "Contrôlez d'où cette personne peut se connecter et réinitialisez sa validation en deux étapes.",
+			"ip": {
+				"label": "Adresses IP autorisées",
+				"hint": "Une adresse IP ou plage CIDR par ligne. Laissez vide pour autoriser toute adresse. S'applique à la connexion par mot de passe."
+			},
+			"mfa": {
+				"title": "Validation en deux étapes",
+				"description": "Si la personne a perdu son appareil et ses codes de récupération, supprimez-la pour qu'elle puisse la reconfigurer.",
+				"reset": "Réinitialiser la validation en deux étapes",
+				"confirmReset": "Oui, réinitialiser",
+				"resetDone": "La validation en deux étapes a été réinitialisée. La personne pourra la reconfigurer à sa prochaine connexion.",
+				"resetFailed": "Impossible de réinitialiser la validation en deux étapes."
+			},
+			"cancel": "Annuler",
+			"save": "Enregistrer"
 		}
 	},
 	"globalRoles": {
@@ -301,6 +321,14 @@
 			"serviceAccountsWrite": {
 				"label": "Gérer les comptes de service",
 				"description": "Créer, modifier et supprimer des comptes de service, et émettre ou révoquer leurs clés d'API"
+			},
+			"gitIdentitiesManage": {
+				"label": "Gérer les connexions Git de l'espace de travail",
+				"description": "Ajouter et supprimer les applications GitHub et les jetons d'accès que tous les projets de l'espace de travail peuvent utiliser"
+			},
+			"settingsSecurityWrite": {
+				"label": "Gérer la sécurité de connexion",
+				"description": "Définit qui doit utiliser la validation en deux étapes et quelles adresses IP peuvent se connecter, et réinitialise la validation en deux étapes d'une autre personne. Retirer cette protection d'un compte revient à en prendre le contrôle : traitez-le comme un accès administrateur complet."
 			}
 		},
 		"permissionGroups": {
@@ -310,7 +338,8 @@
 			"projects": "Projets",
 			"plugins": "Plugins",
 			"settings": "Paramètres",
-			"serviceAccounts": "Comptes de service"
+			"serviceAccounts": "Comptes de service",
+			"git": "Git"
 		},
 		"defaultDialog": {
 			"title": "Définir le rôle par défaut",
@@ -418,7 +447,9 @@
 			"saved": "Enregistré",
 			"errors": {
 				"updateFailed": "Échec de l’enregistrement. Veuillez réessayer."
-			}
+			},
+			"feedbackLabel": "Commentaires",
+			"feedbackDescription": "Affiche « Envoyer des commentaires » dans le menu utilisateur et « Signaler ce problème » sur les écrans d’erreur, qui ouvrent un ticket GitHub prérempli. À désactiver pour les instances privées ou auto-hébergées."
 		},
 		"sso": {
 			"title": "Authentification unique (SSO)",
@@ -453,6 +484,12 @@
 				"scopesHint": "Séparées par des espaces. « openid » est toujours inclus.",
 				"allowedDomains": "Domaines e-mail autorisés",
 				"allowedDomainsHint": "Séparés par des virgules. Laissez vide pour autoriser tous les domaines. Seuls les e-mails vérifiés sont acceptés.",
+				"groupPolicy": "Exiger un groupe ou un rôle",
+				"groupPolicyHint": "Seules les identités dont le jeton d'ID contient un groupe ou un rôle autorisé peuvent se connecter, y compris les utilisateurs existants.",
+				"groupClaim": "Claim de groupes",
+				"groupClaimHint": "Claim du jeton d'ID contenant les groupes ou rôles, p. ex. groups, roles ou realm_access.roles. La connexion est refusée s'il est absent ou mal formé.",
+				"allowedGroups": "Groupes autorisés",
+				"allowedGroupsHint": "Séparés par des virgules. Il faut en avoir au moins un. Utilisez des valeurs stables, comme les ID d'objet de groupe Entra. La correspondance est exacte. Les jetons Microsoft Entra avec dépassement de groupes sont refusés.",
 				"enabled": "Activé",
 				"enabledHint": "Afficher ce fournisseur sur la page de connexion.",
 				"autoProvision": "Créer les comptes automatiquement",
@@ -473,6 +510,45 @@
 				"saveFailed": "Échec de l'enregistrement du fournisseur. Veuillez réessayer.",
 				"loadFailed": "Impossible de charger les fournisseurs SSO.",
 				"deleteFailed": "Échec de la suppression du fournisseur. Veuillez réessayer."
+			}
+		},
+		"nav": {
+			"workspace": "Espace de travail",
+			"signIn": "Connexion",
+			"branding": "Identité visuelle",
+			"sso": "Authentification unique",
+			"security": "Sécurité de connexion"
+		},
+		"security": {
+			"roles": {
+				"title": "Rôles protégés",
+				"description": "Les règles ci-dessous s'appliquent aux personnes ayant l'un des rôles choisis. Activez Tous les rôles pour couvrir tout le monde, y compris les rôles créés plus tard.",
+				"all": "Tous les rôles"
+			},
+			"mfa": {
+				"title": "Exiger la validation en deux étapes",
+				"description": "Les personnes ayant un rôle protégé doivent configurer une application d'authentification avant de pouvoir se connecter par mot de passe. Les connexions SSO dépendent des paramètres multifacteur de votre fournisseur d'identité.",
+				"rolloutNote": "Celles qui ne l'ont pas encore configurée seront guidées lors de leur prochaine connexion."
+			},
+			"ip": {
+				"title": "Adresses IP autorisées",
+				"description": "Limite la connexion par mot de passe des rôles protégés à ces adresses. Laissez vide pour autoriser toute adresse.",
+				"hint": "Une adresse IP ou plage CIDR par ligne, par exemple 203.0.113.0/24. IPv4 et IPv6 sont pris en charge.",
+				"lockoutWarning": "Vérifiez que votre propre adresse est incluse, sinon vous risquez de perdre l'accès. La connexion SSO n'est pas concernée."
+			},
+			"ssoOnly": {
+				"title": "Connexion SSO uniquement",
+				"description": "Désactive la connexion par mot de passe pour tous les comptes, quel que soit leur rôle, sauf l'administrateur par défaut (le compte créé à partir de ADMIN_USERNAME). Tous les autres se connectent avec l'authentification unique, et leur mot de passe ne peut être ni défini, ni réinitialisé, ni modifié.",
+				"noProvider": "Activez d'abord un fournisseur SSO.",
+				"adminNote": "La page de connexion n'affiche que les fournisseurs SSO. L'administrateur par défaut se connecte via le lien « Se connecter en tant qu'administrateur » (ou /?admin=1), par exemple pour désactiver ce réglage si le fournisseur d'identité est indisponible."
+			},
+			"noRoles": "Aucun rôle n'est encore protégé : ces règles ne s'appliquent donc à personne.",
+			"errors": {
+				"invalidCidr": "L'une des entrées n'est pas une adresse IP ou une plage CIDR valide.",
+				"selfLockout": "Votre propre adresse IP doit figurer dans la liste, sinon vous vous verrouilleriez. Ajoutez-la et enregistrez à nouveau.",
+				"ssoOnlyNoProvider": "La connexion SSO uniquement nécessite au moins un fournisseur SSO activé.",
+				"saveFailed": "Échec de l'enregistrement. Veuillez réessayer.",
+				"loadFailed": "Impossible de charger les paramètres de sécurité de connexion."
 			}
 		}
 	},
@@ -628,5 +704,80 @@
 				"deleteHint": "Ses clés d'API cessent de fonctionner et ses rôles et appartenances aux projets sont retirés."
 			}
 		}
+	},
+	"git": {
+		"cancel": "Annuler",
+		"setup": {
+			"dialogTitle": "Configurer {{provider}} sur {{host}}",
+			"dialogDescription": "Paca va créer sur {{host}} une identité de bot que les agents utilisent pour cloner, pousser et travailler sur {{changeRequests}}. Vous serez redirigé vers {{host}} pour l'approuver, puis ramené ici.",
+			"name": "Nom de l'app (facultatif)",
+			"nameHelp": "Nom sous lequel le bot apparaît sur la plateforme. Laissez vide pour utiliser la valeur par défaut.",
+			"org": "Organisation (facultatif)",
+			"orgHelp": "Laissez vide pour la créer sous votre propre compte.",
+			"start": "Continuer vers {{host}}",
+			"submitToken": "Enregistrer",
+			"public": "Autoriser l'installation sur d'autres comptes (app publique)",
+			"publicHelp": "Nécessaire lorsque les projets utilisent des dépôts de différents utilisateurs ou organisations. Une app privée ne peut être installée que sur le compte qui la possède.",
+			"next": "Suivant",
+			"tokenDescription": "Paca se connecte à {{host}} avec un jeton d'accès que vous y créez. À l'étape suivante, vous le collez.",
+			"host": "Hôte",
+			"hostHelp": "L'adresse de votre instance, par exemple gitlab.example.com.",
+			"kind": {
+				"label": "Se connecter avec",
+				"app": {
+					"title": "Application",
+					"help": "Paca crée une application sur {{provider}} pour vous. L'accès est limité aux dépôts sur lesquels vous l'installez."
+				},
+				"bot_user": {
+					"title": "Jeton d'accès",
+					"help": "Collez un jeton d'accès de projet ou de groupe. Paca agit comme son utilisateur bot."
+				},
+				"token": {
+					"title": "Jeton d'accès",
+					"help": "Collez un jeton d'accès personnel. Il agit comme son propriétaire : utilisez un compte machine dédié."
+				}
+			},
+			"scope": {
+				"label": "Disponible pour",
+				"project": {
+					"title": "Ce projet uniquement",
+					"help": "Seul ce projet peut lier des dépôts via cette connexion."
+				},
+				"workspace": {
+					"title": "Tous les projets",
+					"help": "Tous les projets de l'espace de travail peuvent lier des dépôts via cette connexion.",
+					"noPermission": "Nécessite l'autorisation d'espace de travail pour gérer les connexions Git."
+				},
+				"none": "Vous n'avez pas l'autorisation d'ajouter des connexions ici."
+			}
+		},
+		"delete": {
+			"button": "Retirer",
+			"title": "Supprimer cette connexion ?",
+			"description": "Les dépôts liés via {{name}} sur {{host}} cessent de fonctionner tant que vous ne les reconnectez pas via une autre connexion. L'application ou le jeton n'est pas supprimé sur la plateforme ; supprimez-le là-bas si vous n'en avez plus besoin.",
+			"confirm": "Supprimer la connexion",
+			"usage": {
+				"title": "Dépôts qui l'utilisent ({{count}}) :",
+				"others": "Plus {{count}} dans d'autres projets.",
+				"consequence": "Ils restent liés mais n'ont plus d'identifiants : les agents ne peuvent pas les utiliser. Reconnectez ensuite chacun à une autre connexion."
+			}
+		},
+		"callback": {
+			"working": "Finalisation de la configuration…",
+			"workingHint": "Veuillez garder cette page ouverte.",
+			"failedTitle": "La configuration n'a pas pu être terminée",
+			"back": "Retour aux paramètres Git"
+		},
+		"errors": {
+			"generic": "Une erreur s'est produite. Veuillez réessayer.",
+			"setupInvalid": "Ce lien de configuration est invalide, expiré ou déjà utilisé. Relancez la configuration.",
+			"identityExists": "Une identité existe déjà ici. Retirez-la d'abord pour en configurer une nouvelle.",
+			"publicUrlRequired": "L'URL publique de l'instance n'est pas configurée (PUBLIC_URL) ; la plateforme ne peut donc pas l'atteindre.",
+			"providerUnavailable": "Le plugin du fournisseur Git est indisponible. Vérifiez qu'il est installé et activé.",
+			"providerRejected": "La plateforme a refusé la demande. Vérifiez les autorisations du compte utilisé.",
+			"notFound": "Introuvable."
+		},
+		"copy": "Copier",
+		"copied": "Copié"
 	}
 }

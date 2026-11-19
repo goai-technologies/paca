@@ -22,6 +22,14 @@ import (
 	"github.com/Paca-AI/api/internal/platform/messaging"
 )
 
+// PasswordPolicy decides whether an account may have a working password.
+// *mfasvc.Service implements it (SSO-only mode).
+type PasswordPolicy interface {
+	// CheckPasswordAllowed returns an error when u may not sign in with, and
+	// so may not be given, a password.
+	CheckPasswordAllowed(ctx context.Context, u *userdom.User) error
+}
+
 // GlobalPermissionReader resolves global permissions for a user.
 type GlobalPermissionReader interface {
 	ListGlobalPermissions(ctx context.Context, userID uuid.UUID) ([]iam.Action, error)
@@ -34,6 +42,11 @@ type Service struct {
 	avatarSvc              attachmentdom.AvatarService
 	tokenRepo              userdom.PasswordSetTokenRepository
 	publisher              *messaging.Publisher
+	// grants is told when an account's access is revoked (see accessRevoked).
+	// Nil is valid: nothing is announced.
+	grants events.PolicyInvalidator
+	// passwords vets every password set, reset and change. Nil allows them all.
+	passwords PasswordPolicy
 }
 
 // ErrAvatarServiceRequired indicates a missing AvatarService dependency when
@@ -80,6 +93,37 @@ func (s *Service) WithPasswordSetTokenRepo(repo userdom.PasswordSetTokenReposito
 func (s *Service) WithEventPublishing(publisher *messaging.Publisher) *Service {
 	s.publisher = publisher
 	return s
+}
+
+// WithGrantsNotifier wires in the policy cache invalidation called after an
+// account loses its access (a deleted user). *iam.Authorizer, wrapped by
+// events.NotifyIAMChanges, implements it.
+func (s *Service) WithGrantsNotifier(inv events.PolicyInvalidator) *Service {
+	s.grants = inv
+	return s
+}
+
+// WithPasswordPolicy makes password set, reset and change refuse the accounts
+// p keeps off passwords, so none of them opens a path p has closed.
+func (s *Service) WithPasswordPolicy(p PasswordPolicy) *Service {
+	s.passwords = p
+	return s
+}
+
+// checkPasswordAllowed applies the password policy, if any, to u.
+func (s *Service) checkPasswordAllowed(ctx context.Context, u *userdom.User) error {
+	if s.passwords == nil {
+		return nil
+	}
+	return s.passwords.CheckPasswordAllowed(ctx, u)
+}
+
+// accessRevoked tells the policy cache that an account's grants are gone.
+// Which roles it held does not matter to the subscribers, so no ids are passed.
+func (s *Service) accessRevoked() {
+	if s.grants != nil {
+		s.grants.Invalidate()
+	}
 }
 
 // GetByID returns a user by primary key.
@@ -310,6 +354,9 @@ func (s *Service) ResetPassword(ctx context.Context, id uuid.UUID, newPassword s
 	if err != nil {
 		return err
 	}
+	if err := s.checkPasswordAllowed(ctx, u); err != nil {
+		return err
+	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
@@ -333,6 +380,9 @@ func (s *Service) ResetPassword(ctx context.Context, id uuid.UUID, newPassword s
 func (s *Service) ChangeMyPassword(ctx context.Context, id uuid.UUID, currentPassword, newPassword string) error {
 	u, err := s.repo.FindByID(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := s.checkPasswordAllowed(ctx, u); err != nil {
 		return err
 	}
 
@@ -419,6 +469,11 @@ func (s *Service) SetPasswordWithToken(ctx context.Context, rawToken, newPasswor
 		// probe an account's password-change state.
 		return userdom.ErrPasswordSetTokenInvalid
 	}
+	// Before the token is claimed, so a link refused while SSO-only mode is
+	// on still works if the mode is turned off before it expires.
+	if err := s.checkPasswordAllowed(ctx, u); err != nil {
+		return err
+	}
 
 	// Claim the token atomically before writing the password: this is what
 	// makes redemption single-use under concurrent requests. If two
@@ -455,7 +510,13 @@ func hashPasswordSetToken(raw string) string {
 
 // Delete soft-deletes a user.
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	// A deleted account has no grants (the IAM store skips it), so open
+	// realtime sockets of that user must be re-checked now, not at token expiry.
+	s.accessRevoked()
+	return nil
 }
 
 // InitiateAvatarUpload starts an avatar upload for the user's own profile picture.

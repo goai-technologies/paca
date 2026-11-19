@@ -19,7 +19,7 @@ type Repository interface {
 	// newest first. cursorAfter is the opaque cursor from EncodeCursor (nil
 	// for the first page); hasMore reports whether more keys follow and total
 	// is the account's overall active key count.
-	ListByAccountID(ctx context.Context, accountID uuid.UUID, cursorAfter *string, limit int) (keys []*APIKey, hasMore bool, total int, err error)
+	ListByAccountID(ctx context.Context, accountID uuid.UUID, filter KeyFilter, cursorAfter *string, limit int) (keys []*APIKey, hasMore bool, total int, err error)
 	// Create persists a new API key.
 	Create(ctx context.Context, key *APIKey, keyHash string) error
 	// Revoke soft-deletes an API key by setting revoked_at.

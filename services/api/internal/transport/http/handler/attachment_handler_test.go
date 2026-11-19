@@ -38,8 +38,11 @@ func (f *fakeAttachmentSvc) CompleteUpload(_ context.Context, _ uuid.UUID, _ att
 func (f *fakeAttachmentSvc) GetDownloadURL(_ context.Context, _, _, _ uuid.UUID, _ time.Duration, _ bool) (string, error) {
 	return "https://example.com/download", nil
 }
-func (f *fakeAttachmentSvc) ListTaskAttachments(_ context.Context, _, _ uuid.UUID) ([]*attachmentdom.TaskAttachment, error) {
-	return nil, nil
+func (f *fakeAttachmentSvc) GetTaskAttachment(_ context.Context, _, _, _ uuid.UUID) (*attachmentdom.TaskAttachment, error) {
+	return nil, attachmentdom.ErrAttachmentNotFound
+}
+func (f *fakeAttachmentSvc) ListTaskAttachments(_ context.Context, _, _ uuid.UUID, _ *string, _ int) ([]*attachmentdom.TaskAttachment, bool, int, error) {
+	return nil, false, 0, nil
 }
 func (f *fakeAttachmentSvc) DeleteTaskAttachment(_ context.Context, _, _, _ uuid.UUID) error {
 	return nil

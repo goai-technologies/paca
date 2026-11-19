@@ -42,12 +42,16 @@ const role = {
 
 function makeClient(overrides: Record<string, any> = {}) {
 	return {
-		listProjectMembers: vi.fn().mockResolvedValue([member]),
+		listProjectMembers: vi
+			.fn()
+			.mockResolvedValue({ items: [member], nextCursor: null }),
 		addProjectMember: vi.fn().mockResolvedValue(member),
 		getMyProjectPermissions: vi.fn().mockResolvedValue(["tasks:read"]),
 		updateProjectMemberRole: vi.fn().mockResolvedValue([role]),
 		removeProjectMember: vi.fn().mockResolvedValue(undefined),
-		listProjectRoles: vi.fn().mockResolvedValue([role]),
+		listProjectRoles: vi
+			.fn()
+			.mockResolvedValue({ items: [role], nextCursor: null }),
 		createProjectRole: vi.fn().mockResolvedValue(role),
 		getProjectRole: vi.fn().mockResolvedValue(role),
 		updateProjectRole: vi.fn().mockResolvedValue(role),
@@ -84,7 +88,26 @@ describe("handleProjectMemberTool – list_project_members", () => {
 			{ projectId: "p1" },
 			client,
 		);
-		expect(client.listProjectMembers).toHaveBeenCalledWith("p1");
+		expect(client.listProjectMembers).toHaveBeenCalledWith("p1", {
+			cursor: undefined,
+			pageSize: undefined,
+		});
+	});
+
+	it("tells the agent how to fetch the next page", async () => {
+		const client = makeClient({
+			listProjectMembers: vi
+				.fn()
+				.mockResolvedValue({ items: [member], nextCursor: "c2", total: 80 }),
+		});
+		const result = await handleProjectMemberTool(
+			"list_project_members",
+			{ projectId: "p1" },
+			client,
+		);
+		const text = result.content[0].text;
+		expect(text).toContain("Showing 1 of 80");
+		expect(text).toContain('call list_project_members again with cursor="c2"');
 	});
 
 	it("includes 'Project Members:' header and member username in response", async () => {
@@ -232,7 +255,10 @@ describe("handleProjectMemberTool – list_project_roles", () => {
 			{ projectId: "p1" },
 			client,
 		);
-		expect(client.listProjectRoles).toHaveBeenCalledWith("p1");
+		expect(client.listProjectRoles).toHaveBeenCalledWith("p1", {
+			cursor: undefined,
+			pageSize: undefined,
+		});
 	});
 
 	it("includes 'Project Roles:' header and role name in response", async () => {

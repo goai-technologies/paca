@@ -5,7 +5,9 @@ import { Separator } from "@/components/ui/separator";
 
 interface GlobalRolesStatsProps {
 	rolesCount: number;
-	totalGranted: number;
+	/** Permission grants across every role; undefined while only some roles
+	 *  are loaded (the sum would be misleading), which hides the figure. */
+	totalGranted?: number;
 }
 
 export function GlobalRolesStats({
@@ -26,16 +28,20 @@ export function GlobalRolesStats({
 					</span>
 				</span>
 			</div>
-			<Separator orientation="vertical" className="h-4" />
-			<div className="flex items-center gap-2">
-				<Key className="size-4 text-muted-foreground" />
-				<span className="text-sm">
-					<span className="font-semibold tabular-nums">{totalGranted}</span>
-					<span className="ml-1.5 text-muted-foreground">
-						{t("globalRoles.stats.permissionGrants")}
-					</span>
-				</span>
-			</div>
+			{totalGranted !== undefined ? (
+				<>
+					<Separator orientation="vertical" className="h-4" />
+					<div className="flex items-center gap-2">
+						<Key className="size-4 text-muted-foreground" />
+						<span className="text-sm">
+							<span className="font-semibold tabular-nums">{totalGranted}</span>
+							<span className="ml-1.5 text-muted-foreground">
+								{t("globalRoles.stats.permissionGrants")}
+							</span>
+						</span>
+					</div>
+				</>
+			) : null}
 		</div>
 	);
 }

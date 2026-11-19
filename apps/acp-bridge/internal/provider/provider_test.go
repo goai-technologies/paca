@@ -69,6 +69,19 @@ func TestResolveUnknownProviderFallsBackToExplicitCommand(t *testing.T) {
 	}
 }
 
+func TestResolveOpenCodeDefaultCommandWinsOverExplicit(t *testing.T) {
+	want := []string{"opencode", "acp"}
+	for _, explicit := range [][]string{nil, {"should-be-ignored"}} {
+		cmd, err := ResolveCommand("opencode", explicit)
+		if err != nil {
+			t.Fatalf("ResolveCommand: %v", err)
+		}
+		if !reflect.DeepEqual(cmd, want) {
+			t.Errorf("ResolveCommand(opencode, %v) = %v, want %v", explicit, cmd, want)
+		}
+	}
+}
+
 func TestResolveUnknownProviderWithoutExplicitCommandErrors(t *testing.T) {
 	if _, err := ResolveCommand("not-a-real-provider", nil); err == nil {
 		t.Fatal("expected an error for an unknown provider with no explicit command")
@@ -81,6 +94,7 @@ func TestPermissionModeKnownAndUnknownProviders(t *testing.T) {
 		"codex":       "agent-full-access",
 		"gemini-cli":  "default",
 		"goose":       "",
+		"opencode":    "",
 		"custom":      "",
 		"unknown":     "",
 	}
@@ -88,5 +102,31 @@ func TestPermissionModeKnownAndUnknownProviders(t *testing.T) {
 		if got := PermissionMode(provider); got != want {
 			t.Errorf("PermissionMode(%q) = %q, want %q", provider, got, want)
 		}
+	}
+}
+
+func TestModelEnv(t *testing.T) {
+	if got := ModelEnv("claude-code", "my-model"); len(got) != 1 || got[0] != "ANTHROPIC_MODEL=my-model" {
+		t.Errorf("claude-code ModelEnv = %v", got)
+	}
+	if got := ModelEnv("claude-code", ""); got != nil {
+		t.Errorf("empty model must add no env, got %v", got)
+	}
+	if got := ModelEnv("codex", "gpt-5"); got != nil {
+		t.Errorf("codex has no env mechanism, got %v", got)
+	}
+}
+
+// The claude-code default must launch an adapter new enough to support the
+// models Paca offers. claude-agent-acp@0.44.0 bundles Claude Code 2.1.170,
+// which rejects claude-opus-5-5 with "version 2.1.280 or newer is required".
+func TestClaudeCodeDefaultUsesCurrentAdapter(t *testing.T) {
+	cmd, err := ResolveCommand("claude-code", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp@0.107.0"}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("command = %v, want %v", cmd, want)
 	}
 }

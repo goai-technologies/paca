@@ -34,6 +34,7 @@ type Triggers interface {
 	TriggerTaskAssigned(ctx context.Context, projectID, agentID, taskID uuid.UUID, triggeredByMemberID *uuid.UUID, note string) (*agentdom.AgentConversation, error)
 	TriggerDirectMessage(ctx context.Context, projectID, agentID uuid.UUID, triggeredByMemberID *uuid.UUID, message string) (*agentdom.AgentConversation, error)
 	TriggerCommentMention(ctx context.Context, projectID, agentID, taskID, commentID, triggeredByMemberID uuid.UUID, message string) (*agentdom.AgentConversation, error)
+	TriggerDocCommentMention(ctx context.Context, projectID, agentID, documentID, commentID, triggeredByMemberID uuid.UUID, message string) (*agentdom.AgentConversation, error)
 	TriggerDescriptionWrite(ctx context.Context, projectID, agentID, taskID, triggeredByMemberID uuid.UUID) (*agentdom.AgentConversation, error)
 }
 
@@ -80,10 +81,11 @@ func (g *Gate) allow(ctx context.Context, projectID, agentID uuid.UUID, memberID
 	if member.ProjectID != projectID {
 		return errForbidden
 	}
-	principal := iam.User(member.UserID.String())
-	if member.MemberType == "agent" && member.AgentID != nil {
-		principal = iam.Agent(member.AgentID.String())
+	if member.AccountID == uuid.Nil {
+		// No account to judge: fail closed rather than check a nil-UUID principal.
+		return errForbidden
 	}
+	principal := principalOf(member)
 	project := iam.ProjectResource(projectID.String())
 	ok, err := iam.AllowedAll(ctx, g.authz, principal, project+"/agent/"+agentID.String(), iam.ActionConversationsWrite)
 	if err != nil {
@@ -107,6 +109,20 @@ func (g *Gate) allow(ctx context.Context, projectID, agentID uuid.UUID, memberID
 		return errForbidden
 	}
 	return nil
+}
+
+// principalOf is the member's account as an IAM principal. Grants are keyed
+// by account id for every kind (user, agent, service account); member.UserID
+// is only set for human members, so it must not be used here.
+func principalOf(m *projectdom.ProjectMember) iam.Principal {
+	kind := iam.PrincipalUser
+	switch m.MemberType {
+	case "agent":
+		kind = iam.PrincipalAgent
+	case "service_account":
+		kind = iam.PrincipalServiceAccount
+	}
+	return iam.Principal{Type: kind, ID: m.AccountID.String()}
 }
 
 func memberOrNil(id *uuid.UUID) uuid.UUID {
@@ -138,6 +154,14 @@ func (g *Gate) TriggerCommentMention(ctx context.Context, projectID, agentID, ta
 		return nil, err
 	}
 	return g.next.TriggerCommentMention(ctx, projectID, agentID, taskID, commentID, by, message)
+}
+
+// TriggerDocCommentMention implements Triggers.
+func (g *Gate) TriggerDocCommentMention(ctx context.Context, projectID, agentID, documentID, commentID, by uuid.UUID, message string) (*agentdom.AgentConversation, error) {
+	if err := g.allow(ctx, projectID, agentID, by); err != nil {
+		return nil, err
+	}
+	return g.next.TriggerDocCommentMention(ctx, projectID, agentID, documentID, commentID, by, message)
 }
 
 // TriggerDescriptionWrite implements Triggers.

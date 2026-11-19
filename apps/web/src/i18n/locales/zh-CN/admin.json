@@ -36,7 +36,8 @@
 			"changeRoleAction": "更改角色",
 			"deleteAction": "删除用户",
 			"pwdResetHint": "该用户必须在下次登录时设置新密码",
-			"columnActions": "操作"
+			"columnActions": "操作",
+			"securityAction": "安全"
 		},
 		"formDialog": {
 			"createdTitle": "用户已创建",
@@ -110,6 +111,7 @@
 			"errors": {
 				"userNotFound": "该用户已不存在。",
 				"forbidden": "您没有权限重置该用户的密码。",
+				"passwordLoginDisabled": "密码登录已关闭（仅限 SSO 登录），因此无法重置该用户的密码。该用户通过单点登录进行登录。",
 				"internalError": "出现错误，请重试。",
 				"generic": "出现错误。"
 			}
@@ -142,6 +144,24 @@
 			"title": "没有匹配的用户",
 			"description": "请尝试其他搜索词或角色筛选。",
 			"clear": "清除筛选"
+		},
+		"security": {
+			"title": "{{name}} 的登录保护",
+			"description": "控制此人可以从哪里登录，并清除其两步验证。",
+			"ip": {
+				"label": "允许的 IP 地址",
+				"hint": "每行一个 IP 地址或 CIDR 范围。留空则允许任何地址。适用于密码登录。"
+			},
+			"mfa": {
+				"title": "两步验证",
+				"description": "如果对方同时丢失了设备和恢复码，请清除它以便其重新设置。",
+				"reset": "重置两步验证",
+				"confirmReset": "是，重置",
+				"resetDone": "两步验证已重置。对方可在下次登录时重新设置。",
+				"resetFailed": "无法重置两步验证。"
+			},
+			"cancel": "取消",
+			"save": "保存"
 		}
 	},
 	"globalRoles": {
@@ -301,6 +321,14 @@
 			"serviceAccountsWrite": {
 				"label": "管理服务账号",
 				"description": "创建、编辑、删除服务账号，并签发或吊销其 API 密钥"
+			},
+			"gitIdentitiesManage": {
+				"label": "管理工作区 Git 连接",
+				"description": "添加和移除工作区内所有项目都可使用的 GitHub 应用和访问令牌"
+			},
+			"settingsSecurityWrite": {
+				"label": "管理登录安全",
+				"description": "设置谁必须使用两步验证、允许从哪些 IP 地址登录，并重置他人的两步验证。为账户移除这项保护等同于接管该账户，因此请将其视为完整的管理员权限。"
 			}
 		},
 		"permissionGroups": {
@@ -310,7 +338,8 @@
 			"projects": "项目",
 			"plugins": "插件",
 			"settings": "设置",
-			"serviceAccounts": "服务账号"
+			"serviceAccounts": "服务账号",
+			"git": "Git"
 		},
 		"defaultDialog": {
 			"title": "设置默认角色",
@@ -418,7 +447,9 @@
 			"saved": "已保存",
 			"errors": {
 				"updateFailed": "保存失败，请重试。"
-			}
+			},
+			"feedbackLabel": "反馈",
+			"feedbackDescription": "在用户菜单中显示“发送反馈”，并在错误页面显示“报告此问题”，二者都会打开预填好的 GitHub issue。私有或自托管实例请关闭。"
 		},
 		"sso": {
 			"title": "单点登录 (SSO)",
@@ -453,6 +484,12 @@
 				"scopesHint": "以空格分隔。始终包含 \"openid\"。",
 				"allowedDomains": "允许的邮箱域名",
 				"allowedDomainsHint": "以逗号分隔。留空则允许任何域名。仅接受已验证的邮箱。",
+				"groupPolicy": "要求群组或角色",
+				"groupPolicyHint": "只有 ID 令牌中包含允许的群组或角色的身份才能登录，已登录过的用户同样适用。",
+				"groupClaim": "群组声明",
+				"groupClaimHint": "ID 令牌中包含群组或角色的声明，例如 groups、roles 或 realm_access.roles。缺失或格式错误时将拒绝登录。",
+				"allowedGroups": "允许的群组",
+				"allowedGroupsHint": "以逗号分隔，用户至少需属于其中之一。请使用稳定的值，如 Entra 群组对象 ID。按完全匹配判断。出现群组超额的 Microsoft Entra 令牌将被拒绝。",
 				"enabled": "启用",
 				"enabledHint": "在登录页显示此提供商。",
 				"autoProvision": "自动创建账户",
@@ -473,6 +510,45 @@
 				"saveFailed": "保存提供商失败，请重试。",
 				"loadFailed": "加载 SSO 提供商失败。",
 				"deleteFailed": "删除提供商失败，请重试。"
+			}
+		},
+		"nav": {
+			"workspace": "工作区",
+			"signIn": "登录",
+			"branding": "品牌",
+			"sso": "单点登录",
+			"security": "登录安全"
+		},
+		"security": {
+			"roles": {
+				"title": "受保护的角色",
+				"description": "以下规则适用于拥有所选角色之一的人。开启“所有角色”可覆盖所有人，包括之后创建的角色。",
+				"all": "所有角色"
+			},
+			"mfa": {
+				"title": "要求两步验证",
+				"description": "拥有受保护角色的人必须先设置验证器应用，才能使用密码登录。SSO 登录则依赖身份提供商自身的多重身份验证设置。",
+				"rolloutNote": "尚未设置的人会在下次登录时被引导完成设置。"
+			},
+			"ip": {
+				"title": "允许的 IP 地址",
+				"description": "将受保护角色的密码登录限制在这些地址。留空则允许任何地址。",
+				"hint": "每行一个 IP 地址或 CIDR 范围，例如 203.0.113.0/24。支持 IPv4 和 IPv6。",
+				"lockoutWarning": "请确保包含你自己的地址，否则你可能无法登录。SSO 登录不受影响。"
+			},
+			"ssoOnly": {
+				"title": "仅限 SSO 登录",
+				"description": "为所有账户（无论角色）关闭密码登录，默认管理员（根据 ADMIN_USERNAME 创建的账户）除外。其他人都通过单点登录进行登录，且无法设置、重置或修改密码。",
+				"noProvider": "请先启用一个 SSO 提供方。",
+				"adminNote": "登录页面只显示 SSO 提供方。默认管理员通过“以管理员身份登录”链接（或 /?admin=1）登录，例如在身份提供方不可用时关闭此设置。"
+			},
+			"noRoles": "目前还没有受保护的角色，因此这些规则暂不适用于任何人。",
+			"errors": {
+				"invalidCidr": "其中一项不是有效的 IP 地址或 CIDR 范围。",
+				"selfLockout": "列表中必须包含您自己的 IP 地址，否则您会把自己锁在外面。请添加后再保存。",
+				"ssoOnlyNoProvider": "仅限 SSO 登录需要至少一个已启用的 SSO 提供方。",
+				"saveFailed": "保存失败，请重试。",
+				"loadFailed": "无法加载登录安全设置。"
 			}
 		}
 	},
@@ -628,5 +704,80 @@
 				"deleteHint": "其 API 密钥将失效，角色和项目成员身份将被移除。"
 			}
 		}
+	},
+	"git": {
+		"cancel": "取消",
+		"setup": {
+			"dialogTitle": "在 {{host}} 上设置 {{provider}}",
+			"dialogDescription": "Paca 将在 {{host}} 上创建一个机器人身份，供智能体用于克隆、推送以及处理{{changeRequests}}。你将被带到 {{host}} 进行批准，然后返回此处。",
+			"name": "应用名称（可选）",
+			"nameHelp": "机器人在平台上的显示名称。留空则使用默认值。",
+			"org": "组织（可选）",
+			"orgHelp": "留空则在你自己的账户下创建。",
+			"start": "继续前往 {{host}}",
+			"submitToken": "保存",
+			"public": "允许安装到其他账户（公开应用）",
+			"publicHelp": "当各项目使用不同用户或组织的仓库时需要开启。私有应用只能安装在拥有它的账户上。",
+			"next": "下一步",
+			"tokenDescription": "Paca 使用您在 {{host}} 上创建的访问令牌进行连接。下一步中粘贴该令牌。",
+			"host": "主机",
+			"hostHelp": "您的实例地址，例如 gitlab.example.com。",
+			"kind": {
+				"label": "连接方式",
+				"app": {
+					"title": "应用",
+					"help": "Paca 会在 {{provider}} 上为您创建应用。访问范围仅限于您安装该应用的仓库。"
+				},
+				"bot_user": {
+					"title": "访问令牌",
+					"help": "粘贴项目或群组访问令牌。Paca 将以其机器人用户的身份操作。"
+				},
+				"token": {
+					"title": "访问令牌",
+					"help": "粘贴个人访问令牌。它以其所有者的身份操作，因此请使用专用的机器账号。"
+				}
+			},
+			"scope": {
+				"label": "可用范围",
+				"project": {
+					"title": "仅此项目",
+					"help": "只有此项目可以通过它关联仓库。"
+				},
+				"workspace": {
+					"title": "所有项目",
+					"help": "工作区中的所有项目都可以通过它关联仓库。",
+					"noPermission": "需要管理 Git 连接的工作区权限。"
+				},
+				"none": "您没有在此添加连接的权限。"
+			}
+		},
+		"delete": {
+			"button": "移除",
+			"title": "移除此连接？",
+			"description": "通过 {{host}} 上的 {{name}} 关联的仓库将停止工作，直到您通过其他连接重新连接它们。应用或令牌本身不会在平台上被删除；如不再需要，请在平台上自行移除。",
+			"confirm": "移除连接",
+			"usage": {
+				"title": "使用它的仓库（{{count}} 个）：",
+				"others": "另有 {{count}} 个在其他项目中。",
+				"consequence": "它们仍保持关联，但没有凭据，智能体无法使用。之后请将每个仓库重新连接到其他连接。"
+			}
+		},
+		"callback": {
+			"working": "正在完成设置…",
+			"workingHint": "请保持此页面打开。",
+			"failedTitle": "无法完成设置",
+			"back": "返回 Git 设置"
+		},
+		"errors": {
+			"generic": "出了点问题，请重试。",
+			"setupInvalid": "此设置链接无效、已过期或已被使用。请重新开始设置。",
+			"identityExists": "此处已有身份。请先移除它，再设置新的身份。",
+			"publicUrlRequired": "实例的公开 URL（PUBLIC_URL）未配置，平台无法访问。",
+			"providerUnavailable": "Git 提供方插件不可用。请检查它是否已安装并启用。",
+			"providerRejected": "平台拒绝了该请求。请检查所用账户的权限。",
+			"notFound": "未找到。"
+		},
+		"copy": "复制",
+		"copied": "已复制"
 	}
 }

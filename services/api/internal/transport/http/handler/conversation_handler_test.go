@@ -32,7 +32,7 @@ func fixedTime() time.Time {
 
 func newConversationRouter(svc agentdom.Service) chi.Router {
 	h := handler.NewConversationHandler(svc).WithMemberRepo(&fakeMemberRepo{
-		findByUserProject: func(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
 			return &projectdom.ProjectMember{ID: uuid.New()}, nil
 		},
 	})
@@ -878,17 +878,17 @@ func newGlobalConversationsListRouter(svc agentdom.Service, subject string) chi.
 	return r
 }
 
-// The caller's own user id must always be forced as ActorUserID, and
+// The caller's own user id must always be forced as ActorAccountID, and
 // GlobalOnly/ProjectID must never be left for the client to override via
 // query params — this is the privacy boundary that keeps one user's global
 // chats from leaking to another.
 func TestListGlobalConversations_ScopesToCallerAndGlobalOnly(t *testing.T) {
 	callerID := uuid.New()
-	var gotActorUserID uuid.UUID
+	var gotActorAccountID uuid.UUID
 	var gotFilter agentdom.ListConversationsFilter
 	svc := &mockAgentSvc{
-		listGlobalConversations: func(_ context.Context, actorUserID uuid.UUID, filter agentdom.ListConversationsFilter, _ int) ([]*agentdom.AgentConversation, bool, error) {
-			gotActorUserID = actorUserID
+		listGlobalConversations: func(_ context.Context, actorAccountID uuid.UUID, filter agentdom.ListConversationsFilter, _ int) ([]*agentdom.AgentConversation, bool, error) {
+			gotActorAccountID = actorAccountID
 			gotFilter = filter
 			return []*agentdom.AgentConversation{{ID: uuid.New()}}, false, nil
 		},
@@ -901,8 +901,8 @@ func TestListGlobalConversations_ScopesToCallerAndGlobalOnly(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if gotActorUserID != callerID {
-		t.Errorf("expected actorUserID %s forced from claims, got %s", callerID, gotActorUserID)
+	if gotActorAccountID != callerID {
+		t.Errorf("expected actorAccountID %s forced from claims, got %s", callerID, gotActorAccountID)
 	}
 	// The handler itself never sets GlobalOnly/ProjectID — that's the
 	// service's job (see Service.ListGlobalConversations) so there's no
@@ -955,14 +955,14 @@ func TestGetGlobalConversationEvents_ReturnsEvents(t *testing.T) {
 	convID := uuid.New()
 	callerID := uuid.New()
 	svc := &mockAgentSvc{
-		getGlobalConversation: func(_ context.Context, id, actorUserID uuid.UUID) (*agentdom.AgentConversation, error) {
+		getGlobalConversation: func(_ context.Context, id, actorAccountID uuid.UUID) (*agentdom.AgentConversation, error) {
 			if id != convID {
 				t.Fatalf("unexpected conversation id %s", id)
 			}
-			if actorUserID != callerID {
-				t.Fatalf("expected actorUserID %s forced from claims, got %s", callerID, actorUserID)
+			if actorAccountID != callerID {
+				t.Fatalf("expected actorAccountID %s forced from claims, got %s", callerID, actorAccountID)
 			}
-			return &agentdom.AgentConversation{ID: convID, ActorUserID: &callerID}, nil
+			return &agentdom.AgentConversation{ID: convID, ActorAccountID: &callerID}, nil
 		},
 		listConversationEvents: func(_ context.Context, id uuid.UUID, _ agentdom.ConversationEventWindow) ([]*agentdom.AgentConversationEvent, int64, error) {
 			if id != convID {
@@ -1026,21 +1026,21 @@ func TestGetGlobalConversationEvents_UnknownConversationNotFound(t *testing.T) {
 // simply by knowing its ID. Every handler below must forward the caller's
 // own user ID (never a client-suppliable value) to the service, and the
 // service is responsible for 404ing on a mismatch — these tests assert the
-// handler side of that contract: the *right* actorUserID reaches the mock.
+// handler side of that contract: the *right* actorAccountID reaches the mock.
 // ---------------------------------------------------------------------------
 
 func TestGetGlobalConversation_ForwardsCallerIDNotConversationOwner(t *testing.T) {
 	convID := uuid.New()
 	callerID := uuid.New()
 	otherUsersConv := uuid.New() // the conversation's real owner — must never leak in.
-	var gotActorUserID uuid.UUID
+	var gotActorAccountID uuid.UUID
 	svc := &mockAgentSvc{
-		getGlobalConversation: func(_ context.Context, _, actorUserID uuid.UUID) (*agentdom.AgentConversation, error) {
-			gotActorUserID = actorUserID
+		getGlobalConversation: func(_ context.Context, _, actorAccountID uuid.UUID) (*agentdom.AgentConversation, error) {
+			gotActorAccountID = actorAccountID
 			// Simulate the service's real ownership check: this conversation
 			// belongs to otherUsersConv, not the caller, so a correct handler
 			// (forwarding callerID) gets ErrConversationNotFound back.
-			if actorUserID != otherUsersConv {
+			if actorAccountID != otherUsersConv {
 				return nil, agentdom.ErrConversationNotFound
 			}
 			return &agentdom.AgentConversation{ID: convID}, nil
@@ -1051,8 +1051,8 @@ func TestGetGlobalConversation_ForwardsCallerIDNotConversationOwner(t *testing.T
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
-	if gotActorUserID != callerID {
-		t.Fatalf("handler must forward the authenticated caller's own id, got %s want %s", gotActorUserID, callerID)
+	if gotActorAccountID != callerID {
+		t.Fatalf("handler must forward the authenticated caller's own id, got %s want %s", gotActorAccountID, callerID)
 	}
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for a conversation the caller doesn't own, got %d: %s", rec.Code, rec.Body.String())
@@ -1074,18 +1074,18 @@ func TestStopPauseHeartbeatGlobalConversation_ForwardCallerID(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var gotConvID, gotActorUserID uuid.UUID
+			var gotConvID, gotActorAccountID uuid.UUID
 			svc := &mockAgentSvc{
-				stopGlobalConversation: func(_ context.Context, id, actorUserID uuid.UUID) error {
-					gotConvID, gotActorUserID = id, actorUserID
+				stopGlobalConversation: func(_ context.Context, id, actorAccountID uuid.UUID) error {
+					gotConvID, gotActorAccountID = id, actorAccountID
 					return agentdom.ErrConversationNotFound
 				},
-				pauseGlobalConversation: func(_ context.Context, id, actorUserID uuid.UUID) error {
-					gotConvID, gotActorUserID = id, actorUserID
+				pauseGlobalConversation: func(_ context.Context, id, actorAccountID uuid.UUID) error {
+					gotConvID, gotActorAccountID = id, actorAccountID
 					return agentdom.ErrConversationNotFound
 				},
-				globalHeartbeat: func(_ context.Context, id, actorUserID uuid.UUID) error {
-					gotConvID, gotActorUserID = id, actorUserID
+				globalHeartbeat: func(_ context.Context, id, actorAccountID uuid.UUID) error {
+					gotConvID, gotActorAccountID = id, actorAccountID
 					return agentdom.ErrConversationNotFound
 				},
 			}
@@ -1097,8 +1097,8 @@ func TestStopPauseHeartbeatGlobalConversation_ForwardCallerID(t *testing.T) {
 			if gotConvID != convID {
 				t.Errorf("expected conversation id %s forwarded, got %s", convID, gotConvID)
 			}
-			if gotActorUserID != callerID {
-				t.Errorf("expected caller id %s forwarded as actorUserID, got %s", callerID, gotActorUserID)
+			if gotActorAccountID != callerID {
+				t.Errorf("expected caller id %s forwarded as actorAccountID, got %s", callerID, gotActorAccountID)
 			}
 			if rec.Code != http.StatusNotFound {
 				t.Errorf("expected the service's not-found error to surface as 404, got %d: %s", rec.Code, rec.Body.String())
@@ -1111,15 +1111,15 @@ func TestSendGlobalConversationMessage_ForwardsCallerIDNotBodySuppliedActor(t *t
 	convID := uuid.New()
 	callerID := uuid.New()
 	attackerSuppliedActor := uuid.New()
-	var gotActorUserID uuid.UUID
+	var gotActorAccountID uuid.UUID
 	svc := &mockAgentSvc{
-		sendGlobalConversationMessage: func(_ context.Context, _ uuid.UUID, _ string, actorUserID uuid.UUID, _ string) error {
-			gotActorUserID = actorUserID
+		sendGlobalConversationMessage: func(_ context.Context, _ uuid.UUID, _ string, actorAccountID uuid.UUID, _ string) error {
+			gotActorAccountID = actorAccountID
 			return nil
 		},
 	}
 	r := newGlobalConversationRouter(svc, callerID.String())
-	body := `{"message":"hi","actor_user_id":"` + attackerSuppliedActor.String() + `"}`
+	body := `{"message":"hi","actor_account_id":"` + attackerSuppliedActor.String() + `"}`
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
 		"/agents/conversations/"+convID.String()+"/messages", strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -1128,8 +1128,8 @@ func TestSendGlobalConversationMessage_ForwardsCallerIDNotBodySuppliedActor(t *t
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if gotActorUserID != callerID {
-		t.Fatalf("actorUserID must always be the authenticated caller (%s), never a client-suppliable body field (%s)", callerID, gotActorUserID)
+	if gotActorAccountID != callerID {
+		t.Fatalf("actorAccountID must always be the authenticated caller (%s), never a client-suppliable body field (%s)", callerID, gotActorAccountID)
 	}
 }
 
@@ -1165,16 +1165,16 @@ func TestSendGlobalConversationMessage_RejectsInvalidContextItems(t *testing.T) 
 func TestUpdateGlobalConversation_ForwardsCallerIDNotBodySuppliedActor(t *testing.T) {
 	convID := uuid.New()
 	callerID := uuid.New()
-	var gotActorUserID uuid.UUID
+	var gotActorAccountID uuid.UUID
 	var gotTitle string
 	svc := &mockAgentSvc{
-		updateGlobalConversationTitle: func(_ context.Context, id, actorUserID uuid.UUID, title string) (*agentdom.AgentConversation, error) {
+		updateGlobalConversationTitle: func(_ context.Context, id, actorAccountID uuid.UUID, title string) (*agentdom.AgentConversation, error) {
 			if id != convID {
 				t.Fatalf("unexpected conversation id %s", id)
 			}
-			gotActorUserID = actorUserID
+			gotActorAccountID = actorAccountID
 			gotTitle = title
-			return &agentdom.AgentConversation{ID: convID, ActorUserID: &actorUserID, Title: &title}, nil
+			return &agentdom.AgentConversation{ID: convID, ActorAccountID: &actorAccountID, Title: &title}, nil
 		},
 	}
 	r := newGlobalConversationRouter(svc, callerID.String())
@@ -1186,8 +1186,8 @@ func TestUpdateGlobalConversation_ForwardsCallerIDNotBodySuppliedActor(t *testin
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if gotActorUserID != callerID {
-		t.Fatalf("actorUserID must always be the authenticated caller (%s), got %s", callerID, gotActorUserID)
+	if gotActorAccountID != callerID {
+		t.Fatalf("actorAccountID must always be the authenticated caller (%s), got %s", callerID, gotActorAccountID)
 	}
 	if gotTitle != "Renamed chat" {
 		t.Errorf("expected title %q forwarded to the service, got %q", "Renamed chat", gotTitle)
@@ -1219,10 +1219,10 @@ func TestUpdateGlobalConversation_BlankTitleRejected(t *testing.T) {
 func TestDeleteGlobalConversation_ForwardsCallerID(t *testing.T) {
 	convID := uuid.New()
 	callerID := uuid.New()
-	var gotConvID, gotActorUserID uuid.UUID
+	var gotConvID, gotActorAccountID uuid.UUID
 	svc := &mockAgentSvc{
-		deleteGlobalConversation: func(_ context.Context, id, actorUserID uuid.UUID) error {
-			gotConvID, gotActorUserID = id, actorUserID
+		deleteGlobalConversation: func(_ context.Context, id, actorAccountID uuid.UUID) error {
+			gotConvID, gotActorAccountID = id, actorAccountID
 			return nil
 		},
 	}
@@ -1234,8 +1234,8 @@ func TestDeleteGlobalConversation_ForwardsCallerID(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if gotConvID != convID || gotActorUserID != callerID {
-		t.Errorf("expected conv=%s actor=%s forwarded, got conv=%s actor=%s", convID, callerID, gotConvID, gotActorUserID)
+	if gotConvID != convID || gotActorAccountID != callerID {
+		t.Errorf("expected conv=%s actor=%s forwarded, got conv=%s actor=%s", convID, callerID, gotConvID, gotActorAccountID)
 	}
 }
 
@@ -1244,10 +1244,9 @@ func TestDeleteGlobalConversation_ForwardsCallerID(t *testing.T) {
 // (and its /events sibling). Distinct from both GetConversation (human
 // member identity, project-scoped) and GetGlobalConversation (human actor
 // identity, global-chat-only): these two authorize on the caller's verified
-// X-Agent-ID plus the X-Conversation-ID header naming the conversation
-// currently driving the call — see agentdom.Service.GetConversationForAgent's
+// agent identity alone — see agentdom.Service.GetConversationForAgent's
 // doc comment for the full rule. These handler-level tests only pin the
-// plumbing (header parsing, 401/404 mapping); the rule itself is covered by
+// plumbing (identity forwarding, 401/404 mapping); the rule itself is covered by
 // agent_service_test.go's TestGetConversationForAgent_* cases.
 // ---------------------------------------------------------------------------
 
@@ -1290,12 +1289,10 @@ func TestGetConversationForAgent_NoAgentIdentity401s(t *testing.T) {
 func TestGetConversationForAgent_ReturnsOwnConversation(t *testing.T) {
 	agentID := uuid.New()
 	convID := uuid.New()
-	currentConvID := uuid.New()
-	var gotAgentID, gotCurrentConvID uuid.UUID
+	var gotAgentID uuid.UUID
 	svc := &mockAgentSvc{
-		getConversationForAgent: func(_ context.Context, id, callerAgentID, currentConversationID uuid.UUID) (*agentdom.AgentConversation, error) {
+		getConversationForAgent: func(_ context.Context, id, callerAgentID uuid.UUID) (*agentdom.AgentConversation, error) {
 			gotAgentID = callerAgentID
-			gotCurrentConvID = currentConversationID
 			if id != convID {
 				t.Fatalf("unexpected conversation id %s", id)
 			}
@@ -1304,7 +1301,6 @@ func TestGetConversationForAgent_ReturnsOwnConversation(t *testing.T) {
 	}
 	r := newAgentSelfServiceConversationRouter(svc, &agentID)
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/agents/me/conversations/"+convID.String(), nil)
-	req.Header.Set("X-Conversation-ID", currentConvID.String())
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -1313,9 +1309,6 @@ func TestGetConversationForAgent_ReturnsOwnConversation(t *testing.T) {
 	}
 	if gotAgentID != agentID {
 		t.Fatalf("handler must forward the authenticated agent's own id, got %s want %s", gotAgentID, agentID)
-	}
-	if gotCurrentConvID != currentConvID {
-		t.Fatalf("handler must forward X-Conversation-ID, got %s want %s", gotCurrentConvID, currentConvID)
 	}
 	var resp struct {
 		Data struct {
@@ -1330,44 +1323,10 @@ func TestGetConversationForAgent_ReturnsOwnConversation(t *testing.T) {
 	}
 }
 
-// TestGetConversationForAgent_MissingConversationIDHeaderStillForwards
-// pins that an absent X-Conversation-ID (e.g. an older agent-runner build)
-// is forwarded to the service as uuid.Nil rather than dropped/omitted —
-// GetConversationForAgent's own fail-closed handling of uuid.Nil is what
-// actually denies cross-conversation reads in that case; see
-// agent_service_test.go.
-func TestGetConversationForAgent_MissingConversationIDHeaderStillForwards(t *testing.T) {
-	agentID := uuid.New()
-	convID := uuid.New()
-	var gotCurrentConvIDSet bool
-	var gotCurrentConvID uuid.UUID
-	svc := &mockAgentSvc{
-		getConversationForAgent: func(_ context.Context, _, _, currentConversationID uuid.UUID) (*agentdom.AgentConversation, error) {
-			gotCurrentConvIDSet = true
-			gotCurrentConvID = currentConversationID
-			return &agentdom.AgentConversation{ID: convID, AgentID: agentID}, nil
-		},
-	}
-	r := newAgentSelfServiceConversationRouter(svc, &agentID)
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/agents/me/conversations/"+convID.String(), nil)
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !gotCurrentConvIDSet {
-		t.Fatal("expected getConversationForAgent to be called")
-	}
-	if gotCurrentConvID != uuid.Nil {
-		t.Errorf("expected uuid.Nil for a missing X-Conversation-ID header, got %s", gotCurrentConvID)
-	}
-}
-
 func TestGetConversationForAgent_DifferentAgentNotFound(t *testing.T) {
 	agentID := uuid.New()
 	svc := &mockAgentSvc{
-		getConversationForAgent: func(_ context.Context, _, _, _ uuid.UUID) (*agentdom.AgentConversation, error) {
+		getConversationForAgent: func(_ context.Context, _, _ uuid.UUID) (*agentdom.AgentConversation, error) {
 			return nil, agentdom.ErrConversationNotFound
 		},
 	}
@@ -1397,7 +1356,7 @@ func TestGetConversationEventsForAgent_ReturnsEvents(t *testing.T) {
 	agentID := uuid.New()
 	convID := uuid.New()
 	svc := &mockAgentSvc{
-		getConversationForAgent: func(_ context.Context, id, callerAgentID, _ uuid.UUID) (*agentdom.AgentConversation, error) {
+		getConversationForAgent: func(_ context.Context, id, callerAgentID uuid.UUID) (*agentdom.AgentConversation, error) {
 			return &agentdom.AgentConversation{ID: id, AgentID: callerAgentID}, nil
 		},
 		listConversationEvents: func(_ context.Context, id uuid.UUID, _ agentdom.ConversationEventWindow) ([]*agentdom.AgentConversationEvent, int64, error) {
@@ -1432,7 +1391,7 @@ func TestGetConversationEventsForAgent_UnknownConversationNotFound(t *testing.T)
 	agentID := uuid.New()
 	eventsCalled := false
 	svc := &mockAgentSvc{
-		getConversationForAgent: func(_ context.Context, _, _, _ uuid.UUID) (*agentdom.AgentConversation, error) {
+		getConversationForAgent: func(_ context.Context, _, _ uuid.UUID) (*agentdom.AgentConversation, error) {
 			return nil, agentdom.ErrConversationNotFound
 		},
 		listConversationEvents: func(_ context.Context, _ uuid.UUID, _ agentdom.ConversationEventWindow) ([]*agentdom.AgentConversationEvent, int64, error) {

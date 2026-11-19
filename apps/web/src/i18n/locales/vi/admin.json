@@ -36,7 +36,8 @@
 			"changeRoleAction": "Đổi vai trò",
 			"deleteAction": "Xóa người dùng",
 			"pwdResetHint": "Người dùng này phải đặt mật khẩu mới ở lần đăng nhập tiếp theo",
-			"columnActions": "Thao tác"
+			"columnActions": "Thao tác",
+			"securityAction": "Bảo mật"
 		},
 		"formDialog": {
 			"createdTitle": "Đã tạo người dùng",
@@ -110,6 +111,7 @@
 			"errors": {
 				"userNotFound": "Người dùng này không còn tồn tại.",
 				"forbidden": "Bạn không có quyền đặt lại mật khẩu của người dùng này.",
+				"passwordLoginDisabled": "Đăng nhập bằng mật khẩu đã bị tắt (chỉ đăng nhập SSO) nên không thể đặt lại mật khẩu của người dùng này. Họ đăng nhập bằng đăng nhập một lần.",
 				"internalError": "Đã xảy ra lỗi. Vui lòng thử lại.",
 				"generic": "Đã xảy ra lỗi."
 			}
@@ -142,6 +144,24 @@
 			"title": "Không có người dùng phù hợp",
 			"description": "Hãy thử từ khóa hoặc bộ lọc vai trò khác.",
 			"clear": "Xóa bộ lọc"
+		},
+		"security": {
+			"title": "Bảo vệ đăng nhập của {{name}}",
+			"description": "Kiểm soát nơi người này được đăng nhập và xóa xác minh hai bước của họ.",
+			"ip": {
+				"label": "Địa chỉ IP được phép",
+				"hint": "Mỗi dòng một địa chỉ IP hoặc dải CIDR. Để trống để cho phép mọi địa chỉ. Áp dụng cho đăng nhập bằng mật khẩu."
+			},
+			"mfa": {
+				"title": "Xác minh hai bước",
+				"description": "Nếu họ mất cả thiết bị lẫn mã khôi phục, hãy xóa để họ thiết lập lại.",
+				"reset": "Đặt lại xác minh hai bước",
+				"confirmReset": "Có, đặt lại",
+				"resetDone": "Đã đặt lại xác minh hai bước. Họ có thể thiết lập lại vào lần đăng nhập tiếp theo.",
+				"resetFailed": "Không thể đặt lại xác minh hai bước."
+			},
+			"cancel": "Hủy",
+			"save": "Lưu"
 		}
 	},
 	"globalRoles": {
@@ -301,6 +321,14 @@
 			"serviceAccountsWrite": {
 				"label": "Quản lý tài khoản dịch vụ",
 				"description": "Tạo, sửa, xóa tài khoản dịch vụ và cấp hoặc thu hồi khóa API"
+			},
+			"gitIdentitiesManage": {
+				"label": "Quản lý kết nối Git của không gian làm việc",
+				"description": "Thêm và gỡ các GitHub App và access token mà mọi dự án trong không gian làm việc đều có thể dùng"
+			},
+			"settingsSecurityWrite": {
+				"label": "Quản lý bảo mật đăng nhập",
+				"description": "Đặt ai phải dùng xác minh hai bước và địa chỉ IP nào được phép đăng nhập, đồng thời đặt lại xác minh hai bước của người khác. Gỡ bảo vệ này khỏi một tài khoản tương đương với chiếm quyền tài khoản đó, vì vậy hãy coi nó như quyền quản trị viên đầy đủ."
 			}
 		},
 		"permissionGroups": {
@@ -310,7 +338,8 @@
 			"projects": "Dự án",
 			"plugins": "Plugin",
 			"settings": "Cài đặt",
-			"serviceAccounts": "Tài khoản dịch vụ"
+			"serviceAccounts": "Tài khoản dịch vụ",
+			"git": "Git"
 		},
 		"defaultDialog": {
 			"title": "Đặt vai trò mặc định",
@@ -418,7 +447,9 @@
 			"saved": "Đã lưu",
 			"errors": {
 				"updateFailed": "Lưu thất bại. Vui lòng thử lại."
-			}
+			},
+			"feedbackLabel": "Phản hồi",
+			"feedbackDescription": "Hiển thị “Gửi phản hồi” trong menu người dùng và “Báo cáo sự cố này” trên màn hình lỗi, mở một issue GitHub đã điền sẵn. Hãy tắt với các phiên bản riêng tư hoặc tự lưu trữ."
 		},
 		"sso": {
 			"title": "Đăng nhập một lần (SSO)",
@@ -453,6 +484,12 @@
 				"scopesHint": "Phân tách bằng dấu cách. \"openid\" luôn được thêm vào.",
 				"allowedDomains": "Tên miền email được phép",
 				"allowedDomainsHint": "Phân tách bằng dấu phẩy. Để trống để cho phép mọi tên miền. Chỉ chấp nhận email đã xác minh.",
+				"groupPolicy": "Yêu cầu nhóm hoặc vai trò",
+				"groupPolicyHint": "Chỉ những danh tính có token ID chứa nhóm hoặc vai trò được phép mới đăng nhập được, kể cả người dùng cũ.",
+				"groupClaim": "Claim nhóm",
+				"groupClaimHint": "Claim của token ID chứa nhóm hoặc vai trò, ví dụ groups, roles hoặc realm_access.roles. Đăng nhập bị từ chối nếu claim thiếu hoặc sai định dạng.",
+				"allowedGroups": "Nhóm được phép",
+				"allowedGroupsHint": "Phân tách bằng dấu phẩy. Người dùng cần thuộc ít nhất một nhóm. Dùng giá trị ổn định như ID đối tượng nhóm của Entra. So khớp chính xác. Token Microsoft Entra bị vượt quá số nhóm sẽ bị từ chối.",
 				"enabled": "Bật",
 				"enabledHint": "Hiển thị nhà cung cấp này trên trang đăng nhập.",
 				"autoProvision": "Tự động tạo tài khoản",
@@ -473,6 +510,45 @@
 				"saveFailed": "Không thể lưu nhà cung cấp. Vui lòng thử lại.",
 				"loadFailed": "Không thể tải danh sách nhà cung cấp SSO.",
 				"deleteFailed": "Không thể xóa nhà cung cấp. Vui lòng thử lại."
+			}
+		},
+		"nav": {
+			"workspace": "Không gian làm việc",
+			"signIn": "Đăng nhập",
+			"branding": "Thương hiệu",
+			"sso": "Đăng nhập một lần (SSO)",
+			"security": "Bảo mật đăng nhập"
+		},
+		"security": {
+			"roles": {
+				"title": "Vai trò được bảo vệ",
+				"description": "Các quy tắc bên dưới áp dụng cho người có bất kỳ vai trò nào bạn chọn. Bật Tất cả vai trò để áp dụng cho mọi người, kể cả các vai trò tạo sau này.",
+				"all": "Tất cả vai trò"
+			},
+			"mfa": {
+				"title": "Bắt buộc xác minh hai bước",
+				"description": "Người có vai trò được bảo vệ phải thiết lập ứng dụng xác thực trước khi đăng nhập bằng mật khẩu. Đăng nhập SSO phụ thuộc vào cài đặt đa yếu tố của nhà cung cấp danh tính của bạn.",
+				"rolloutNote": "Người chưa thiết lập sẽ được hướng dẫn thiết lập vào lần đăng nhập tiếp theo."
+			},
+			"ip": {
+				"title": "Địa chỉ IP được phép",
+				"description": "Giới hạn đăng nhập bằng mật khẩu của các vai trò được bảo vệ ở những địa chỉ này. Để trống để cho phép mọi địa chỉ.",
+				"hint": "Mỗi dòng một địa chỉ IP hoặc dải CIDR, ví dụ 203.0.113.0/24. Hỗ trợ IPv4 và IPv6.",
+				"lockoutWarning": "Hãy đảm bảo địa chỉ của chính bạn nằm trong danh sách, nếu không bạn có thể bị khóa. Đăng nhập SSO không bị ảnh hưởng."
+			},
+			"ssoOnly": {
+				"title": "Chỉ đăng nhập bằng SSO",
+				"description": "Tắt đăng nhập bằng mật khẩu cho mọi tài khoản, bất kể vai trò, trừ quản trị viên mặc định (tài khoản được tạo từ ADMIN_USERNAME). Những người khác đăng nhập bằng đăng nhập một lần và không thể đặt, đặt lại hay đổi mật khẩu.",
+				"noProvider": "Hãy bật một nhà cung cấp SSO trước.",
+				"adminNote": "Trang đăng nhập chỉ hiển thị các nhà cung cấp SSO. Quản trị viên mặc định đăng nhập qua liên kết \"Đăng nhập với tư cách quản trị viên\" (hoặc /?admin=1), ví dụ để tắt tùy chọn này khi nhà cung cấp danh tính không khả dụng."
+			},
+			"noRoles": "Chưa có vai trò nào được bảo vệ nên các quy tắc này hiện không áp dụng cho ai.",
+			"errors": {
+				"invalidCidr": "Một trong các mục không phải địa chỉ IP hoặc dải CIDR hợp lệ.",
+				"selfLockout": "Địa chỉ IP của chính bạn phải có trong danh sách, nếu không bạn sẽ tự khóa mình. Hãy thêm vào và lưu lại.",
+				"ssoOnlyNoProvider": "Chỉ đăng nhập bằng SSO cần ít nhất một nhà cung cấp SSO đang bật.",
+				"saveFailed": "Lưu thất bại. Vui lòng thử lại.",
+				"loadFailed": "Không thể tải cài đặt bảo mật đăng nhập."
 			}
 		}
 	},
@@ -628,5 +704,80 @@
 				"deleteHint": "Khóa API ngừng hoạt động, vai trò và tư cách thành viên dự án bị gỡ bỏ."
 			}
 		}
+	},
+	"git": {
+		"cancel": "Hủy",
+		"setup": {
+			"dialogTitle": "Thiết lập {{provider}} trên {{host}}",
+			"dialogDescription": "Paca sẽ tạo trên {{host}} một danh tính bot để các agent dùng khi clone, push và làm việc với {{changeRequests}}. Bạn sẽ được chuyển đến {{host}} để phê duyệt, rồi quay lại đây.",
+			"name": "Tên ứng dụng (tùy chọn)",
+			"nameHelp": "Tên bot hiển thị trên nền tảng. Để trống để dùng mặc định.",
+			"org": "Tổ chức (tùy chọn)",
+			"orgHelp": "Để trống để tạo dưới tài khoản của chính bạn.",
+			"start": "Tiếp tục đến {{host}}",
+			"submitToken": "Lưu",
+			"public": "Cho phép cài đặt trên tài khoản khác (ứng dụng công khai)",
+			"publicHelp": "Cần khi các dự án dùng repository của những người dùng hoặc tổ chức khác nhau. Ứng dụng riêng tư chỉ cài được trên tài khoản sở hữu nó.",
+			"next": "Tiếp theo",
+			"tokenDescription": "Paca kết nối tới {{host}} bằng một access token mà bạn tạo ở đó. Ở bước tiếp theo, bạn dán token vào.",
+			"host": "Máy chủ",
+			"hostHelp": "Địa chỉ của hệ thống của bạn, ví dụ gitlab.example.com.",
+			"kind": {
+				"label": "Kết nối bằng",
+				"app": {
+					"title": "Ứng dụng (App)",
+					"help": "Paca tạo một ứng dụng trên {{provider}} cho bạn. Quyền truy cập chỉ giới hạn ở các kho bạn cài ứng dụng vào."
+				},
+				"bot_user": {
+					"title": "Access token",
+					"help": "Dán access token của dự án hoặc nhóm. Paca hoạt động với tư cách người dùng bot của token đó."
+				},
+				"token": {
+					"title": "Access token",
+					"help": "Dán personal access token. Token hoạt động với tư cách chủ sở hữu, vì vậy hãy dùng một tài khoản máy riêng."
+				}
+			},
+			"scope": {
+				"label": "Phạm vi sử dụng",
+				"project": {
+					"title": "Chỉ dự án này",
+					"help": "Chỉ dự án này có thể liên kết kho thông qua kết nối này."
+				},
+				"workspace": {
+					"title": "Tất cả dự án",
+					"help": "Mọi dự án trong không gian làm việc đều có thể liên kết kho thông qua kết nối này.",
+					"noPermission": "Cần quyền quản lý kết nối Git ở cấp không gian làm việc."
+				},
+				"none": "Bạn không có quyền thêm kết nối tại đây."
+			}
+		},
+		"delete": {
+			"button": "Gỡ bỏ",
+			"title": "Gỡ kết nối này?",
+			"description": "Các kho đã liên kết qua {{name}} trên {{host}} sẽ ngừng hoạt động cho đến khi bạn kết nối lại qua một kết nối khác. Bản thân ứng dụng hoặc token không bị xóa trên nền tảng; hãy xóa ở đó nếu bạn không cần nữa.",
+			"confirm": "Gỡ kết nối",
+			"usage": {
+				"title": "Các kho đang dùng ({{count}}):",
+				"others": "Cùng {{count}} kho ở các dự án khác.",
+				"consequence": "Chúng vẫn được liên kết nhưng không còn thông tin xác thực nên agent không dùng được. Sau đó hãy kết nối lại từng kho với một kết nối khác."
+			}
+		},
+		"callback": {
+			"working": "Đang hoàn tất thiết lập…",
+			"workingHint": "Vui lòng giữ trang này mở.",
+			"failedTitle": "Không thể hoàn tất thiết lập",
+			"back": "Quay lại cài đặt Git"
+		},
+		"errors": {
+			"generic": "Đã xảy ra lỗi. Vui lòng thử lại.",
+			"setupInvalid": "Liên kết thiết lập này không hợp lệ, đã hết hạn hoặc đã được dùng. Hãy bắt đầu thiết lập lại.",
+			"identityExists": "Đã có một danh tính ở đây. Hãy gỡ bỏ nó trước để thiết lập danh tính mới.",
+			"publicUrlRequired": "URL công khai của hệ thống chưa được cấu hình (PUBLIC_URL) nên nền tảng không thể truy cập.",
+			"providerUnavailable": "Plugin nhà cung cấp Git không khả dụng. Hãy kiểm tra xem đã cài đặt và bật chưa.",
+			"providerRejected": "Nền tảng đã từ chối yêu cầu. Hãy kiểm tra quyền của tài khoản bạn đã dùng.",
+			"notFound": "Không tìm thấy."
+		},
+		"copy": "Sao chép",
+		"copied": "Đã sao chép"
 	}
 }

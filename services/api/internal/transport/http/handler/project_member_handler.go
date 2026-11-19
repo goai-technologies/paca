@@ -211,8 +211,6 @@ func (h *ProjectHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 // GetMyProjectPermissions handles GET /projects/:projectId/members/me/permissions.
 // It returns {"actions": [...]}: the caller's effective IAM actions in the
 // project (see iam.Authorizer.EffectiveActions).
-// With ?scope=project, only actions allowed on the whole project are listed,
-// not those allowed on some resource inside it.
 // Any authenticated project member can call this endpoint regardless of which
 // permissions their role grants — the lookup is always scoped to themselves.
 func (h *ProjectHandler) GetMyProjectPermissions(w http.ResponseWriter, r *http.Request) {
@@ -235,13 +233,7 @@ func (h *ProjectHandler) GetMyProjectPermissions(w http.ResponseWriter, r *http.
 		presenter.Error(w, r, apierr.New(apierr.CodeInternalError, "authorization not configured"))
 		return
 	}
-	// ?scope=project narrows to actions allowed on the whole project, for
-	// callers that authorize delivery (realtime rooms) rather than show UI.
-	effective := h.authorizer.EffectiveActions
-	if r.URL.Query().Get("scope") == "project" {
-		effective = h.authorizer.ProjectWideActions
-	}
-	actions, err := effective(r.Context(), principal, projectID.String())
+	actions, err := h.authorizer.EffectiveActions(r.Context(), principal, projectID.String())
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -251,4 +243,18 @@ func (h *ProjectHandler) GetMyProjectPermissions(w http.ResponseWriter, r *http.
 	}
 
 	presenter.OK(w, r, map[string]any{"actions": actions})
+}
+
+// CheckMyAccess handles POST /projects/:projectId/members/me/permissions/check.
+// The body is {"checks": [{"action", "resource"}, ...]} and the answer is
+// {"allowed": [bool, ...]} in the same order. Like GetMyProjectPermissions it
+// reports the caller's own access and gates nothing; the pairs are evaluated by
+// middleware.ProbeAccess, so this handler decides nothing.
+func (h *ProjectHandler) CheckMyAccess(w http.ResponseWriter, r *http.Request) {
+	allowed, ok := middleware.AccessProbeResultsFrom(r)
+	if !ok {
+		presenter.Error(w, r, apierr.New(apierr.CodeInternalError, "access probe not configured"))
+		return
+	}
+	presenter.OK(w, r, map[string]any{"allowed": allowed})
 }

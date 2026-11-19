@@ -1,3 +1,4 @@
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,13 +41,26 @@ vi.mock("@/lib/role-api", async () => {
 		await vi.importActual<typeof import("@/lib/role-api")>("@/lib/role-api");
 	return {
 		...actual,
-		projectRolesQueryOptions: (projectId: string) => ({
-			queryKey: ["projects", projectId, "roles"],
-			queryFn: async () => {
-				if (state.fail) throw new Error("roles unavailable");
-				return ROLES;
-			},
-		}),
+		projectRolesInfiniteQueryOptions: (projectId: string, search = "") =>
+			infiniteQueryOptions({
+				queryKey: ["projects", projectId, "roles", "list", search],
+				queryFn: async () => {
+					if (state.fail) throw new Error("roles unavailable");
+					return {
+						items: ROLES,
+						page_size: 30,
+						next_cursor: null,
+						total_count: ROLES.length,
+					};
+				},
+				initialPageParam: undefined as string | undefined,
+				getNextPageParam: () => undefined,
+			}),
+		rolesByIdsQueryOptions: (projectId: string | undefined, ids: string[]) =>
+			queryOptions({
+				queryKey: ["projects", projectId, "roles", "ids", ids],
+				queryFn: async () => ROLES.filter((r) => ids.includes(r.id)),
+			}),
 	};
 });
 

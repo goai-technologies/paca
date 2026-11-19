@@ -34,9 +34,7 @@ type taskLookup interface {
 // memberLookup is the minimal project-domain surface the automation service needs.
 type memberLookup interface {
 	FindMemberByID(ctx context.Context, memberID uuid.UUID) (*projectdom.ProjectMember, error)
-	// FindMemberByActor resolves an authenticated actor (user, or agent when
-	// agentID is non-nil) to their project_members.id.
-	FindMemberByActor(ctx context.Context, projectID, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error)
+	FindMember(ctx context.Context, projectID, accountID uuid.UUID) (*projectdom.ProjectMember, error)
 }
 
 // Service implements automationdom.Service.
@@ -74,9 +72,12 @@ func (s *Service) publish(ctx context.Context, a *automationdom.Automation, topi
 		return
 	}
 	if topic == events.TopicAutomationNodeUpdated {
-		_ = s.publisher.Publish(ctx, events.ChannelRealtime, map[string]any{
-			"type":    topic,
-			"payload": payload,
+		events.PublishRealtime(ctx, s.publisher, events.Event{
+			Topic:      topic,
+			Payload:    payload,
+			ProjectID:  a.ProjectID,
+			EntityType: events.EntityAutomation,
+			EntityID:   &a.ID,
 		})
 		return
 	}
@@ -125,7 +126,7 @@ func (s *Service) CreateAutomation(ctx context.Context, in automationdom.CreateA
 		Name:        name,
 		Description: strings.TrimSpace(in.Description),
 		Status:      automationdom.StatusInactive,
-		CreatedBy:   s.resolveMember(ctx, in.CreatedBy, in.AgentID, in.ProjectID),
+		CreatedBy:   s.resolveMember(ctx, in.CreatedBy, in.ProjectID),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -226,7 +227,10 @@ func (s *Service) Activate(ctx context.Context, projectID, automationID uuid.UUI
 	if hasCycle(nodes, edges) {
 		return nil, automationdom.ErrEdgeCycle
 	}
-	if err := validateTaskReachability(nodes, edges); err != nil {
+	if err := s.validateTaskReachability(nodes, edges); err != nil {
+		return nil, err
+	}
+	if err := validateNoSelfParent(nodes, edges); err != nil {
 		return nil, err
 	}
 
@@ -314,11 +318,13 @@ func (s *Service) UpdateNode(ctx context.Context, projectID, automationID, nodeI
 			return nil, err
 		}
 		newConfig := normalizeConfig(*in.Config)
-		if n.Kind == automationdom.KindTrigger {
-			// A trigger's TargetTaskID can change here (e.g. cleared to
-			// nil) — re-check the whole graph, not just this node's own
-			// config, since that can retroactively make an already-valid
-			// downstream edge invalid (see validateTaskReachability).
+		// A trigger's TargetTaskID can change here (e.g. cleared to nil), and
+		// an update_task node's parent can change into the triggered task —
+		// either way, re-check the whole graph, not just this node's own
+		// config, since that can retroactively invalidate (or newly violate)
+		// an invariant downstream (see validateTaskReachability and
+		// validateNoSelfParent).
+		if n.Kind == automationdom.KindTrigger || (n.Kind == automationdom.KindAction && automationdom.ActionType(n.Type) == automationdom.ActionUpdateTask) {
 			nodes, err := s.repo.ListNodesByAutomation(ctx, a.ID)
 			if err != nil {
 				return nil, err
@@ -337,7 +343,10 @@ func (s *Service) UpdateNode(ctx context.Context, projectID, automationID, nodeI
 					tentativeNodes[i] = existing
 				}
 			}
-			if err := validateTaskReachability(tentativeNodes, edges); err != nil {
+			if err := s.validateTaskReachability(tentativeNodes, edges); err != nil {
+				return nil, err
+			}
+			if err := validateNoSelfParent(tentativeNodes, edges); err != nil {
 				return nil, err
 			}
 		}
@@ -430,7 +439,10 @@ func (s *Service) AddEdge(ctx context.Context, projectID, automationID uuid.UUID
 	tentativeEdges := make([]*automationdom.Edge, len(edges), len(edges)+1)
 	copy(tentativeEdges, edges)
 	tentativeEdges = append(tentativeEdges, &automationdom.Edge{SourceNodeID: source.ID, TargetNodeID: target.ID})
-	if err := validateTaskReachability(nodes, tentativeEdges); err != nil {
+	if err := s.validateTaskReachability(nodes, tentativeEdges); err != nil {
+		return nil, err
+	}
+	if err := validateNoSelfParent(nodes, tentativeEdges); err != nil {
 		return nil, err
 	}
 
@@ -572,7 +584,7 @@ func (s *Service) GenerateWebhookToken(ctx context.Context, projectID, automatio
 		NodeID:       nodeID,
 		AutomationID: automationID,
 		TokenPrefix:  rawHex[:webhookTokenDisplayLen],
-		CreatedBy:    s.resolveMember(ctx, actor.UserID, actor.AgentID, projectID),
+		CreatedBy:    s.resolveMember(ctx, actor.UserID, projectID),
 	}
 	created, err := s.repo.CreateOrRotateWebhookToken(ctx, tok, tokenHash)
 	if err != nil {
@@ -670,14 +682,14 @@ func (s *Service) findOwnedRun(ctx context.Context, automationID, runID uuid.UUI
 }
 
 // resolveMember resolves an authenticated actor to their project_members.id
-// for storage in Automation.CreatedBy. Returns nil (no error) when userID is
+// for storage in Automation.CreatedBy. Returns nil (no error) when accountID is
 // nil or the actor can't be resolved as a member of this project —
 // CreatedBy is purely informational.
-func (s *Service) resolveMember(ctx context.Context, userID, agentID *uuid.UUID, projectID uuid.UUID) *uuid.UUID {
-	if userID == nil {
+func (s *Service) resolveMember(ctx context.Context, accountID *uuid.UUID, projectID uuid.UUID) *uuid.UUID {
+	if accountID == nil {
 		return nil
 	}
-	member, err := s.memberRepo.FindMemberByActor(ctx, projectID, *userID, agentID)
+	member, err := s.memberRepo.FindMember(ctx, projectID, *accountID)
 	if err != nil {
 		return nil
 	}
@@ -772,6 +784,14 @@ func (s *Service) validateTriggerConfig(ctx context.Context, projectID uuid.UUID
 			if task.ProjectID != projectID {
 				return automationdom.ErrNodeCrossProject
 			}
+		}
+	}
+	if t == automationdom.TriggerFieldChanged {
+		if cfg.Field != "" && !automationdom.ValidChangedFields[cfg.Field] {
+			return fmt.Errorf("%w: field_changed cannot watch %q", automationdom.ErrNodeConfigInvalid, cfg.Field)
+		}
+		if strict && cfg.Field == "" {
+			return fmt.Errorf("%w: field_changed requires a field", automationdom.ErrNodeConfigInvalid)
 		}
 	}
 	if t == automationdom.TriggerCron {
@@ -906,6 +926,16 @@ func (s *Service) validateActionConfig(ctx context.Context, projectID uuid.UUID,
 	switch t {
 	case automationdom.ActionUpdateTask:
 		return s.validateTaskFieldUpdate(ctx, projectID, cfg.Update, strict)
+	case automationdom.ActionCreateTask:
+		return s.validateTaskCreate(ctx, projectID, cfg.Create, strict)
+	case automationdom.ActionAddComment:
+		if strict && (cfg.Comment == nil || strings.TrimSpace(cfg.Comment.Text) == "") {
+			return fmt.Errorf("%w: add_comment requires text", automationdom.ErrNodeConfigInvalid)
+		}
+	case automationdom.ActionNotify:
+		return s.validateNotify(ctx, projectID, cfg.Notify, strict)
+	case automationdom.ActionLinkTask:
+		return s.validateLinkAction(ctx, projectID, cfg.Link, strict)
 	case automationdom.ActionTriggerAIAgent:
 		if cfg.MemberID == nil {
 			if strict {
@@ -1002,6 +1032,17 @@ func (s *Service) validateTaskFieldUpdate(ctx context.Context, projectID uuid.UU
 	if strict && !taskFieldUpdateHasAnyField(upd) {
 		return fmt.Errorf("%w: update_task requires at least one field to update", automationdom.ErrNodeConfigInvalid)
 	}
+	if err := validateListModes(upd.TagsMode, upd.AssigneesMode); err != nil {
+		return err
+	}
+	for _, f := range upd.Clear {
+		if !automationdom.ClearableFields[f] {
+			return fmt.Errorf("%w: cannot clear field %q", automationdom.ErrNodeConfigInvalid, f)
+		}
+	}
+	if err := validateDynamic(upd.Dynamic); err != nil {
+		return err
+	}
 	if upd.StatusID != nil {
 		if err := s.assertStatusInProject(ctx, projectID, *upd.StatusID); err != nil {
 			return err
@@ -1029,6 +1070,41 @@ func (s *Service) validateTaskFieldUpdate(ctx context.Context, projectID uuid.UU
 	return nil
 }
 
+// validateTaskCreate validates ActionCreateTask's config: in strict mode a
+// non-blank title template is required; a referenced status or assignee must
+// belong to projectID. Task type existence is left to the task service when
+// the action runs (same precedent as update_task's task_type_id).
+func (s *Service) validateTaskCreate(ctx context.Context, projectID uuid.UUID, c *automationdom.TaskCreate, strict bool) error {
+	if c == nil {
+		if strict {
+			return fmt.Errorf("%w: create_task requires a title", automationdom.ErrNodeConfigInvalid)
+		}
+		return nil
+	}
+	if strict && strings.TrimSpace(c.Title) == "" {
+		return fmt.Errorf("%w: create_task requires a title", automationdom.ErrNodeConfigInvalid)
+	}
+	if c.StatusID != nil {
+		if err := s.assertStatusInProject(ctx, projectID, *c.StatusID); err != nil {
+			return err
+		}
+	}
+	for _, memberID := range c.AssigneeIDs {
+		if err := s.assertMemberInProject(ctx, projectID, memberID); err != nil {
+			return err
+		}
+	}
+	if c.ReporterID != nil {
+		if err := s.assertMemberInProject(ctx, projectID, *c.ReporterID); err != nil {
+			return err
+		}
+	}
+	if c.Link != "" && !automationdom.ValidLinkActionTypes[c.Link] {
+		return fmt.Errorf("%w: unknown link type %q", automationdom.ErrNodeConfigInvalid, c.Link)
+	}
+	return validateDynamic(c.Dynamic)
+}
+
 // taskFieldUpdateHasAnyField reports whether upd sets at least one field —
 // used only to reject a config-less update_task node in strict mode.
 func taskFieldUpdateHasAnyField(upd *automationdom.TaskFieldUpdate) bool {
@@ -1045,7 +1121,95 @@ func taskFieldUpdateHasAnyField(upd *automationdom.TaskFieldUpdate) bool {
 		len(upd.CustomFields) > 0 ||
 		upd.StartDate != nil ||
 		upd.DueDate != nil ||
-		len(upd.Tags) > 0
+		len(upd.Tags) > 0 ||
+		len(upd.Clear) > 0 ||
+		len(upd.Dynamic) > 0
+}
+
+func validateListModes(modes ...string) error {
+	for _, m := range modes {
+		switch m {
+		case "", automationdom.ListModeSet, automationdom.ListModeAdd, automationdom.ListModeRemove:
+		default:
+			return fmt.Errorf("%w: unknown list mode %q (use set, add or remove)", automationdom.ErrNodeConfigInvalid, m)
+		}
+	}
+	return nil
+}
+
+func validateDynamic(dyn map[string]automationdom.DynamicValue) error {
+	for key, dv := range dyn {
+		if !automationdom.DynamicFields[key] {
+			return fmt.Errorf("%w: %q cannot be set dynamically", automationdom.ErrNodeConfigInvalid, key)
+		}
+		switch dv.Source {
+		case automationdom.DynamicSourceTask, automationdom.DynamicSourceParent:
+		case automationdom.DynamicSourceNow:
+			if key != "start_date" && key != "due_date" {
+				return fmt.Errorf("%w: source \"now\" only applies to dates", automationdom.ErrNodeConfigInvalid)
+			}
+		default:
+			return fmt.Errorf("%w: dynamic %s has unknown source %q", automationdom.ErrNodeConfigInvalid, key, dv.Source)
+		}
+		if dv.OffsetDays != nil && key != "start_date" && key != "due_date" {
+			return fmt.Errorf("%w: offset_days only applies to dates", automationdom.ErrNodeConfigInvalid)
+		}
+	}
+	return nil
+}
+
+// validateNotify validates notify's config: a message, known recipient roles
+// and (when set) members of the project; strict mode also needs at least one
+// recipient.
+func (s *Service) validateNotify(ctx context.Context, projectID uuid.UUID, n *automationdom.NotifyAction, strict bool) error {
+	if n == nil {
+		if strict {
+			return fmt.Errorf("%w: notify requires a message and recipients", automationdom.ErrNodeConfigInvalid)
+		}
+		return nil
+	}
+	for _, r := range n.Recipients {
+		switch r {
+		case automationdom.RecipientAssignees, automationdom.RecipientReporter, automationdom.RecipientParentAssignees:
+		default:
+			return fmt.Errorf("%w: unknown notify recipient %q", automationdom.ErrNodeConfigInvalid, r)
+		}
+	}
+	for _, id := range n.MemberIDs {
+		if err := s.assertMemberInProject(ctx, projectID, id); err != nil {
+			return err
+		}
+	}
+	if strict {
+		if strings.TrimSpace(n.Message) == "" {
+			return fmt.Errorf("%w: notify requires a message", automationdom.ErrNodeConfigInvalid)
+		}
+		if len(n.Recipients) == 0 && len(n.MemberIDs) == 0 {
+			return fmt.Errorf("%w: notify requires at least one recipient", automationdom.ErrNodeConfigInvalid)
+		}
+	}
+	return nil
+}
+
+// validateLinkAction validates link_task's config: a known link type and a
+// single-task "to" target (self, parent or other).
+func (s *Service) validateLinkAction(ctx context.Context, projectID uuid.UUID, l *automationdom.LinkAction, strict bool) error {
+	if l == nil {
+		if strict {
+			return fmt.Errorf("%w: link_task requires a link type and a task to link to", automationdom.ErrNodeConfigInvalid)
+		}
+		return nil
+	}
+	if l.Type != "" && !automationdom.ValidLinkActionTypes[l.Type] {
+		return fmt.Errorf("%w: unknown link type %q", automationdom.ErrNodeConfigInvalid, l.Type)
+	}
+	if strict && l.Type == "" {
+		return fmt.Errorf("%w: link_task requires a link type", automationdom.ErrNodeConfigInvalid)
+	}
+	if l.To.Kind.MultiValued() {
+		return fmt.Errorf("%w: link_task must link to a single task", automationdom.ErrNodeConfigInvalid)
+	}
+	return s.validateTaskTarget(ctx, projectID, &l.To, strict)
 }
 
 var validCallAPIMethods = map[string]bool{
@@ -1200,6 +1364,96 @@ func hasCycle(nodes []*automationdom.Node, edges []*automationdom.Edge) bool {
 	return false
 }
 
+// validateNoSelfParent rejects an update_task node that would set the task it
+// mutates as its own parent. The task service rejects that at runtime
+// (task: a task cannot be its own parent), failing the whole run at that
+// step — a graph that saves cleanly would therefore fail every single run
+// with nothing in the API logs to show it.
+//
+// Which task is mutated depends on the node's ActionConfig.Target:
+//
+//   - nil / "self" (not retargeted): the walk's task, which for a trigger
+//     with a fixed TargetTaskID is that task — checked below per trigger.
+//   - "other": the explicitly chosen task, checkable on its own, with no
+//     trigger involved.
+//   - "parent"/"children"/link kinds: resolved against the task graph during
+//     the run, so there is nothing to compare against statically. The
+//     runtime check still rejects those; this is the save-time half.
+func validateNoSelfParent(nodes []*automationdom.Node, edges []*automationdom.Edge) error {
+	nodesByID := make(map[uuid.UUID]*automationdom.Node, len(nodes))
+	for _, n := range nodes {
+		nodesByID[n.ID] = n
+	}
+	outgoing := make(map[uuid.UUID][]uuid.UUID, len(edges))
+	for _, e := range edges {
+		outgoing[e.SourceNodeID] = append(outgoing[e.SourceNodeID], e.TargetNodeID)
+	}
+
+	// Retargeted actions mutate the task they name, not the run's task.
+	for _, n := range nodes {
+		cfg, ok := updateTaskConfig(n)
+		if !ok || cfg.Update == nil || cfg.Update.ParentTaskID == nil {
+			continue
+		}
+		if cfg.Target != nil && cfg.Target.Kind == automationdom.TaskTargetOther &&
+			cfg.Target.OtherTaskID != nil && *cfg.Update.ParentTaskID == *cfg.Target.OtherTaskID {
+			return automationdom.ErrUpdateTaskSelfParent
+		}
+	}
+
+	for _, n := range nodes {
+		if n.Kind != automationdom.KindTrigger {
+			continue
+		}
+		var trigger automationdom.TriggerConfig
+		if err := json.Unmarshal(n.Config, &trigger); err != nil || trigger.TargetTaskID == nil {
+			continue
+		}
+		target := *trigger.TargetTaskID
+
+		visited := map[uuid.UUID]bool{n.ID: true}
+		queue := append([]uuid.UUID{}, outgoing[n.ID]...)
+		for len(queue) > 0 {
+			id := queue[0]
+			queue = queue[1:]
+			if visited[id] {
+				continue
+			}
+			visited[id] = true
+			node, ok := nodesByID[id]
+			if !ok {
+				continue
+			}
+			if cfg, ok := updateTaskConfig(node); ok && cfg.Update != nil && cfg.Update.ParentTaskID != nil &&
+				!retargetsAction(cfg) && *cfg.Update.ParentTaskID == target {
+				return automationdom.ErrUpdateTaskSelfParent
+			}
+			queue = append(queue, outgoing[id]...)
+		}
+	}
+	return nil
+}
+
+// updateTaskConfig returns node's decoded config when node is an update_task
+// action.
+func updateTaskConfig(node *automationdom.Node) (*automationdom.ActionConfig, bool) {
+	if node.Kind != automationdom.KindAction || automationdom.ActionType(node.Type) != automationdom.ActionUpdateTask {
+		return nil, false
+	}
+	var cfg automationdom.ActionConfig
+	if err := json.Unmarshal(node.Config, &cfg); err != nil {
+		return nil, false
+	}
+	return &cfg, true
+}
+
+// retargetsAction reports whether cfg makes the action operate on a task
+// other than the walk's own. An empty or "self" kind is the default and is
+// not a retarget.
+func retargetsAction(cfg *automationdom.ActionConfig) bool {
+	return cfg.Target != nil && cfg.Target.Kind != "" && cfg.Target.Kind != automationdom.TaskTargetSelf
+}
+
 // validateTaskReachability enforces that a trigger with no target task
 // (predecessor_done, cron, or api_trigger whose TriggerConfig.TargetTaskID
 // is nil — the only triggers not derived from a task-activity event, so the
@@ -1212,7 +1466,7 @@ func hasCycle(nodes []*automationdom.Node, edges []*automationdom.Edge) bool {
 // problem") so it catches the transitive case too: a task-less trigger
 // reaching a task-needing node through several hops, or through a node that
 // only became reachable because a different, unrelated edge was added.
-func validateTaskReachability(nodes []*automationdom.Node, edges []*automationdom.Edge) error {
+func (s *Service) validateTaskReachability(nodes []*automationdom.Node, edges []*automationdom.Edge) error {
 	nodesByID := make(map[uuid.UUID]*automationdom.Node, len(nodes))
 	for _, n := range nodes {
 		nodesByID[n.ID] = n
@@ -1229,7 +1483,9 @@ func validateTaskReachability(nodes []*automationdom.Node, edges []*automationdo
 		switch automationdom.TriggerType(n.Type) {
 		case automationdom.TriggerPredecessorDone, automationdom.TriggerCron, automationdom.TriggerAPITrigger:
 		default:
-			continue
+			if s.pluginResolver == nil || !s.pluginResolver.IsTasklessTrigger(n.Type) {
+				continue
+			}
 		}
 		var cfg automationdom.TriggerConfig
 		if err := json.Unmarshal(n.Config, &cfg); err != nil || cfg.TargetTaskID != nil {

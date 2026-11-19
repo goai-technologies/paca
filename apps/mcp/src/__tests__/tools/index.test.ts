@@ -29,6 +29,16 @@ vi.mock("../../tools/sprint-tools.js", () => ({
 		.fn()
 		.mockResolvedValue({ content: [{ type: "text", text: "ok" }] }),
 }));
+vi.mock("../../tools/doc-mirror-tools.js", () => ({
+	DOC_MIRROR_TOOL_NAMES: new Set(["pull_docs", "push_docs"]),
+	getDocMirrorTools: vi.fn(() => [
+		{ name: "pull_docs" },
+		{ name: "push_docs" },
+	]),
+	handleDocMirrorTool: vi
+		.fn()
+		.mockResolvedValue({ content: [{ type: "text", text: "ok" }] }),
+}));
 vi.mock("../../tools/filesystem-doc-tools.js", () => ({
 	getFilesystemDocTools: vi.fn(() => [
 		{ name: "list_docs" },
@@ -118,10 +128,29 @@ vi.mock("../../tools/repo-tools.js", () => ({
 		.mockResolvedValue({ content: [{ type: "text", text: "ok" }] }),
 }));
 
+vi.mock("../../tools/workspace-tools.js", () => ({
+	WORKSPACE_TOOL_NAMES: [
+		"workspace_inspect",
+		"workspace_prepare",
+		"git_commit",
+		"git_push",
+	],
+	getWorkspaceTools: vi.fn(() => [
+		{ name: "workspace_inspect" },
+		{ name: "workspace_prepare" },
+		{ name: "git_commit" },
+		{ name: "git_push" },
+	]),
+	handleWorkspaceTool: vi
+		.fn()
+		.mockResolvedValue({ content: [{ type: "text", text: "ok" }] }),
+}));
+
 import { handleAttachmentTool } from "../../tools/attachment-tools.js";
 import { handleAutomationTool } from "../../tools/automation-tools.js";
 import { handleConversationTool } from "../../tools/conversation-tools.js";
 import { handleDocActivityTool } from "../../tools/doc-activity-tools.js";
+import { handleDocMirrorTool } from "../../tools/doc-mirror-tools.js";
 import { handleFilesystemDocTool } from "../../tools/filesystem-doc-tools.js";
 import { getAllTools, handleToolCall } from "../../tools/index.js";
 import { handleProjectMemberTool } from "../../tools/member-tools.js";
@@ -133,6 +162,7 @@ import { handleTaskActivityTool } from "../../tools/task-activity-tools.js";
 import { handleTaskTool } from "../../tools/task-tools.js";
 import { handleTaskTypeTool } from "../../tools/task-type-tools.js";
 import { handleViewTool } from "../../tools/view-tools.js";
+import { handleWorkspaceTool } from "../../tools/workspace-tools.js";
 
 // Stub clients – these are only passed through to domain handlers (which are mocked)
 const stubClients = {
@@ -174,6 +204,7 @@ describe("getAllTools", () => {
 		expect(names).toContain("get_automation");
 		expect(names).toContain("list_doc_activities");
 		expect(names).toContain("list_repositories");
+		expect(names).toContain("workspace_prepare");
 		expect(names).toContain("read_conversation");
 	});
 });
@@ -253,14 +284,38 @@ describe("handleToolCall – sprint tool routing", () => {
 });
 
 describe("handleToolCall – document tool routing", () => {
-	it("routes list_docs to handleFilesystemDocTool", async () => {
-		await handleToolCall(makeRequest("list_docs"), stubClients);
+	it.each([
+		"list_docs",
+		"read_doc",
+		"grep_docs",
+		"edit_doc",
+	])("routes %s to handleFilesystemDocTool", async (name) => {
+		await handleToolCall(makeRequest(name), stubClients);
 		expect(handleFilesystemDocTool).toHaveBeenCalledWith(
-			"list_docs",
+			name,
 			{},
 			stubClients.apiClient,
 			stubClients.docClient,
+			stubClients.extendedClient,
 		);
+	});
+});
+
+describe("handleToolCall – document mirror tool routing", () => {
+	it.each([
+		"pull_docs",
+		"push_docs",
+	])("lists %s and routes it to handleDocMirrorTool only", async (name) => {
+		expect(getAllTools().map((t) => t.name)).toContain(name);
+		vi.mocked(handleDocMirrorTool).mockClear();
+		vi.mocked(handleFilesystemDocTool).mockClear();
+		await handleToolCall(makeRequest(name), stubClients);
+		expect(handleDocMirrorTool).toHaveBeenCalledWith(
+			name,
+			{},
+			stubClients.docClient,
+		);
+		expect(handleFilesystemDocTool).not.toHaveBeenCalled();
 	});
 });
 
@@ -443,35 +498,16 @@ describe("handleToolCall – conversation tool routing", () => {
 });
 
 describe("handleToolCall – repo tool routing", () => {
-	it("routes list_repositories to handleRepoTool with a default empty repoPluginIds", async () => {
-		await handleToolCall(makeRequest("list_repositories"), stubClients);
+	it.each([
+		"list_repositories",
+		"clone_repository",
+		"push_branch",
+	])("routes %s to handleRepoTool", async (name) => {
+		await handleToolCall(makeRequest(name), stubClients);
 		expect(handleRepoTool).toHaveBeenCalledWith(
-			"list_repositories",
+			name,
 			{},
 			stubClients.apiClient,
-			[],
-		);
-	});
-
-	it("forwards the repoPluginIds argument through to handleRepoTool", async () => {
-		await handleToolCall(makeRequest("clone_repository"), stubClients, [
-			"com.paca.github",
-		]);
-		expect(handleRepoTool).toHaveBeenCalledWith(
-			"clone_repository",
-			{},
-			stubClients.apiClient,
-			["com.paca.github"],
-		);
-	});
-
-	it("routes push_branch to handleRepoTool", async () => {
-		await handleToolCall(makeRequest("push_branch"), stubClients);
-		expect(handleRepoTool).toHaveBeenCalledWith(
-			"push_branch",
-			{},
-			stubClients.apiClient,
-			[],
 		);
 	});
 });
@@ -511,5 +547,21 @@ describe("handleToolCall – error handling", () => {
 		await expect(
 			handleToolCall(makeRequest("list_projects"), stubClients),
 		).rejects.toThrow("Async API down");
+	});
+});
+
+describe("handleToolCall – workspace tool routing", () => {
+	it.each([
+		"workspace_inspect",
+		"workspace_prepare",
+		"git_commit",
+		"git_push",
+	])("routes %s to handleWorkspaceTool", async (name) => {
+		await handleToolCall(makeRequest(name, { projectId: "p1" }), stubClients);
+		expect(handleWorkspaceTool).toHaveBeenCalledWith(
+			name,
+			{ projectId: "p1" },
+			stubClients.apiClient,
+		);
 	});
 });

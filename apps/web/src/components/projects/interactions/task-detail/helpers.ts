@@ -22,6 +22,7 @@ const API_TO_UI_FIELD_TYPE: Record<FieldType, CustomFieldDef["field_type"]> = {
 	select: "Select",
 	multi_select: "MultiSelect",
 	url: "Url",
+	long_text: "LongText",
 };
 
 const UI_TO_API_FIELD_TYPE: Record<CustomFieldDef["field_type"], FieldType> = {
@@ -32,6 +33,7 @@ const UI_TO_API_FIELD_TYPE: Record<CustomFieldDef["field_type"], FieldType> = {
 	Select: "select",
 	MultiSelect: "multi_select",
 	Url: "url",
+	LongText: "long_text",
 };
 
 export function mapApiFieldToUi(
@@ -44,6 +46,7 @@ export function mapApiFieldToUi(
 		field_type: API_TO_UI_FIELD_TYPE[apiField.field_type] ?? "Text",
 		required: apiField.is_required,
 		options: apiField.options,
+		rows: apiField.rows,
 	};
 }
 

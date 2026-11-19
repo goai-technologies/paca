@@ -78,7 +78,7 @@ type Handler struct {
 	// connection, but was gone the instant a second connection resumed via
 	// session/load. Reusing chatsandbox.Registry's type rather than a
 	// bespoke one — its State shape (Client/SessionID/ProjectID/
-	// ActorUserID/LastActiveAt, Handle left nil) already fits exactly, and
+	// ActorAccountID/LastActiveAt, Handle left nil) already fits exactly, and
 	// avoids a second idle-cache implementation to keep in sync.
 	ProviderCLIEnvClients *chatsandbox.Registry
 	ACPDispatcher         *acpbridge.Dispatcher
@@ -124,14 +124,14 @@ func (h *Handler) Handle(ctx context.Context, trigger agent.Trigger) error {
 	// Chat conversations are owner-private: their realtime events must route
 	// to the owner's user room, not the project room. Resolve the owner user
 	// id once here (sessionless triggers have ChatSessionID == nil and keep a
-	// nil ActorUserID, staying project-shared) so both the llm path and the
+	// nil ActorAccountID, staying project-shared) so both the llm path and the
 	// acp dispatch path below publish the right room.
 	if trigger.ChatSessionID != nil {
-		_, ownerUserID, err := h.ConvRepo.GetConversationRealtimeContext(ctx, trigger.ConversationID)
+		_, ownerAccountID, err := h.ConvRepo.GetConversationRealtimeContext(ctx, trigger.ConversationID)
 		if err != nil {
 			return fmt.Errorf("resolve realtime owner for conversation %s: %w", trigger.ConversationID, err)
 		}
-		trigger.ActorUserID = ownerUserID
+		trigger.ActorAccountID = ownerAccountID
 	}
 
 	cfg, err := h.AgentRepo.FindByID(ctx, trigger.AgentID)
@@ -178,7 +178,7 @@ func (h *Handler) Handle(ctx context.Context, trigger agent.Trigger) error {
 				h.Log.Warn("agent-runner: failed to record failure status after a bundled-skills load error",
 					"conversation_id", trigger.ConversationID, "error", statusErr)
 			}
-			h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorUserID, "failed", "agent.conversation.failed")
+			h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorAccountID, "failed", "agent.conversation.failed")
 			h.Log.Error("agent-runner: failed to load bundled skills",
 				"conversation_id", trigger.ConversationID, "agent_id", trigger.AgentID, "error", err)
 			// The failure is already recorded and visible, so ack (return
@@ -334,7 +334,7 @@ func (h *Handler) Handle(ctx context.Context, trigger agent.Trigger) error {
 				"payload":      json.RawMessage(payload),
 				"created_at":   createdAt.Format(time.RFC3339Nano),
 			},
-			trigger.ActorUserID,
+			trigger.ActorAccountID,
 		); pubErr != nil {
 			h.Log.Warn("agent-runner: failed to publish realtime event",
 				"conversation_id", trigger.ConversationID, "error", pubErr)
@@ -515,7 +515,7 @@ func (h *Handler) Handle(ctx context.Context, trigger agent.Trigger) error {
 				h.Log.Warn("agent-runner: failed to record stopped status",
 					"conversation_id", trigger.ConversationID, "error", err)
 			}
-			h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorUserID, "stopped", "agent.conversation.stopped")
+			h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorAccountID, "stopped", "agent.conversation.stopped")
 			h.Log.Info("agent-runner: conversation stopped",
 				"conversation_id", trigger.ConversationID)
 			return nil
@@ -569,7 +569,7 @@ func (h *Handler) Handle(ctx context.Context, trigger agent.Trigger) error {
 			h.Log.Warn("agent-runner: failed to record failure status",
 				"conversation_id", trigger.ConversationID, "error", err)
 		}
-		h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorUserID, "failed", "agent.conversation.failed")
+		h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorAccountID, "failed", "agent.conversation.failed")
 		// The run itself failing isn't a transient infra condition to
 		// retry — the failure is already recorded, so ack (return nil)
 		// rather than leave it stuck redelivering forever.
@@ -710,7 +710,7 @@ func (h *Handler) Handle(ctx context.Context, trigger agent.Trigger) error {
 	if err := h.ConvRepo.UpdateStatus(ctx, trigger.ConversationID, "finished", noOutputMsg); err != nil {
 		return fmt.Errorf("mark conversation %s finished: %w", trigger.ConversationID, err)
 	}
-	h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorUserID, "finished", "agent.conversation.finished")
+	h.publishTerminalStatus(ctx, trigger.ProjectID, trigger.ConversationID, trigger.ActorAccountID, "finished", "agent.conversation.finished")
 
 	h.Log.Info("agent-runner: conversation finished",
 		"conversation_id", trigger.ConversationID, "stop_reason", result.StopReason)
@@ -780,12 +780,12 @@ func (h *Handler) keepSandboxAlive(trigger agent.Trigger, result executor.Result
 		return
 	}
 	h.ChatSandboxes.Set(trigger.ConversationID, &chatsandbox.State{
-		Handle:       result.Handle,
-		Client:       result.Client,
-		SessionID:    result.SessionID,
-		ProjectID:    trigger.ProjectID,
-		ActorUserID:  trigger.ActorUserID,
-		LastActiveAt: time.Now(),
+		Handle:         result.Handle,
+		Client:         result.Client,
+		SessionID:      result.SessionID,
+		ProjectID:      trigger.ProjectID,
+		ActorAccountID: trigger.ActorAccountID,
+		LastActiveAt:   time.Now(),
 	})
 }
 
@@ -804,11 +804,11 @@ func (h *Handler) keepSandboxAlive(trigger agent.Trigger, result executor.Result
 // this registry's to stop, only the local *acp.Client connection is.
 func (h *Handler) keepProviderCLIClientAlive(ctx context.Context, trigger agent.Trigger, result executor.Result) {
 	h.ProviderCLIEnvClients.Set(trigger.ConversationID, &chatsandbox.State{
-		Client:       result.Client,
-		SessionID:    result.SessionID,
-		ProjectID:    trigger.ProjectID,
-		ActorUserID:  trigger.ActorUserID,
-		LastActiveAt: time.Now(),
+		Client:         result.Client,
+		SessionID:      result.SessionID,
+		ProjectID:      trigger.ProjectID,
+		ActorAccountID: trigger.ActorAccountID,
+		LastActiveAt:   time.Now(),
 	})
 	// tearDownSandbox's own environment branch normally does this bump —
 	// bypassed here since this path calls neither it nor that branch, but a
@@ -980,7 +980,7 @@ func (h *Handler) TeardownPausedChatSandbox(ctx context.Context, conversationID 
 		h.Log.Warn("agent-runner: failed to record stopped status for paused chat sandbox",
 			"conversation_id", conversationID, "error", err)
 	}
-	h.publishTerminalStatus(ctx, state.ProjectID, conversationID, state.ActorUserID, "stopped", "agent.conversation.stopped")
+	h.publishTerminalStatus(ctx, state.ProjectID, conversationID, state.ActorAccountID, "stopped", "agent.conversation.stopped")
 	return true
 }
 
@@ -1031,9 +1031,9 @@ func (h *Handler) TeardownIdleProviderCLIClient(conversationID uuid.UUID) bool {
 // the pub/sub realtime path. Best-effort: a failure here is logged, not
 // returned — the conversation's own DB status is already the source of
 // truth and was written by the caller before this runs.
-func (h *Handler) publishTerminalStatus(ctx context.Context, projectID, conversationID uuid.UUID, actorUserID *uuid.UUID, status, realtimeEventType string) {
+func (h *Handler) publishTerminalStatus(ctx context.Context, projectID, conversationID uuid.UUID, actorAccountID *uuid.UUID, status, realtimeEventType string) {
 	if err := h.Publisher.PublishRealtime(
-		ctx, projectID, conversationID, realtimeEventType, nil, actorUserID,
+		ctx, projectID, conversationID, realtimeEventType, nil, actorAccountID,
 	); err != nil {
 		h.Log.Warn("agent-runner: failed to publish realtime status",
 			"conversation_id", conversationID, "status", status, "error", err)
@@ -1052,7 +1052,7 @@ func (h *Handler) publishTerminalStatus(ctx context.Context, projectID, conversa
 // terminal status does.
 func (h *Handler) publishNonTerminalStatus(ctx context.Context, trigger agent.Trigger, realtimeEventType string) {
 	if err := h.Publisher.PublishRealtime(
-		ctx, trigger.ProjectID, trigger.ConversationID, realtimeEventType, nil, trigger.ActorUserID,
+		ctx, trigger.ProjectID, trigger.ConversationID, realtimeEventType, nil, trigger.ActorAccountID,
 	); err != nil {
 		h.Log.Warn("agent-runner: failed to publish realtime status",
 			"conversation_id", trigger.ConversationID, "event_type", realtimeEventType, "error", err)

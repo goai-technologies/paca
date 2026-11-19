@@ -120,6 +120,30 @@ func (a *Authorizer) Authorize(ctx context.Context, p Principal, action, resourc
 	return a.evaluate(ctx, grants, p, action, resource, o.attrs)
 }
 
+// Query is one action-on-resource question for AuthorizeMany.
+type Query struct{ Action, Resource string }
+
+// AuthorizeMany answers several Authorize questions for one principal,
+// fetching the principal's grants once. The results are in query order. As
+// with Authorize, an error means the answers are unknown and the caller MUST
+// deny.
+func (a *Authorizer) AuthorizeMany(ctx context.Context, p Principal, queries []Query) ([]Result, error) {
+	out := make([]Result, len(queries))
+	if !p.valid() {
+		return out, nil
+	}
+	grants, err := a.store.ListGrants(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("iam: list grants: %w", err)
+	}
+	for i, q := range queries {
+		if out[i], err = a.evaluate(ctx, grants, p, q.Action, q.Resource, nil); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // AuthorizeChange authorizes an update that may change attributes: it must be
 // allowed against the current (loaded) state AND against the state with
 // newAttrs overlaid. If the kind's loader implements AttributeExpander, newAttrs
@@ -285,18 +309,6 @@ func (a *Authorizer) ListScopes(ctx context.Context, p Principal, action string,
 // (those with a PlatformRootFor) on their platform root resource and each
 // plugin's own actions on plugin/<pluginID>.
 func (a *Authorizer) EffectiveActions(ctx context.Context, p Principal, projectID string) ([]string, error) {
-	return a.effectiveActions(ctx, p, projectID, true)
-}
-
-// ProjectWideActions returns the registered actions the principal may perform
-// on project/<projectID> itself, leaving out those allowed only on some
-// resource inside it (a single task, one sprint). Unlike EffectiveActions it
-// is fit to authorize project-wide delivery, such as realtime rooms.
-func (a *Authorizer) ProjectWideActions(ctx context.Context, p Principal, projectID string) ([]string, error) {
-	return a.effectiveActions(ctx, p, projectID, false)
-}
-
-func (a *Authorizer) effectiveActions(ctx context.Context, p Principal, projectID string, includeChild bool) ([]string, error) {
 	if !p.valid() {
 		return nil, nil
 	}
@@ -323,7 +335,7 @@ func (a *Authorizer) effectiveActions(ctx context.Context, p Principal, projectI
 		if err != nil {
 			return nil, err
 		}
-		if r.Allowed || (includeChild && projectID != "" && possiblyAllowedOnChild(grants, action, projectID)) {
+		if r.Allowed || (projectID != "" && possiblyAllowedOnChild(grants, action, projectID)) {
 			out = append(out, action)
 		}
 	}
@@ -346,12 +358,14 @@ func PlatformRootFor(action string) string {
 		return "plugin/*"
 	case "settings":
 		return "settings"
-	case "settings.sso":
+	case "settings.sso", "settings.security":
 		return "sso"
 	case "agents":
 		return "agent/*"
 	case "projects":
 		return "project"
+	case "git.identities":
+		return "git_identity/*"
 	}
 	return ""
 }

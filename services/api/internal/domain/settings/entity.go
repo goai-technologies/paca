@@ -28,8 +28,11 @@ type WorkspaceSettings struct {
 	// commitment (the "Commitments" project). nil until an admin sets it,
 	// and until then no ticket can be attached to a commitment.
 	CommitmentsProjectID *uuid.UUID
-	UpdatedAt            time.Time
-	UpdatedBy            *uuid.UUID
+	// FeedbackEnabled shows the in-app "Send feedback" / "Report this issue"
+	// entry points. Defaults to true.
+	FeedbackEnabled bool
+	UpdatedAt       time.Time
+	UpdatedBy       *uuid.UUID
 }
 
 // ImageSlot discriminates the two image slots a WorkspaceSettings row holds.

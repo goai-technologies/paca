@@ -1,6 +1,8 @@
 {
 	"activityPane": {
+		"resize": "Redimensionner le panneau d'activité",
 		"title": "Activité",
+		"actions": "Actions de l'entrée",
 		"empty": "Aucune activité pour le moment",
 		"emptyComments": "Aucun commentaire pour le moment",
 		"showAllActivity": "Afficher toute l'activité",
@@ -194,5 +196,14 @@
 		"minOne": "Au moins un rôle est requis.",
 		"clear": "Effacer",
 		"placeholder": "Sélectionner des rôles"
+	},
+	"askQuestion": {
+		"otherPlaceholder": "Ou saisissez votre propre réponse…",
+		"submit": "Envoyer la réponse",
+		"answered": "Vous avez répondu : {{answer}}"
+	},
+	"paneResize": {
+		"sidebar": "Redimensionner la barre latérale",
+		"taskColumn": "Redimensionner la colonne des tâches"
 	}
 }

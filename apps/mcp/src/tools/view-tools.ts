@@ -95,22 +95,26 @@ const ListTaskPositionsSchema = z.object({
 	viewId: z.string(),
 });
 
-const BulkMoveTasksSchema = z.object({
-	projectId: z.string(),
-	viewId: z.string(),
-	taskId: z.string(),
-	targetViewId: z.string(),
-	targetStatusId: z.string().nullable().optional(),
-	targetPosition: z.number().optional(),
-});
-
 const MoveTaskSchema = z.object({
 	projectId: z.string(),
 	viewId: z.string(),
 	taskId: z.string(),
-	targetViewId: z.string(),
-	targetStatusId: z.string().nullable().optional(),
-	targetPosition: z.number().optional(),
+	position: z.number().min(0),
+	groupKey: z.string().nullable().optional(),
+});
+
+const BulkMoveTasksSchema = z.object({
+	projectId: z.string(),
+	viewId: z.string(),
+	items: z
+		.array(
+			z.object({
+				taskId: z.string(),
+				position: z.number().min(0),
+				groupKey: z.string().nullable().optional(),
+			}),
+		)
+		.min(1),
 });
 
 const ListCustomFieldsSchema = z.object({
@@ -131,6 +135,8 @@ const CreateCustomFieldSchema = z.object({
 	fieldType: z.string(),
 	options: z.array(CustomFieldOptionInputSchema).optional(),
 	isRequired: z.boolean().optional(),
+	useInSearch: z.boolean().optional(),
+	rows: z.number().int().min(2).max(20).optional(),
 });
 
 const GetCustomFieldSchema = z.object({
@@ -145,6 +151,8 @@ const UpdateCustomFieldSchema = z.object({
 	fieldType: z.string().optional(),
 	options: z.array(CustomFieldOptionInputSchema).optional(),
 	isRequired: z.boolean().optional(),
+	useInSearch: z.boolean().optional(),
+	rows: z.number().int().min(2).max(20).optional(),
 });
 
 // Normalizes a parsed options array (each element either a plain string or
@@ -212,9 +220,9 @@ export function getViewTools(): Tool[] {
 					},
 					viewType: {
 						type: "string",
-						enum: ["table", "board", "roadmap", "plugin"],
+						enum: ["table", "board", "gantt", "plugin"],
 						description:
-							"The type of view. Use 'table', 'board', or 'roadmap' for the built-in layouts, or 'plugin' to host a plugin-provided view (requires pluginManifestId and pluginComponent).",
+							"The type of view. Use 'table', 'board', or 'gantt' for the built-in layouts, or 'plugin' to host a plugin-provided view (requires pluginManifestId and pluginComponent).",
 					},
 					sprintId: {
 						type: "string",
@@ -304,9 +312,9 @@ export function getViewTools(): Tool[] {
 					},
 					viewType: {
 						type: "string",
-						enum: ["table", "board", "roadmap", "plugin"],
+						enum: ["table", "board", "gantt", "plugin"],
 						description:
-							"The type of view (table, board, roadmap, or plugin — plugin requires pluginManifestId and pluginComponent).",
+							"The type of view (table, board, gantt, or plugin — plugin requires pluginManifestId and pluginComponent).",
 					},
 					sprintId: {
 						type: "string",
@@ -364,7 +372,8 @@ export function getViewTools(): Tool[] {
 		},
 		{
 			name: "bulk_move_tasks",
-			description: "Bulk move tasks in a view",
+			description:
+				"Set the position of several tasks within one view (no sprint or status change)",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -376,29 +385,33 @@ export function getViewTools(): Tool[] {
 						type: "string",
 						description: "The ID of the view",
 					},
-					taskId: {
-						type: "string",
-						description: "The ID of the task to move",
-					},
-					targetViewId: {
-						type: "string",
-						description: "The target view ID",
-					},
-					targetStatusId: {
-						type: "string",
-						description: "The target status ID",
-					},
-					targetPosition: {
-						type: "number",
-						description: "The target position",
+					items: {
+						type: "array",
+						description: "The tasks and their new positions in the view",
+						items: {
+							type: "object",
+							properties: {
+								taskId: { type: "string", description: "The ID of the task" },
+								position: {
+									type: "number",
+									description: "The zero-based position in the view",
+								},
+								groupKey: {
+									type: ["string", "null"],
+									description: "The group key when the view is grouped",
+								},
+							},
+							required: ["taskId", "position"],
+						},
 					},
 				},
-				required: ["projectId", "viewId", "taskId", "targetViewId"],
+				required: ["projectId", "viewId", "items"],
 			},
 		},
 		{
 			name: "move_task",
-			description: "Move a task within a view",
+			description:
+				"Set a task's position within one view (no sprint or status change)",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -414,20 +427,16 @@ export function getViewTools(): Tool[] {
 						type: "string",
 						description: "The ID of the task",
 					},
-					targetViewId: {
-						type: "string",
-						description: "The target view ID",
-					},
-					targetStatusId: {
-						type: "string",
-						description: "The target status ID",
-					},
-					targetPosition: {
+					position: {
 						type: "number",
-						description: "The target position",
+						description: "The zero-based position in the view",
+					},
+					groupKey: {
+						type: ["string", "null"],
+						description: "The group key when the view is grouped",
 					},
 				},
-				required: ["projectId", "viewId", "taskId", "targetViewId"],
+				required: ["projectId", "viewId", "taskId", "position"],
 			},
 		},
 	];
@@ -473,7 +482,7 @@ export function getCustomFieldTools(): Tool[] {
 					fieldType: {
 						type: "string",
 						description:
-							"The field type (text, number, date, select, multi_select, boolean, url)",
+							"The field type (text, number, date, select, multi_select, boolean, url, long_text)",
 					},
 					options: {
 						type: "array",
@@ -496,6 +505,15 @@ export function getCustomFieldTools(): Tool[] {
 					isRequired: {
 						type: "boolean",
 						description: "Whether the field is required",
+					},
+					useInSearch: {
+						type: "boolean",
+						description: "Whether task search also matches this field's value",
+					},
+					rows: {
+						type: "number",
+						description:
+							"Visible lines of a long_text field's editor (2-20, default 3)",
 					},
 				},
 				required: ["projectId", "fieldKey", "displayName", "fieldType"],
@@ -562,6 +580,15 @@ export function getCustomFieldTools(): Tool[] {
 					isRequired: {
 						type: "boolean",
 						description: "Whether the field is required",
+					},
+					useInSearch: {
+						type: "boolean",
+						description: "Whether task search also matches this field's value",
+					},
+					rows: {
+						type: "number",
+						description:
+							"Visible lines of a long_text field's editor (2-20, default 3)",
 					},
 				},
 				required: ["projectId", "fieldId"],
@@ -632,6 +659,8 @@ Key: ${field.field_key}
 Type: ${field.field_type}
 Options: ${field.options.length > 0 ? field.options.map((o: { value: string }) => o.value).join(", ") : "None"}
 Required: ${field.is_required}
+Use in search: ${field.use_in_search}
+Rows: ${field.rows}
 Created: ${field.created_at}`;
 }
 
@@ -783,50 +812,36 @@ export async function handleViewTool(
 		}
 
 		case "bulk_move_tasks": {
-			const {
-				projectId,
-				viewId,
-				taskId,
-				targetViewId,
-				targetStatusId,
-				targetPosition,
-			} = BulkMoveTasksSchema.parse(args);
+			const { projectId, viewId, items } = BulkMoveTasksSchema.parse(args);
 			await client.bulkMoveTasks(projectId, viewId, {
-				task_id: taskId,
-				target_view_id: targetViewId,
-				target_status_id: targetStatusId ?? null,
-				target_position: targetPosition,
+				items: items.map((item) => ({
+					task_id: item.taskId,
+					position: item.position,
+					group_key: item.groupKey ?? null,
+				})),
 			});
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Tasks moved successfully`,
+						text: `Moved ${items.length} task position${items.length === 1 ? "" : "s"} in view ${viewId}`,
 					},
 				],
 			};
 		}
 
 		case "move_task": {
-			const {
-				projectId,
-				viewId,
-				taskId,
-				targetViewId,
-				targetStatusId,
-				targetPosition,
-			} = MoveTaskSchema.parse(args);
-			await client.bulkMoveTasks(projectId, viewId, {
-				task_id: taskId,
-				target_view_id: targetViewId,
-				target_status_id: targetStatusId ?? null,
-				target_position: targetPosition,
+			const { projectId, viewId, taskId, position, groupKey } =
+				MoveTaskSchema.parse(args);
+			await client.moveTaskPosition(projectId, viewId, taskId, {
+				position,
+				group_key: groupKey ?? null,
 			});
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Task moved successfully`,
+						text: `Moved task ${taskId} to position ${position} in view ${viewId}`,
 					},
 				],
 			};
@@ -854,6 +869,8 @@ export async function handleViewTool(
 				fieldType,
 				options,
 				isRequired,
+				useInSearch,
+				rows,
 			} = CreateCustomFieldSchema.parse(args);
 			const field = await client.createCustomFieldDefinition(projectId, {
 				field_key: fieldKey,
@@ -861,6 +878,8 @@ export async function handleViewTool(
 				field_type: fieldType as any,
 				options: normalizeCustomFieldOptions(options),
 				is_required: isRequired,
+				use_in_search: useInSearch,
+				rows,
 			});
 			return {
 				content: [
@@ -893,6 +912,8 @@ export async function handleViewTool(
 				fieldType,
 				options,
 				isRequired,
+				useInSearch,
+				rows,
 			} = UpdateCustomFieldSchema.parse(args);
 			const field = await client.updateCustomFieldDefinition(
 				projectId,
@@ -902,6 +923,8 @@ export async function handleViewTool(
 					field_type: fieldType as any,
 					options: normalizeCustomFieldOptions(options),
 					is_required: isRequired,
+					use_in_search: useInSearch,
+					rows,
 				},
 			);
 			return {

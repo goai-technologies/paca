@@ -37,23 +37,25 @@ type Trigger struct {
 	ConversationID uuid.UUID
 	// ProjectID is the zero value (uuid.Nil) for a global-chat trigger — see
 	// agentdom.AgentConversation's own doc comment on the same convention.
-	ProjectID     uuid.UUID
-	AgentID       uuid.UUID
-	TaskID        *uuid.UUID
+	ProjectID uuid.UUID
+	AgentID   uuid.UUID
+	TaskID    *uuid.UUID
+	// DocumentID is set for a comment_mention on a document (TaskID is nil).
+	DocumentID    *uuid.UUID
 	CommentID     *uuid.UUID
 	ChatSessionID *uuid.UUID
 	Message       string
 	// ActorMemberID is nil when the automation-workflow engine fired this
 	// trigger rather than a human — see entity.go's AgentConversation doc
-	// comment on TriggeredByMemberID/ActorUserID. Never set together with
-	// ActorUserID.
+	// comment on TriggeredByMemberID/ActorAccountID. Never set together with
+	// ActorAccountID.
 	ActorMemberID *uuid.UUID
-	// ActorUserID is set only for a global-chat trigger (ProjectID is
+	// ActorAccountID is set only for a global-chat trigger (ProjectID is
 	// uuid.Nil) — publishGlobalChatTrigger in agent_service.go identifies
-	// the human by actor_user_id instead of actor_member_id, since there
+	// the human by actor_account_id instead of actor_member_id, since there
 	// may be no project_members row for them at all.
-	ActorUserID *uuid.UUID
-	TriggerType TriggerType
+	ActorAccountID *uuid.UUID
+	TriggerType    TriggerType
 	// RepoPluginIDs is the comma-separated repo_plugin_ids stream field,
 	// already split — a project can have more than one repository plugin
 	// installed.

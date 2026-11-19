@@ -14,6 +14,13 @@ type listCursor struct {
 	ID        string    `json:"id"`
 }
 
+// KeyFilter shapes an API key list.
+type KeyFilter struct {
+	// Offset, when positive, skips that many keys instead of resuming from a
+	// cursor — page-number paging for tables. The cursor is then ignored.
+	Offset int
+}
+
 // EncodeCursor builds the opaque cursor that resumes a (created_at, id)
 // ordered list after the row with the given values. The key list
 // orders on that pair.

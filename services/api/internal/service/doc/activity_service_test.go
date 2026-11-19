@@ -11,7 +11,9 @@ import (
 	"github.com/google/uuid"
 
 	activitydom "github.com/Paca-AI/api/internal/domain/activity"
+	agentdom "github.com/Paca-AI/api/internal/domain/agent"
 	docdom "github.com/Paca-AI/api/internal/domain/doc"
+	notificationdom "github.com/Paca-AI/api/internal/domain/notification"
 	projectdom "github.com/Paca-AI/api/internal/domain/project"
 	userdom "github.com/Paca-AI/api/internal/domain/user"
 	activitysvc "github.com/Paca-AI/api/internal/service/activity"
@@ -70,18 +72,15 @@ func (r *fakeCommentActivityRepo) find(id uuid.UUID) *activitydom.Activity {
 	return a
 }
 
-// fakeCommentMemberRepo mirrors production FindMemberByActor semantics
+// fakeCommentMemberRepo mirrors production FindMember semantics
 // closely enough to exercise the unidentified-actor branch: the
-// userdom.SystemActorUserID identity (with no agentID) is never itself a
+// userdom.SystemActorUserID identity is never itself a
 // project member, exactly like the real repository.
 type fakeCommentMemberRepo struct {
 	membersByUser map[uuid.UUID]*projectdom.ProjectMember
 }
 
-func (r *fakeCommentMemberRepo) FindMemberByActor(_ context.Context, _ uuid.UUID, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error) {
-	if agentID != nil {
-		return &projectdom.ProjectMember{ID: *agentID, MemberType: "agent"}, nil
-	}
+func (r *fakeCommentMemberRepo) FindMember(_ context.Context, _ uuid.UUID, actorID uuid.UUID) (*projectdom.ProjectMember, error) {
 	if actorID == userdom.SystemActorUserID {
 		// Matches production: the system/agent-bot identity is never itself
 		// a project member.
@@ -113,7 +112,6 @@ func TestActivitySvc_AddComment_UnidentifiedSystemActor_ReturnsClearError(t *tes
 		DocumentID: documentID,
 		ProjectID:  projectID,
 		ActorID:    userdom.SystemActorUserID, // shared agent key, no X-Agent-ID
-		AgentID:    nil,
 		Content:    validCommentContent(),
 	})
 
@@ -139,7 +137,6 @@ func TestActivitySvc_AddComment_GenuineNonMember_ReturnsMemberNotFound(t *testin
 		DocumentID: documentID,
 		ProjectID:  projectID,
 		ActorID:    realUserID,
-		AgentID:    nil,
 		Content:    validCommentContent(),
 	})
 
@@ -198,7 +195,7 @@ func TestActivitySvc_UpdateComment_UnidentifiedSystemActor_ReturnsClearError(t *
 	memberRepo := &fakeCommentMemberRepo{membersByUser: map[uuid.UUID]*projectdom.ProjectMember{}}
 	svc := docsvc.NewActivityService(activitysvc.New(repo.log, memberRepo, nil), repo)
 
-	_, err := svc.UpdateComment(context.Background(), commentID, projectID, userdom.SystemActorUserID, nil, validCommentContent())
+	_, err := svc.UpdateComment(context.Background(), commentID, projectID, userdom.SystemActorUserID, validCommentContent())
 
 	if !errors.Is(err, docdom.ErrCommentActorUnidentified) {
 		t.Fatalf("expected ErrCommentActorUnidentified, got %v", err)
@@ -222,7 +219,7 @@ func TestActivitySvc_DeleteComment_UnidentifiedSystemActor_ReturnsClearError(t *
 	memberRepo := &fakeCommentMemberRepo{membersByUser: map[uuid.UUID]*projectdom.ProjectMember{}}
 	svc := docsvc.NewActivityService(activitysvc.New(repo.log, memberRepo, nil), repo)
 
-	err := svc.DeleteComment(context.Background(), commentID, projectID, userdom.SystemActorUserID, nil)
+	err := svc.DeleteComment(context.Background(), commentID, projectID, userdom.SystemActorUserID)
 
 	if !errors.Is(err, docdom.ErrCommentActorUnidentified) {
 		t.Fatalf("expected ErrCommentActorUnidentified, got %v", err)
@@ -303,7 +300,7 @@ func TestActivitySvc_UpdateComment_WrongProject_ReturnsNotFound(t *testing.T) {
 	}}
 	svc := docsvc.NewActivityService(activitysvc.New(repo.log, memberRepo, nil), repo)
 
-	_, err := svc.UpdateComment(context.Background(), commentID, attackerProjectID, author, nil, validCommentContent())
+	_, err := svc.UpdateComment(context.Background(), commentID, attackerProjectID, author, validCommentContent())
 	if !errors.Is(err, docdom.ErrActivityNotFound) {
 		t.Fatalf("expected ErrActivityNotFound for cross-project UpdateComment, got %v", err)
 	}
@@ -329,11 +326,125 @@ func TestActivitySvc_DeleteComment_WrongProject_ReturnsNotFound(t *testing.T) {
 	}}
 	svc := docsvc.NewActivityService(activitysvc.New(repo.log, memberRepo, nil), repo)
 
-	err := svc.DeleteComment(context.Background(), commentID, attackerProjectID, author, nil)
+	err := svc.DeleteComment(context.Background(), commentID, attackerProjectID, author)
 	if !errors.Is(err, docdom.ErrActivityNotFound) {
 		t.Fatalf("expected ErrActivityNotFound for cross-project DeleteComment, got %v", err)
 	}
 	if repo.find(commentID).DeletedAt != nil {
 		t.Error("comment must not be deleted by a cross-project request")
+	}
+}
+
+// fakeDocAgentTrigger records TriggerDocCommentMention calls.
+type fakeDocAgentTrigger struct {
+	calls []struct{ agentID, documentID, commentID, by uuid.UUID }
+	text  []string
+}
+
+func (f *fakeDocAgentTrigger) TriggerDocCommentMention(_ context.Context, _, agentID, documentID, commentID, by uuid.UUID, message string) (*agentdom.AgentConversation, error) {
+	f.calls = append(f.calls, struct{ agentID, documentID, commentID, by uuid.UUID }{agentID, documentID, commentID, by})
+	f.text = append(f.text, message)
+	return &agentdom.AgentConversation{ID: uuid.New()}, nil
+}
+
+func TestActivitySvc_AddComment_MentionedAgentIsTriggered(t *testing.T) {
+	repo := newFakeCommentActivityRepo()
+	documentID, projectID := uuid.New(), uuid.New()
+	repo.docs[documentID] = &docdom.Document{ID: documentID, ProjectID: projectID}
+
+	authorUser, agentID := uuid.New(), uuid.New()
+	author := &projectdom.ProjectMember{ID: uuid.New(), ProjectID: projectID, UserID: authorUser}
+	agentMember := &projectdom.ProjectMember{ID: uuid.New(), ProjectID: projectID, MemberType: "agent", AgentID: &agentID}
+	memberRepo := &fakeCommentMemberRepo{membersByUser: map[uuid.UUID]*projectdom.ProjectMember{
+		authorUser: author,
+		agentID:    agentMember,
+	}}
+	trigger := &fakeDocAgentTrigger{}
+	svc := docsvc.NewActivityService(activitysvc.New(repo.log, memberRepo, nil), repo).
+		WithAgentTrigger(trigger, memberRepo)
+
+	content := json.RawMessage(`[{"type":"paragraph","content":[` +
+		`{"type":"teamMention","props":{"id":"` + agentID.String() + `","name":"Helper"}},` +
+		`{"type":"text","text":" Option A"}]}]`)
+	a, err := svc.AddComment(context.Background(), docdom.AddCommentInput{
+		DocumentID: documentID, ProjectID: projectID, ActorID: authorUser, Content: content,
+	})
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if len(trigger.calls) != 1 {
+		t.Fatalf("expected 1 trigger, got %d", len(trigger.calls))
+	}
+	c := trigger.calls[0]
+	if c.agentID != agentID || c.documentID != documentID || c.commentID != a.ID || c.by != author.ID {
+		t.Fatalf("unexpected trigger: %+v", c)
+	}
+	if trigger.text[0] != "@Helper Option A" {
+		t.Fatalf("unexpected message %q", trigger.text[0])
+	}
+}
+
+func TestActivitySvc_AddComment_AgentMentioningItselfDoesNotTrigger(t *testing.T) {
+	repo := newFakeCommentActivityRepo()
+	documentID, projectID := uuid.New(), uuid.New()
+	repo.docs[documentID] = &docdom.Document{ID: documentID, ProjectID: projectID}
+
+	agentID := uuid.New()
+	agentMember := &projectdom.ProjectMember{ID: uuid.New(), ProjectID: projectID, MemberType: "agent", AgentID: &agentID}
+	memberRepo := &fakeCommentMemberRepo{membersByUser: map[uuid.UUID]*projectdom.ProjectMember{agentID: agentMember}}
+	trigger := &fakeDocAgentTrigger{}
+	svc := docsvc.NewActivityService(activitysvc.New(repo.log, memberRepo, nil), repo).
+		WithAgentTrigger(trigger, memberRepo)
+
+	content := json.RawMessage(`[{"type":"paragraph","content":[{"type":"teamMention","props":{"id":"` + agentID.String() + `","name":"Helper"}}]}]`)
+	if _, err := svc.AddComment(context.Background(), docdom.AddCommentInput{
+		DocumentID: documentID, ProjectID: projectID, ActorID: agentID, Content: content,
+	}); err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if len(trigger.calls) != 0 {
+		t.Fatalf("self-mention must not trigger, got %d", len(trigger.calls))
+	}
+}
+
+// fakeDocNotifier records NotifyDocCommentMentioned calls.
+type fakeDocNotifier struct {
+	inputs []notificationdom.NotifyDocCommentMentionedInput
+}
+
+func (f *fakeDocNotifier) NotifyDocCommentMentioned(_ context.Context, in notificationdom.NotifyDocCommentMentionedInput) error {
+	f.inputs = append(f.inputs, in)
+	return nil
+}
+
+func TestActivitySvc_AddComment_MentionedPersonIsNotified(t *testing.T) {
+	repo := newFakeCommentActivityRepo()
+	documentID, projectID := uuid.New(), uuid.New()
+	repo.docs[documentID] = &docdom.Document{ID: documentID, ProjectID: projectID}
+
+	agentID, personID := uuid.New(), uuid.New()
+	author := &projectdom.ProjectMember{ID: uuid.New(), ProjectID: projectID, MemberType: "agent", AgentID: &agentID}
+	person := &projectdom.ProjectMember{ID: uuid.New(), ProjectID: projectID, UserID: personID, AccountID: personID}
+	memberRepo := &fakeCommentMemberRepo{membersByUser: map[uuid.UUID]*projectdom.ProjectMember{
+		agentID:  author,
+		personID: person,
+	}}
+	notifier := &fakeDocNotifier{}
+	svc := docsvc.NewActivityService(activitysvc.New(repo.log, memberRepo, nil), repo).
+		WithAgentTrigger(&fakeDocAgentTrigger{}, memberRepo).
+		WithNotificationService(notifier)
+
+	content := json.RawMessage(`[{"type":"paragraph","content":[{"type":"teamMention","props":{"id":"` + personID.String() + `","name":"Admin"}}]}]`)
+	if _, err := svc.AddComment(context.Background(), docdom.AddCommentInput{
+		DocumentID: documentID, ProjectID: projectID, ActorID: agentID, Content: content,
+	}); err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if len(notifier.inputs) != 1 {
+		t.Fatalf("expected 1 notification, got %d", len(notifier.inputs))
+	}
+	in := notifier.inputs[0]
+	if in.MentionedUserID != personID || in.DocumentID != documentID || in.ActorMemberID != author.ID || in.ActorID != agentID {
+		t.Fatalf("unexpected notification input: %+v", in)
 	}
 }

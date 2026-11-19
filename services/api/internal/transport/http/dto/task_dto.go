@@ -402,11 +402,18 @@ type TaskResponse struct {
 	Tags             []string        `json:"tags"`
 	ViewPosition     *float64        `json:"view_position,omitempty"`
 	ViewGroupKey     *string         `json:"view_group_key,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	// SubtaskCount / SubtaskDoneCount are direct-child aggregates, present on
+	// list responses only (absent means "not computed or none").
+	SubtaskCount     int       `json:"subtask_count,omitempty"`
+	SubtaskDoneCount int       `json:"subtask_done_count,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 	// AssignmentMode is "manual" or "auto" — see taskdom.Task.AssignmentMode's
 	// doc comment.
 	AssignmentMode string `json:"assignment_mode"`
+	// Version is the row version, bumped on every update: the same value in a
+	// realtime change tells a client whether its copy is older.
+	Version int64 `json:"version"`
 	// Assignees and Reporter are the people behind AssigneeIDs / ReporterID,
 	// present only when the list request asked for them with
 	// include=assignees,reporter. They carry identity (names, avatar, kind)
@@ -452,6 +459,9 @@ func TaskFromEntity(t *taskdom.Task) TaskResponse {
 		CreatedAt:        t.CreatedAt,
 		UpdatedAt:        t.UpdatedAt,
 		AssignmentMode:   t.AssignmentMode,
+		Version:          t.Version,
+		SubtaskCount:     t.SubtaskCount,
+		SubtaskDoneCount: t.SubtaskDoneCount,
 	}
 }
 
@@ -496,6 +506,8 @@ type CreateCustomFieldDefinitionRequest struct {
 	FieldType   taskdom.FieldType      `json:"field_type" binding:"required"`
 	Options     []CustomFieldOptionDTO `json:"options"`
 	IsRequired  bool                   `json:"is_required"`
+	UseInSearch bool                   `json:"use_in_search"`
+	Rows        int                    `json:"rows"`
 }
 
 // UpdateCustomFieldDefinitionRequest is the body for
@@ -505,6 +517,8 @@ type UpdateCustomFieldDefinitionRequest struct {
 	FieldType   *taskdom.FieldType     `json:"field_type"`
 	Options     []CustomFieldOptionDTO `json:"options"`
 	IsRequired  *bool                  `json:"is_required"`
+	UseInSearch *bool                  `json:"use_in_search"`
+	Rows        *int                   `json:"rows"`
 }
 
 // CustomFieldDefinitionResponse is the public representation of a custom
@@ -517,6 +531,8 @@ type CustomFieldDefinitionResponse struct {
 	FieldType   taskdom.FieldType      `json:"field_type"`
 	Options     []CustomFieldOptionDTO `json:"options"`
 	IsRequired  bool                   `json:"is_required"`
+	UseInSearch bool                   `json:"use_in_search"`
+	Rows        int                    `json:"rows"`
 	CreatedAt   time.Time              `json:"created_at"`
 	UpdatedAt   time.Time              `json:"updated_at"`
 }
@@ -559,6 +575,8 @@ func CustomFieldDefinitionFromEntity(f *taskdom.CustomFieldDefinition) CustomFie
 		FieldType:   f.FieldType,
 		Options:     opts,
 		IsRequired:  f.IsRequired,
+		UseInSearch: f.UseInSearch,
+		Rows:        f.Rows,
 		CreatedAt:   f.CreatedAt,
 		UpdatedAt:   f.UpdatedAt,
 	}
@@ -667,5 +685,37 @@ func TaskLinkFromEntity(l *taskdom.TaskLink) TaskLinkResponse {
 			TaskTypeID: l.LinkedTask.TaskTypeID,
 		}
 	}
+	return resp
+}
+
+// ProjectTaskLinkResponse is one link in a project-wide link listing. Unlike
+// TaskLinkResponse it is not seen from either task, so it carries neither a
+// display label nor a summary of the other task: both ids are tasks the
+// caller already reads through the task list.
+type ProjectTaskLinkResponse struct {
+	ID           uuid.UUID        `json:"id"`
+	SourceTaskID uuid.UUID        `json:"source_task_id"`
+	TargetTaskID uuid.UUID        `json:"target_task_id"`
+	LinkType     taskdom.LinkType `json:"link_type"`
+	CreatedAt    time.Time        `json:"created_at"`
+}
+
+// ProjectTaskLinkFromEntity maps a domain TaskLink to a ProjectTaskLinkResponse.
+func ProjectTaskLinkFromEntity(l *taskdom.TaskLink) ProjectTaskLinkResponse {
+	return ProjectTaskLinkResponse{
+		ID:           l.ID,
+		SourceTaskID: l.SourceTaskID,
+		TargetTaskID: l.TargetTaskID,
+		LinkType:     l.LinkType,
+		CreatedAt:    l.CreatedAt,
+	}
+}
+
+// TaskSnapshot is the task as realtime clients patch it into their cache: the
+// route response without the description, which can be large and which
+// collaborative editing owns, so a client keeps the one it has.
+func TaskSnapshot(t *taskdom.Task) TaskResponse {
+	resp := TaskFromEntity(t)
+	resp.Description = nil
 	return resp
 }

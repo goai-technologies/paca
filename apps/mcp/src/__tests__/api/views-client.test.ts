@@ -220,17 +220,33 @@ describe("PacaAPIViewsClient", () => {
 	});
 
 	describe("bulkMoveTasks", () => {
-		it("calls PUT /api/v1/projects/:id/views/:viewId/task-positions/:taskId", async () => {
+		it("calls PUT .../task-positions with the API's items body", async () => {
 			const client = new PacaAPIViewsClient(CONFIG);
 			fetchMock.mockResolvedValue(okEnvelope(null));
 			await client.bulkMoveTasks("p1", "v1", {
-				task_id: "t1",
-				target_view_id: "v2",
-				target_status_id: null,
-				target_position: 0,
+				items: [{ task_id: "t1", position: 2, group_key: "todo" }],
+			});
+			expect(fetchMock.mock.calls[0][0]).toContain("/views/v1/task-positions");
+			expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
+			const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+			expect(body).toEqual({
+				items: [{ task_id: "t1", position: 2, group_key: "todo" }],
+			});
+		});
+	});
+
+	describe("moveTaskPosition", () => {
+		it("calls PUT .../task-positions/:taskId with position and group_key", async () => {
+			const client = new PacaAPIViewsClient(CONFIG);
+			fetchMock.mockResolvedValue(okEnvelope(null));
+			await client.moveTaskPosition("p1", "v1", "t1", {
+				position: 2,
+				group_key: "todo",
 			});
 			expect(fetchMock.mock.calls[0][0]).toContain("/task-positions/t1");
 			expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
+			const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+			expect(body).toEqual({ position: 2, group_key: "todo" });
 		});
 	});
 
@@ -310,16 +326,31 @@ describe("PacaAPIViewsClient", () => {
 			fetchMock.mockResolvedValue(okEnvelope([{ id: "att1" }]));
 			const result = await client.listTaskAttachments("p1", "t1");
 			expect(fetchMock.mock.calls[0][0]).toContain("/tasks/t1/attachments");
-			expect(result).toEqual([{ id: "att1" }]);
+			expect(result.items).toEqual([{ id: "att1" }]);
 		});
 
-		it("extracts .attachments from object response", async () => {
+		it("returns one page and the cursor for the next, without fetching it", async () => {
 			const client = new PacaAPIViewsClient(CONFIG);
 			fetchMock.mockResolvedValue(
-				okEnvelope({ attachments: [{ id: "att1" }] }),
+				okEnvelope({ items: [{ id: "att1" }], next_cursor: "c2" }),
 			);
-			const result = await client.listTaskAttachments("p1", "t1");
-			expect(result).toEqual([{ id: "att1" }]);
+			const result = await client.listTaskAttachments("p1", "t1", {
+				pageSize: 1,
+			});
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(result).toEqual({ items: [{ id: "att1" }], nextCursor: "c2" });
+		});
+	});
+
+	describe("getTaskAttachment", () => {
+		it("calls GET .../attachments/:attachmentId", async () => {
+			const client = new PacaAPIViewsClient(CONFIG);
+			fetchMock.mockResolvedValue(okEnvelope({ id: "att1" }));
+			const result = await client.getTaskAttachment("p1", "t1", "att1");
+			expect(fetchMock.mock.calls[0][0]).toMatch(
+				/\/tasks\/t1\/attachments\/att1$/,
+			);
+			expect(result).toEqual({ id: "att1" });
 		});
 	});
 

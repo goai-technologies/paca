@@ -13,11 +13,12 @@ import (
 // as GET /admin/roles reports them.
 func defaultRoleNames(t *testing.T, env *e2eEnv, client *http.Client) []string {
 	t.Helper()
-	status, out := doJSON(t, env, client, http.MethodGet, "/api/v1/admin/roles", nil)
+	status, out := doJSON(t, env, client, http.MethodGet, "/api/v1/admin/roles?page_size=100", nil)
 	if status != http.StatusOK {
 		t.Fatalf("list roles: want 200, got %d", status)
 	}
-	items, _ := out.Data.([]any)
+	page, _ := out.Data.(map[string]any)
+	items, _ := page["items"].([]any)
 	var names []string
 	for _, item := range items {
 		role, _ := item.(map[string]any)

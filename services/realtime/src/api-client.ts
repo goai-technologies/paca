@@ -10,6 +10,9 @@ export interface AuthResult {
 	username: string;
 	role: string;
 	globalPermissions: string[];
+	// expiresAt is the token's exp claim in epoch milliseconds, or undefined
+	// when it carries none. A socket must not outlive it (see server.ts).
+	expiresAt?: number;
 }
 
 // Thrown by the API calls below so callers can distinguish an expired/invalid
@@ -66,12 +69,13 @@ export async function verifyTokenWithAPI(
 
 	// Decode identity claims from the JWT payload (no signature check — the
 	// API call above is the verification).
-	const { sub, username, role } = decodePayload(token);
+	const { sub, username, role, exp } = decodePayload(token);
 
 	return {
 		userId: sub,
 		username,
 		role,
+		expiresAt: exp === undefined ? undefined : exp * 1000,
 		globalPermissions: Array.isArray(envelope.data?.permissions)
 			? envelope.data.permissions
 			: [],
@@ -80,9 +84,10 @@ export async function verifyTokenWithAPI(
 
 // fetchProjectPermissions calls GET /api/v1/projects/:projectId/members/me/permissions
 // to retrieve the authenticated user's effective IAM actions in a project
-// ("tasks:read", ...), returned as a map of action -> true. scope=project
-// leaves out actions held only on a single task/doc/etc.: a room delivers
-// every event of its namespace, so it needs project-wide access.
+// ("tasks:read", ...), returned as a map of action -> true. The list includes
+// an action allowed only on some resource inside the project (one sprint's
+// tasks): it decides which rooms a socket may be in, not what it receives —
+// every event is checked on its own resource (see AccessDecider).
 // Returns null when the user is not a member of that project (API returns 404).
 export async function fetchProjectPermissions(
 	apiUrl: string,
@@ -90,7 +95,7 @@ export async function fetchProjectPermissions(
 	projectId: string,
 ): Promise<Record<string, boolean> | null> {
 	const res = await fetch(
-		`${apiUrl}/api/v1/projects/${encodeURIComponent(projectId)}/members/me/permissions?scope=project`,
+		`${apiUrl}/api/v1/projects/${encodeURIComponent(projectId)}/members/me/permissions`,
 		{
 			headers: { Authorization: `Bearer ${token}` },
 			signal: AbortSignal.timeout(8_000),
@@ -99,13 +104,65 @@ export async function fetchProjectPermissions(
 
 	if (res.status === 404) return null; // not a project member
 	if (!res.ok) {
-		throw new Error(`API project permissions failed: HTTP ${res.status}`);
+		throw new ApiRequestError(
+			`API project permissions failed: HTTP ${res.status}`,
+			res.status,
+		);
 	}
 
 	const envelope = (await res.json()) as ApiEnvelope<ProjectPermissionsData>;
 	return Object.fromEntries(
 		(envelope.data?.actions ?? []).map((action) => [action, true]),
 	);
+}
+
+// AccessQuery is one question for checkAccess: may the token's account
+// perform `action` on `resource` (an IAM resource name inside the project)?
+export interface AccessQuery {
+	action: string;
+	resource: string;
+}
+
+// checkAccess asks the API, in one request, whether the token's account is
+// allowed each query — POST /projects/:projectId/members/me/permissions/check,
+// evaluated by the IAM engine that gates the REST routes, so entity-level Deny
+// statements and conditions apply. The answers are in query order. Anything
+// but a complete answer throws (a 401 as an ApiRequestError so the caller can
+// force a fresh handshake): callers fail closed instead of caching a guess.
+export async function checkAccess(
+	apiUrl: string,
+	token: string,
+	projectId: string,
+	queries: AccessQuery[],
+): Promise<boolean[]> {
+	const res = await fetch(
+		`${apiUrl}/api/v1/projects/${encodeURIComponent(projectId)}/members/me/permissions/check`,
+		{
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ checks: queries }),
+			signal: AbortSignal.timeout(8_000),
+		},
+	);
+	if (!res.ok) {
+		throw new ApiRequestError(
+			`API access check failed: HTTP ${res.status}`,
+			res.status,
+		);
+	}
+	const envelope = (await res.json()) as ApiEnvelope<{ allowed?: unknown }>;
+	const allowed = envelope.data?.allowed;
+	if (
+		!Array.isArray(allowed) ||
+		allowed.length !== queries.length ||
+		!allowed.every((a) => typeof a === "boolean")
+	) {
+		throw new ApiRequestError("API access check: malformed answer", 502);
+	}
+	return allowed as boolean[];
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +173,7 @@ interface JwtPayload {
 	sub: string;
 	username: string;
 	role: string;
+	exp?: number;
 }
 
 function decodePayload(token: string): JwtPayload {
@@ -142,5 +200,7 @@ function decodePayload(token: string): JwtPayload {
 	if (typeof role !== "string" || !role)
 		throw new Error("JWT payload missing role");
 
-	return { sub, username, role };
+	const exp = typeof payload.exp === "number" ? payload.exp : undefined;
+
+	return { sub, username, role, exp };
 }

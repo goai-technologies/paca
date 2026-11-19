@@ -24,9 +24,18 @@ type mockNotificationSvc struct {
 	unreadCount       func(ctx context.Context, userID uuid.UUID) (int64, error)
 	markAsRead        func(ctx context.Context, id, userID uuid.UUID) error
 	markAllAsRead     func(ctx context.Context, userID uuid.UUID) error
+	docMentions       int
 }
 
 func (m *mockNotificationSvc) NotifyAssigned(_ context.Context, _ notificationdom.NotifyAssignedInput) error {
+	return nil
+}
+
+func (m *mockNotificationSvc) NotifyDocCommentMentioned(_ context.Context, _ notificationdom.NotifyDocCommentMentionedInput) error {
+	return nil
+}
+
+func (m *mockNotificationSvc) NotifyQuestion(_ context.Context, _ notificationdom.NotifyQuestionInput) error {
 	return nil
 }
 
@@ -35,6 +44,7 @@ func (m *mockNotificationSvc) NotifyMentioned(_ context.Context, _ notificationd
 }
 
 func (m *mockNotificationSvc) NotifyDocMentioned(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID) {
+	m.docMentions++
 }
 
 func (m *mockNotificationSvc) NotifyTaskDescriptionMentioned(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID) {
@@ -151,17 +161,17 @@ func TestNotificationHandler_List_Success(t *testing.T) {
 	taskID := uuid.New()
 	notifs := []*notificationdom.Notification{
 		{
-			ID:              uuid.New(),
-			RecipientUserID: userID,
-			Type:            notificationdom.NotificationTypeAssigned,
-			ActorFullName:   "Jane Doe",
-			ActorUsername:   "janedoe",
-			TaskID:          &taskID,
-			TaskTitle:       "Do the thing",
-			TaskNumber:      7,
-			ProjectID:       uuid.New(),
-			ProjectName:     "Paca",
-			CreatedAt:       now,
+			ID:                 uuid.New(),
+			RecipientAccountID: userID,
+			Type:               notificationdom.NotificationTypeAssigned,
+			ActorFullName:      "Jane Doe",
+			ActorUsername:      "janedoe",
+			TaskID:             &taskID,
+			TaskTitle:          "Do the thing",
+			TaskNumber:         7,
+			ProjectID:          uuid.New(),
+			ProjectName:        "Paca",
+			CreatedAt:          now,
 		},
 	}
 

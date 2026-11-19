@@ -1,12 +1,21 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Edit2, Key, Lock, Plus, Shield, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { activePermissions } from "@/components/admin/global-roles/utils";
 import { DeleteProjectRoleDialog } from "@/components/projects/roles/DeleteProjectRoleDialog";
 import { ProjectRoleFormDialog } from "@/components/projects/roles/ProjectRoleFormDialog";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
 import { Button } from "@/components/ui/button";
+import {
+	Empty,
+	EmptyContent,
+	EmptyDescription,
+	EmptyHeader,
+	EmptyMedia,
+	EmptyTitle,
+} from "@/components/ui/empty";
+import { Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
 	Table,
@@ -17,9 +26,10 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
+import { useTablePaging } from "@/hooks/use-table-paging";
 import { isForbiddenError } from "@/lib/api-error";
 import { formatDate as formatDateLocale } from "@/lib/format-date";
-import { projectRolesQueryOptions, type Role } from "@/lib/role-api";
+import { projectRolesPageQueryOptions, type Role } from "@/lib/role-api";
 
 function formatDate(iso: string) {
 	return formatDateLocale(iso, {
@@ -145,15 +155,26 @@ export function RolesSettings({
 	const { hasProjectPermission, isLoading: isPermissionsLoading } =
 		useProjectPermissions(projectId);
 	const canReadRoles = hasProjectPermission("roles:read");
+	const { page, pageSize, setPage, setPageSize } = useTablePaging(
+		"project-roles-settings",
+	);
 	const {
-		data: roles,
+		data: rolePage,
 		isLoading: isDataLoading,
 		isError,
 		error,
 	} = useQuery({
-		...projectRolesQueryOptions(projectId),
+		...projectRolesPageQueryOptions(projectId, page, pageSize),
 		enabled: canReadRoles,
+		placeholderData: keepPreviousData,
 	});
+	const roles = rolePage?.items;
+	const roleCount = rolePage?.total_count ?? 0;
+	const totalPages = Math.max(1, Math.ceil(roleCount / pageSize));
+	// Deleting the last role of the last page leaves it empty: step back.
+	useEffect(() => {
+		if (rolePage && page > totalPages) setPage(totalPages);
+	}, [rolePage, page, totalPages, setPage]);
 	// While permissions are still loading, canReadRoles defaults to false
 	// same as a confirmed denial — guard on isPermissionsLoading (and fold
 	// it into isLoading) so the section shows the skeleton instead of
@@ -200,27 +221,31 @@ export function RolesSettings({
 					<div className="flex items-center gap-2">
 						<Shield className="size-4 text-primary" />
 						<span className="text-sm">
-							<span className="font-semibold tabular-nums">{roles.length}</span>
+							<span className="font-semibold tabular-nums">{roleCount}</span>
 							<span className="ml-1.5 text-muted-foreground">
-								{t("settings.roles.rolesDefined", { count: roles.length })}
+								{t("settings.roles.rolesDefined", { count: roleCount })}
 							</span>
 						</span>
 					</div>
-					<div className="h-4 w-px bg-border" />
-					<div className="flex items-center gap-2">
-						<Key className="size-4 text-muted-foreground" />
-						<span className="text-sm">
-							<span className="font-semibold tabular-nums">
-								{roles.reduce(
-									(sum, r) => sum + activePermissions(r.policy).length,
-									0,
-								)}
-							</span>
-							<span className="ml-1.5 text-muted-foreground">
-								{t("settings.roles.permissionGrants")}
-							</span>
-						</span>
-					</div>
+					{roleCount <= pageSize ? (
+						<>
+							<div className="h-4 w-px bg-border" />
+							<div className="flex items-center gap-2">
+								<Key className="size-4 text-muted-foreground" />
+								<span className="text-sm">
+									<span className="font-semibold tabular-nums">
+										{roles.reduce(
+											(sum, r) => sum + activePermissions(r.policy).length,
+											0,
+										)}
+									</span>
+									<span className="ml-1.5 text-muted-foreground">
+										{t("settings.roles.permissionGrants")}
+									</span>
+								</span>
+							</div>
+						</>
+					) : null}
 				</div>
 			) : null}
 
@@ -234,29 +259,29 @@ export function RolesSettings({
 			) : isLoading ? (
 				<RolesTableSkeleton />
 			) : !roles?.length ? (
-				<div className="flex flex-col items-center gap-4 rounded-xl border border-dashed bg-muted/20 py-16 text-center mt-4">
-					<div className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground/60">
-						<Shield className="size-6" />
-					</div>
-					<div>
-						<p className="text-sm font-medium">
-							{t("settings.roles.empty.title")}
-						</p>
-						<p className="mt-1 text-xs text-muted-foreground">
+				<Empty className="border border-dashed bg-muted/20 py-16 mt-4">
+					<EmptyHeader>
+						<EmptyMedia variant="icon">
+							<Shield className="size-6" />
+						</EmptyMedia>
+						<EmptyTitle>{t("settings.roles.empty.title")}</EmptyTitle>
+						<EmptyDescription>
 							{t("settings.roles.empty.description")}
-						</p>
-					</div>
-					{canManageRoles ? (
-						<Button
-							size="sm"
-							variant="outline"
-							onClick={() => setCreateOpen(true)}
-						>
-							<Plus className="size-4" />
-							{t("settings.roles.empty.createRole")}
-						</Button>
-					) : null}
-				</div>
+						</EmptyDescription>
+					</EmptyHeader>
+					<EmptyContent>
+						{canManageRoles ? (
+							<Button
+								size="sm"
+								variant="outline"
+								onClick={() => setCreateOpen(true)}
+							>
+								<Plus className="size-4" />
+								{t("settings.roles.empty.createRole")}
+							</Button>
+						) : null}
+					</EmptyContent>
+				</Empty>
 			) : (
 				<div className="overflow-x-auto rounded-xl border mt-4">
 					<Table>
@@ -286,6 +311,15 @@ export function RolesSettings({
 							))}
 						</TableBody>
 					</Table>
+					<Pagination
+						className="border-t px-4 py-3"
+						page={page}
+						totalPages={totalPages}
+						onPageChange={setPage}
+						total={roleCount}
+						pageSize={pageSize}
+						onPageSizeChange={setPageSize}
+					/>
 				</div>
 			)}
 

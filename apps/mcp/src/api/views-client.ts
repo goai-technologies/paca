@@ -1,6 +1,7 @@
 import type {
 	Attachment,
 	BulkMoveTasksInput,
+	MoveTaskPositionInput,
 	CreateCustomFieldInput,
 	CreateViewInput,
 	CustomFieldDefinition,
@@ -13,6 +14,7 @@ import type {
 	View,
 } from "../types/index.js";
 import { formatApiRequestError } from "../utils/index.js";
+import { type Page, type PageOptions, toPage, withPaging } from "./paginate.js";
 
 /**
  * Extended API client for Views, Custom Fields, and Attachments.
@@ -200,19 +202,24 @@ export class PacaAPIViewsClient {
 		);
 	}
 
+	async moveTaskPosition(
+		projectId: string,
+		viewId: string,
+		taskId: string,
+		input: MoveTaskPositionInput,
+	): Promise<void> {
+		await this.put(
+			`/api/v1/projects/${projectId}/views/${viewId}/task-positions/${taskId}`,
+			{ position: input.position, group_key: input.group_key ?? null },
+		);
+	}
+
 	async bulkMoveTasks(
 		projectId: string,
 		viewId: string,
 		input: BulkMoveTasksInput,
 	): Promise<void> {
-		await this.put(
-			`/api/v1/projects/${projectId}/views/${viewId}/task-positions/${input.task_id}`,
-			{
-				target_view_id: input.target_view_id,
-				target_status_id: input.target_status_id,
-				target_position: input.target_position,
-			},
-		);
+		await this.bulkMoveViewTaskPositions(projectId, viewId, input.items);
 	}
 
 	// ==================== Custom Fields ====================
@@ -272,14 +279,26 @@ export class PacaAPIViewsClient {
 	async listTaskAttachments(
 		projectId: string,
 		taskId: string,
-	): Promise<Attachment[]> {
-		const response = await this.get(
-			`/api/v1/projects/${projectId}/tasks/${taskId}/attachments`,
+		opts: PageOptions = {},
+	): Promise<Page<Attachment>> {
+		return toPage<Attachment>(
+			await this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/tasks/${taskId}/attachments`,
+					opts,
+				),
+			),
 		);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.attachments || response.data || [];
+	}
+
+	async getTaskAttachment(
+		projectId: string,
+		taskId: string,
+		attachmentId: string,
+	): Promise<Attachment> {
+		return this.get(
+			`/api/v1/projects/${projectId}/tasks/${taskId}/attachments/${attachmentId}`,
+		);
 	}
 
 	async getAttachmentDownloadURL(

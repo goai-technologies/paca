@@ -18,7 +18,7 @@ vi.mock("./api-client", () => ({
 
 import {
 	type APIKey,
-	apiKeysInfiniteQueryOptions,
+	apiKeysPageQueryOptions,
 	type CreateAPIKeyResponse,
 	createAPIKey,
 	listAPIKeys,
@@ -61,7 +61,7 @@ describe("apikey-api", () => {
 				total_count: 1,
 			});
 			expect(mockGet).toHaveBeenCalledWith("/users/me/api-keys", {
-				params: { page_size: 30, cursor: undefined },
+				params: { page_size: 30, page: undefined },
 			});
 		});
 
@@ -126,9 +126,14 @@ describe("apikey-api", () => {
 		});
 	});
 
-	describe("apiKeysInfiniteQueryOptions", () => {
+	describe("apiKeysPageQueryOptions", () => {
 		it("has the expected query key", () => {
-			expect(apiKeysInfiniteQueryOptions.queryKey).toEqual(["api-keys"]);
+			expect(apiKeysPageQueryOptions(2, 50).queryKey).toEqual([
+				"api-keys",
+				"page",
+				2,
+				50,
+			]);
 		});
 
 		it("uses listAPIKeys as the query function", async () => {
@@ -145,14 +150,13 @@ describe("apikey-api", () => {
 				},
 			});
 
-			if (typeof apiKeysInfiniteQueryOptions.queryFn !== "function") {
+			if (typeof apiKeysPageQueryOptions(2, 50).queryFn !== "function") {
 				throw new Error("queryFn is not a function");
 			}
 
 			// @ts-expect-error - queryFn type can be complex but it's a function here
-			const result = await apiKeysInfiniteQueryOptions.queryFn({
-				queryKey: ["api-keys"],
-				pageParam: undefined,
+			const result = await apiKeysPageQueryOptions(2, 50).queryFn({
+				queryKey: ["api-keys", "page", 2, 50],
 				meta: undefined,
 			});
 			expect(result).toEqual({

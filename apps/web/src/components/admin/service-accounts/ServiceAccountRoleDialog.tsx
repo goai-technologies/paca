@@ -1,15 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-
-import { RolesQueryBoundary } from "@/components/admin/global-roles/role-option-list";
 import { isFullAccessRole } from "@/components/admin/global-roles/role-picker";
+import { useRoleChoices } from "@/components/admin/global-roles/use-role-choices";
 import { roleErrorKey } from "@/components/roles/role-errors";
 import { InlineNotice } from "@/components/shared/inline-notice";
 import { RoleChangeDialog } from "@/components/shared/role-change-dialog";
-import { isProjectTemplate } from "@/lib/policy";
 import { serviceAccountAvatar } from "@/lib/provider-logos";
-import { platformRolesQueryOptions } from "@/lib/role-api";
 import {
 	replaceServiceAccountRoles,
 	type ServiceAccount,
@@ -38,16 +35,15 @@ export function ServiceAccountRoleDialog({
 	const queryClient = useQueryClient();
 	const [error, setError] = useState<string | null>(null);
 
-	const rolesQuery = useQuery({ ...platformRolesQueryOptions, enabled: open });
 	// The account carries the roles it holds (the list and detail both load it).
 	const currentIds = account.roles.map((r) => r.id);
-	// A project template only works attached per project; given platform-wide it
-	// would reach every project. One the account already holds stays listed.
-	const roles = (rolesQuery.data ?? []).filter(
-		(r) => !isProjectTemplate(r.policy) || currentIds.includes(r.id),
+	const { roles, knownRoles, remote, status } = useRoleChoices(
+		open,
+		currentIds,
 	);
 
 	const mutation = useMutation({
+		meta: { success: "updated", subject: "serviceAccountRoles" },
 		mutationFn: (roleIds: string[]) =>
 			replaceServiceAccountRoles(account.id, roleIds),
 		onSuccess: () => {
@@ -76,13 +72,9 @@ export function ServiceAccountRoleDialog({
 			})}
 			person={{ avatar: serviceAccountAvatar(account) }}
 			roles={roles}
-			status={
-				roles.length === 0 ? (
-					<RolesQueryBoundary query={{ ...rolesQuery, data: roles }}>
-						{() => null}
-					</RolesQueryBoundary>
-				) : undefined
-			}
+			knownRoles={knownRoles}
+			remote={remote}
+			status={status}
 			currentIds={currentIds}
 			saveLabel={t("serviceAccounts.roleDialog.assign")}
 			savingLabel={t("serviceAccounts.roleDialog.assigning")}

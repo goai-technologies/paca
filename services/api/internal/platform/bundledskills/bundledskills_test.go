@@ -1,6 +1,8 @@
 package bundledskills
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -268,4 +270,185 @@ func TestRolePolicySkill_ExamplesValidate(t *testing.T) {
 			t.Errorf("example %d is invalid: %v", i+1, issues)
 		}
 	}
+}
+
+// TestList_EngineeringPractices guards the engineering-practice guidance
+// (adapted from mattpocock/skills) folded into the existing skills, in both
+// flavors.
+func TestList_EngineeringPractices(t *testing.T) {
+	want := map[string][]string{
+		"paca-do":        {"failing test", "ranked, falsifiable hypotheses", "regression test"},
+		"paca-breakdown": {"tracer bullets", "expand → migrate in batches → contract"},
+		"paca-clarify":   {"recommended answer", "glossary", "standalone brief"},
+		"paca-test":      {"exact reproduction"},
+	}
+	for _, target := range []string{TargetCLI, TargetAgent} {
+		for _, s := range List(target) {
+			for _, phrase := range want[s.Name] {
+				if !strings.Contains(s.Content, phrase) {
+					t.Errorf("%s/%s: missing guidance %q", target, s.Name, phrase)
+				}
+			}
+		}
+	}
+}
+
+// TestList_PacaFeatureSkills guards the skills built on Paca's own features:
+// present in both flavors, routed to by the paca skill, reserved as builtin
+// names, and the retired paca-workflow no longer shipped.
+func TestList_PacaFeatureSkills(t *testing.T) {
+	names := []string{"paca-analyst", "paca-automation", "paca-review", "paca-triage", "paca-retro", "paca-feedback", "paca-board", "paca-team"}
+	for _, target := range []string{TargetCLI, TargetAgent} {
+		byName := map[string]Skill{}
+		for _, s := range List(target) {
+			byName[s.Name] = s
+		}
+		if _, ok := byName["paca-workflow"]; ok {
+			t.Errorf("%s: retired skill paca-workflow is still shipped", target)
+		}
+		for _, n := range names {
+			s, ok := byName[n]
+			if !ok {
+				t.Errorf("%s: missing skill %q", target, n)
+				continue
+			}
+			if !strings.Contains(s.Content, "description: ") {
+				t.Errorf("%s/%s: missing description", target, n)
+			}
+			route := "/" + n
+			if target == TargetAgent {
+				route = `load_skill(name: "` + n + `")`
+			}
+			if !strings.Contains(byName["paca"].Content, route) {
+				t.Errorf("%s: paca router does not route to %s", target, n)
+			}
+		}
+	}
+	for _, n := range names {
+		if !IsBuiltinName(n) {
+			t.Errorf("%s should be a reserved builtin name", n)
+		}
+	}
+	if IsBuiltinName("paca-workflow") {
+		t.Error("paca-workflow should no longer be reserved")
+	}
+}
+
+func pacaRouter(t *testing.T, skills []Skill) string {
+	t.Helper()
+	for _, s := range skills {
+		if s.Name == "paca" {
+			return s.Content
+		}
+	}
+	t.Fatal("paca router skill not found")
+	return ""
+}
+
+// TestRouter_NoPluginRoutesLeavesNoTrace guards that, with no plugin routes,
+// the router mentions no plugin skill and no marker leaks into the content.
+func TestRouter_NoPluginRoutesLeavesNoTrace(t *testing.T) {
+	for _, target := range []string{TargetCLI, TargetAgent} {
+		c := pacaRouter(t, List(target))
+		if strings.Contains(c, "paca:plugin-routes") {
+			t.Errorf("%s: routes marker leaked into the router", target)
+		}
+	}
+}
+
+// TestRouter_PluginRoutesJoinTheTable guards that plugin routes become rows of
+// the same table (directly after the last bundled row), in each flavor's
+// routing syntax, and are flattened so they cannot break the table.
+func TestRouter_PluginRoutesJoinTheTable(t *testing.T) {
+	routes := []Route{
+		{Skill: "paca-bdd-scenarios", When: "Write Given/When/Then scenarios"},
+		{Skill: "paca-x", When: "Odd | text with `ticks`\nand a newline"},
+	}
+	cli := pacaRouter(t, ListWithRoutes(TargetCLI, routes))
+	for _, want := range []string{
+		"| Write Given/When/Then scenarios | `/paca-bdd-scenarios` |\n",
+		"| Odd / text with 'ticks' and a newline | `/paca-x` |\n",
+	} {
+		if !strings.Contains(cli, want) {
+			t.Errorf("cli router missing row %q", want)
+		}
+	}
+	// Directly after the last bundled row: no blank line that would end the table.
+	if !strings.Contains(cli, "`/paca-role-policy <what the role should allow>` |\n| Write Given") {
+		t.Error("plugin rows are not contiguous with the router table")
+	}
+	agent := pacaRouter(t, ListWithRoutes(TargetAgent, routes))
+	if !strings.Contains(agent, "| Write Given/When/Then scenarios | `load_skill(name: \"paca-bdd-scenarios\")` |\n") {
+		t.Error("agent router missing load_skill row")
+	}
+	if strings.Contains(pacaRouter(t, List(TargetCLI)), "paca-bdd-scenarios") {
+		t.Error("List must not mention plugin skills")
+	}
+}
+
+// TestList_AgentFlavorHasNoCLIOnlyText guards deriveAgentContent: if a content
+// file's compatibility line or fallback block drifts, the replace silently
+// no-ops and the agent flavor would ship CLI-only instructions.
+func TestList_AgentFlavorHasNoCLIOnlyText(t *testing.T) {
+	for _, s := range List(TargetAgent) {
+		for _, banned := range []string{compatibilityLine, "## If Paca MCP is not connected"} {
+			if strings.Contains(s.Content, banned) {
+				t.Errorf("agent/%s: contains CLI-only text %q", s.Name, banned)
+			}
+		}
+	}
+}
+
+// TestPacaAnalyst_ToolReferenceNamesRealTools guards the analyst skill's
+// tool reference against MCP tool names that do not exist: an agent told to
+// call a missing tool fails mid-conversation.
+func TestPacaAnalyst_ToolReferenceNamesRealTools(t *testing.T) {
+	dir := filepath.Join("..", "..", "..", "..", "..", "apps", "mcp", "src", "tools")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skipf("MCP tool sources not available: %v", err)
+	}
+	registered := map[string]bool{}
+	nameRe := regexp.MustCompile(`name: "([a-z_]+)"`)
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range nameRe.FindAllStringSubmatch(string(b), -1) {
+			registered[m[1]] = true
+		}
+	}
+	var content string
+	for _, s := range List(TargetCLI) {
+		if s.Name == "paca-analyst" {
+			content = s.Content
+		}
+	}
+	_, ref, ok := strings.Cut(content, "## Tool reference")
+	if !ok {
+		t.Fatal("paca-analyst has no Tool reference section")
+	}
+	for _, m := range regexp.MustCompile("`([a-z_]+)`").FindAllStringSubmatch(ref, -1) {
+		if !registered[m[1]] {
+			t.Errorf("tool reference names %q, which is not a Paca MCP tool", m[1])
+		}
+	}
+}
+
+// A task in Refinement is a draft: the in-product agent's status table must
+// route it to the analyst skill, not to breakdown or implementation.
+func TestPacaAgentRouter_RoutesRefinementToAnalyst(t *testing.T) {
+	for _, s := range List(TargetAgent) {
+		if s.Name != "paca" {
+			continue
+		}
+		for _, line := range strings.Split(s.Content, "\n") {
+			if strings.HasPrefix(line, "| Refinement") && strings.Contains(line, `"paca-analyst"`) {
+				return
+			}
+		}
+		t.Fatal("paca agent router has no Refinement row loading paca-analyst")
+	}
+	t.Fatal("no paca skill in the agent flavor")
 }

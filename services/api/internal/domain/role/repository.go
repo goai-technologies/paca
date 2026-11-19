@@ -20,14 +20,17 @@ type ReplaceAttachmentsInput struct {
 
 // Repository is the persistence contract of the role service.
 type Repository interface {
-	// ListPlatform returns the platform roles (no owner project) with their
-	// total attachment counts, sorted by name.
-	ListPlatform(ctx context.Context) ([]*Role, error)
+	// ListPlatform returns one page of the platform roles (no owner project)
+	// with their total attachment counts, sorted by name. cursorAfter is the
+	// cursor from EncodeCursor (nil for the first page); total counts every
+	// role matching the filter.
+	ListPlatform(ctx context.Context, filter RoleFilter, cursorAfter *string, limit int) (roles []*Role, hasMore bool, total int, err error)
 	// ListForProject returns the roles owned by the project followed by the
 	// platform roles that are attached to someone inside it (so a converted
 	// shared role stays visible where it is in use, and a new project lists
 	// only its own roles), each with its attachment count inside the project.
-	ListForProject(ctx context.Context, projectID uuid.UUID) ([]*Role, error)
+	// Paged like ListPlatform.
+	ListForProject(ctx context.Context, projectID uuid.UUID, filter RoleFilter, cursorAfter *string, limit int) (roles []*Role, hasMore bool, total int, err error)
 	// FindByID returns a role (ErrNotFound when missing). With countProject
 	// set, AttachmentCount counts only attachments inside that project;
 	// otherwise all of them.

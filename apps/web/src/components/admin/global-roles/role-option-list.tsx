@@ -36,9 +36,13 @@ interface RolesQuery<T> {
  */
 export function RolesQueryBoundary<T>({
 	query,
+	searching = false,
 	children,
 }: {
 	query: RolesQuery<T>;
+	/** A search is active: no matches is not "no roles", so the children (and
+	 *  their search box) stay. */
+	searching?: boolean;
 	children: (roles: T[]) => ReactNode;
 }) {
 	const { t } = useTranslation("admin");
@@ -70,7 +74,7 @@ export function RolesQueryBoundary<T>({
 		);
 	}
 
-	if (!query.data || query.data.length === 0) {
+	if (!query.data || (query.data.length === 0 && !searching)) {
 		return (
 			<p className="rounded-lg border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
 				{t("rolePicker.empty")}

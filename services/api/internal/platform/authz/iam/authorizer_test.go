@@ -737,9 +737,10 @@ func TestEffectiveActionsKindScoped(t *testing.T) {
 	}
 }
 
-// A grant limited to one task shows the Tasks UI (EffectiveActions) but does
-// not give project-wide access (ProjectWideActions), which realtime rooms need.
-func TestProjectWideActionsExcludesChildOnlyGrants(t *testing.T) {
+// A grant limited to one task still lists its action: realtime places the
+// socket in the room on this list and then checks every event on its own
+// resource, so a role limited to one sprint's tasks gets live updates.
+func TestEffectiveActionsIncludeChildOnlyGrants(t *testing.T) {
 	g := []Grant{
 		{RoleID: "r1", ProjectID: "p1", Policy: pol(allow("tasks:read", "project/p1/task/t1", nil), allow("docs:read", "project/p1/*", nil))},
 	}
@@ -751,11 +752,47 @@ func TestProjectWideActionsExcludesChildOnlyGrants(t *testing.T) {
 	if want := []string{"docs:read", "tasks:read"}; !reflect.DeepEqual(all, want) {
 		t.Fatalf("EffectiveActions got %v want %v", all, want)
 	}
-	wide, err := a.ProjectWideActions(context.Background(), u1, "p1")
+}
+
+// AuthorizeMany must agree with Authorize question by question while reading
+// the principal's grants once, and must fail closed as a whole.
+func TestAuthorizeMany_MatchesAuthorizeAndReadsGrantsOnce(t *testing.T) {
+	a, st := newTestAuthorizer([]Grant{{RoleID: "r", Policy: pol(
+		allow("tasks:*", "project/p1/*", nil),
+		deny("tasks:read", "project/p1/task/secret", nil),
+	)}})
+	queries := []Query{
+		{"tasks:read", "project/p1/task/t1"},
+		{"tasks:read", "project/p1/task/secret"},
+		{"tasks:write", "project/p1/task/secret"},
+		{"docs:read", "project/p1/doc/d1"},
+		{"tasks:read", "project/p2/task/t1"},
+	}
+	st.calls = 0
+	got, err := a.AuthorizeMany(context.Background(), u1, queries)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"docs:read"}; !reflect.DeepEqual(wide, want) {
-		t.Fatalf("ProjectWideActions got %v want %v", wide, want)
+	if st.calls != 1 {
+		t.Errorf("grants read %d times, want once", st.calls)
+	}
+	for i, q := range queries {
+		single, err := a.Authorize(context.Background(), u1, q.Action, q.Resource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got[i].Allowed != single.Allowed {
+			t.Errorf("%v: AuthorizeMany = %v, Authorize = %v", q, got[i].Allowed, single.Allowed)
+		}
+	}
+
+	invalid, err := a.AuthorizeMany(context.Background(), Principal{}, queries)
+	if err != nil || len(invalid) != len(queries) || slices.ContainsFunc(invalid, func(r Result) bool { return r.Allowed }) {
+		t.Errorf("an invalid principal must be denied everything: %+v %v", invalid, err)
+	}
+
+	st.err = errors.New("db down")
+	if res, err := a.AuthorizeMany(context.Background(), u1, queries); err == nil || res != nil {
+		t.Errorf("a store error must fail the whole batch, got %+v %v", res, err)
 	}
 }

@@ -53,8 +53,8 @@ func (r *fakeRepo) UpdateFileStatus(_ context.Context, _ uuid.UUID, _ attachment
 }
 func (r *fakeRepo) DeleteFile(_ context.Context, _ uuid.UUID) error { return nil }
 
-func (r *fakeRepo) ListTaskAttachments(_ context.Context, _ uuid.UUID) ([]*attachmentdom.TaskAttachment, error) {
-	return nil, nil
+func (r *fakeRepo) ListTaskAttachments(_ context.Context, _ uuid.UUID, _ *string, _ int) ([]*attachmentdom.TaskAttachment, bool, int, error) {
+	return nil, false, 0, nil
 }
 func (r *fakeRepo) FindTaskAttachmentByID(_ context.Context, id uuid.UUID) (*attachmentdom.TaskAttachment, error) {
 	a, ok := r.attachments[id]

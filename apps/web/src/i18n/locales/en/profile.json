@@ -1,7 +1,7 @@
 {
 	"page": {
-		"title": "My Profile",
-		"subtitle": "View and update your account information."
+		"title": "Account",
+		"subtitle": "Manage your profile, sign-in security and access."
 	},
 	"fields": {
 		"fullName": "Full name",
@@ -62,6 +62,7 @@
 		"errors": {
 			"currentPasswordRequired": "Current password is required.",
 			"currentPasswordIncorrect": "Current password is incorrect.",
+			"passwordLoginDisabled": "Password sign-in is turned off for this workspace, so your password can't be changed. Sign in with single sign-on instead.",
 			"sessionExpired": "Your session has expired. Please log in again.",
 			"serverError": "Something went wrong on the server. Please try again.",
 			"changeFailed": "Failed to change password."
@@ -116,6 +117,96 @@
 			"nameTooLong": "Name must be 100 characters or fewer.",
 			"createFailed": "Failed to create key. Please try again.",
 			"copyFailed": "Copy failed. Please copy the key manually."
+		}
+	},
+	"nav": {
+		"profile": "Profile",
+		"security": "Security",
+		"apiKeys": "API keys",
+		"preferences": "Notifications"
+	},
+	"preferences": {
+		"title": "Notifications",
+		"subtitle": "Choose how you want to be notified."
+	},
+	"security": {
+		"title": "Security",
+		"subtitle": "Protect your account and control how you sign in.",
+		"mfa": {
+			"title": "Two-step verification",
+			"description": "Ask for a code from an authenticator app, in addition to your password, when you sign in.",
+			"on": "On",
+			"off": "Off",
+			"enable": "Set up two-step verification",
+			"recoveryLeft": "Recovery codes remaining: {{count}}",
+			"recoveryLow": "You are running low on recovery codes. Generate new ones before you lose access.",
+			"codeOrRecovery": "Authentication code or recovery code",
+			"codes": {
+				"copy": "Copy",
+				"copied": "Copied",
+				"download": "Download"
+			},
+			"errors": {
+				"generic": "Something went wrong. Please try again.",
+				"invalidCode": "That code is invalid or was already used.",
+				"unavailable": "Two-step verification isn't available: the server has no encryption key configured. Ask your administrator.",
+				"load": "Couldn't load your two-step verification status."
+			},
+			"setup": {
+				"title": "Set up two-step verification",
+				"description": "Use an authenticator app such as 1Password, Google Authenticator or Authy.",
+				"scan": "Scan this QR code with your authenticator app.",
+				"orEnterKey": "Can't scan? Enter this key instead.",
+				"copyKey": "Copy setup key",
+				"qrLabel": "QR code for two-step verification setup",
+				"codeLabel": "Enter the 6-digit code from the app",
+				"verify": "Verify and turn on",
+				"codesTitle": "Save your recovery codes",
+				"codesDescription": "Each code works once if you lose access to your authenticator app.",
+				"codesWarning": "These codes are shown only now. Store them somewhere safe before closing.",
+				"saved": "I've saved them"
+			},
+			"disable": {
+				"button": "Turn off",
+				"title": "Turn off two-step verification",
+				"description": "Your account will be protected by your password alone. Enter a current code to confirm.",
+				"confirm": "Turn off"
+			},
+			"regenerate": {
+				"button": "New recovery codes",
+				"title": "Generate new recovery codes",
+				"description": "This replaces all your existing recovery codes. Enter a current code to confirm.",
+				"confirm": "Generate",
+				"doneTitle": "Your new recovery codes"
+			}
+		},
+		"passkeys": {
+			"title": "Passkeys",
+			"description": "Sign in with your fingerprint, face, screen lock or a security key as your second step, instead of a code.",
+			"add": "Add a passkey",
+			"unsupported": "This browser doesn't support passkeys.",
+			"empty": "You haven't added a passkey yet.",
+			"added": "Added {{date}}",
+			"lastUsed": "Last used {{date}}",
+			"neverUsed": "Never used",
+			"removeLabel": "Remove {{name}}",
+			"defaultName": "Passkey",
+			"addTitle": "Add a passkey",
+			"addDescription": "Give it a name you'll recognise, then follow your browser's prompt.",
+			"nameLabel": "Name",
+			"namePlaceholder": "e.g. Work laptop",
+			"continue": "Continue",
+			"removeTitle": "Remove passkey",
+			"removeDescription": "“{{name}}” will no longer work to sign in. You'll be asked to confirm with one of your passkeys.",
+			"remove": "Remove",
+			"errors": {
+				"load": "Couldn't load your passkeys.",
+				"cancelled": "The passkey prompt was cancelled or timed out.",
+				"alreadyRegistered": "This device or key is already registered as a passkey.",
+				"limit": "You've reached the maximum number of passkeys. Remove one first.",
+				"invalid": "The passkey couldn't be verified. Please try again.",
+				"generic": "Something went wrong. Please try again."
+			}
 		}
 	}
 }

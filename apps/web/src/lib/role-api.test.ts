@@ -26,8 +26,10 @@ import {
 	getKnownActions,
 	getRole,
 	listRoles,
-	platformRolesQueryOptions,
-	projectRolesQueryOptions,
+	platformRolesInfiniteQueryOptions,
+	platformRolesKey,
+	projectRolesInfiniteQueryOptions,
+	projectRolesKey,
 	type Role,
 	replaceAgentRoles,
 	replaceMemberRoles,
@@ -67,9 +69,17 @@ describe("role-api", () => {
 
 	describe("workspace roles", () => {
 		it("lists them from /admin/roles", async () => {
-			mockGet.mockResolvedValue(ok([role]));
-			await expect(listRoles()).resolves.toEqual([role]);
-			expect(mockGet).toHaveBeenCalledWith("/admin/roles");
+			const page = {
+				items: [role],
+				page_size: 30,
+				next_cursor: null,
+				total_count: 1,
+			};
+			mockGet.mockResolvedValue(ok(page));
+			await expect(listRoles()).resolves.toEqual(page);
+			expect(mockGet).toHaveBeenCalledWith("/admin/roles", {
+				params: { page_size: 30 },
+			});
 		});
 
 		it("gets one by id", async () => {
@@ -109,9 +119,13 @@ describe("role-api", () => {
 
 	describe("project roles", () => {
 		it("addresses the project's own routes", async () => {
-			mockGet.mockResolvedValue(ok([role]));
-			await listRoles("p1");
-			expect(mockGet).toHaveBeenCalledWith("/projects/p1/roles");
+			mockGet.mockResolvedValue(
+				ok({ items: [role], page_size: 30, next_cursor: null, total_count: 1 }),
+			);
+			await listRoles("p1", { search: " ed ", ids: ["a", "b"], cursor: "c1" });
+			expect(mockGet).toHaveBeenCalledWith("/projects/p1/roles", {
+				params: { page_size: 30, search: "ed", ids: "a,b", cursor: "c1" },
+			});
 
 			mockPost.mockResolvedValue(ok(role));
 			await createRole({ name: "x", description: "", policy }, "p1");
@@ -204,11 +218,14 @@ describe("role-api", () => {
 	});
 
 	it("exposes query keys", () => {
-		expect(platformRolesQueryOptions.queryKey).toEqual(["admin", "roles"]);
-		expect(projectRolesQueryOptions("p1").queryKey).toEqual([
-			"projects",
-			"p1",
-			"roles",
-		]);
+		expect(platformRolesKey).toEqual(["admin", "roles"]);
+		expect(projectRolesKey("p1")).toEqual(["projects", "p1", "roles"]);
+		// Lists sit under the prefix, so invalidating it refreshes them.
+		expect(platformRolesInfiniteQueryOptions("x").queryKey.slice(0, 2)).toEqual(
+			platformRolesKey,
+		);
+		expect(
+			projectRolesInfiniteQueryOptions("p1", "x").queryKey.slice(0, 3),
+		).toEqual(projectRolesKey("p1"));
 	});
 });

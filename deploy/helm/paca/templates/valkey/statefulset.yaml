@@ -14,6 +14,10 @@ spec:
       {{- include "paca.selectorLabels" (dict "root" . "component" "valkey") | nindent 6 }}
   template:
     metadata:
+      {{- if not .Values.secrets.existingSecret }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      {{- end }}
       labels:
         {{- include "paca.componentLabels" (dict "root" . "component" "valkey") | nindent 8 }}
     spec:
@@ -24,18 +28,25 @@ spec:
       containers:
         - name: valkey
           image: "{{ .Values.valkey.image.repository }}:{{ .Values.valkey.image.tag }}"
-          args: ["valkey-server", "--appendonly", "yes"]
+          # Password via env, not argv, so it stays out of the process list.
+          command: ["sh", "-c", 'exec valkey-server --appendonly yes --requirepass "$VALKEY_PASSWORD"']
+          env:
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "paca.secretName" . }}
+                  key: VALKEY_PASSWORD
           ports:
             - containerPort: 6379
               name: valkey
           readinessProbe:
             exec:
-              command: ["valkey-cli", "ping"]
+              command: ["sh", "-c", 'REDISCLI_AUTH="$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             exec:
-              command: ["valkey-cli", "ping"]
+              command: ["sh", "-c", 'REDISCLI_AUTH="$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
             initialDelaySeconds: 15
             periodSeconds: 20
           volumeMounts:

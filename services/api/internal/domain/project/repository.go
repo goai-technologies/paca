@@ -39,7 +39,7 @@ type ProjectSetup struct {
 type ProjectRepository interface {
 	List(ctx context.Context, offset, limit int) ([]*Project, int64, error)
 	// ListAccessible returns only projects the given user is a member of.
-	ListAccessible(ctx context.Context, userID uuid.UUID, offset, limit int) ([]*Project, int64, error)
+	ListAccessible(ctx context.Context, accountID uuid.UUID, offset, limit int) ([]*Project, int64, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*Project, error)
 	// Create inserts the project and, in the same transaction, the roles and
 	// the creator's membership described by setup, so a project never exists

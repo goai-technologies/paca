@@ -133,18 +133,40 @@ const taskAttachmentJoinSQL = `
 	FROM task_attachments ta
 	JOIN files f ON f.id = ta.file_id`
 
-// ListTaskAttachments returns all task attachments for the given task,
-// with the associated file metadata eagerly loaded.
-func (r *AttachmentRepository) ListTaskAttachments(ctx context.Context, taskID uuid.UUID) ([]*attachmentdom.TaskAttachment, error) {
+// ListTaskAttachments returns one page of the task's attachments, with the
+// associated file metadata eagerly loaded, ordered by (created_at, id)
+// ascending. The total counts every attachment of the task.
+func (r *AttachmentRepository) ListTaskAttachments(ctx context.Context, taskID uuid.UUID, cursorAfter *string, limit int) ([]*attachmentdom.TaskAttachment, bool, int, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	var total int
+	if err := r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM task_attachments WHERE task_id = $1`, taskID.String()); err != nil {
+		return nil, false, 0, fmt.Errorf("attachment repo: count task attachments: %w", err)
+	}
+	q := taskAttachmentJoinSQL + ` WHERE ta.task_id = $1`
+	sink := &argList{args: []any{taskID.String()}}
+	if cursorAfter != nil {
+		at, id, err := attachmentdom.DecodeCursor(*cursorAfter)
+		if err != nil {
+			return nil, false, 0, err
+		}
+		q += ` AND (ta.created_at, ta.id) > (` + sink.addArg(at) + `, ` + sink.addArg(id.String()) + `::uuid)`
+	}
+	q += ` ORDER BY ta.created_at ASC, ta.id ASC LIMIT ` + sink.addArg(limit+1)
 	var rows []taskAttachmentWithFileRow
-	if err := r.db.SelectContext(ctx, &rows, taskAttachmentJoinSQL+` WHERE ta.task_id = $1 ORDER BY ta.created_at ASC`, taskID.String()); err != nil {
-		return nil, fmt.Errorf("attachment repo: list task attachments: %w", err)
+	if err := r.db.SelectContext(ctx, &rows, q, sink.args...); err != nil {
+		return nil, false, 0, fmt.Errorf("attachment repo: list task attachments: %w", err)
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
 	}
 	result := make([]*attachmentdom.TaskAttachment, 0, len(rows))
-	for _, row := range rows {
-		result = append(result, taskAttachmentWithFileRowToEntity(&row))
+	for i := range rows {
+		result = append(result, taskAttachmentWithFileRowToEntity(&rows[i]))
 	}
-	return result, nil
+	return result, hasMore, total, nil
 }
 
 // FindTaskAttachmentByID returns a single task attachment by ID.

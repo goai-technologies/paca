@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -39,7 +40,7 @@ func WithSprintDefaultTaskTypes(taskTypeSvc taskTypeLister) SprintHandlerOption 
 	}
 }
 
-// WithSprintDefaultTaskStatuses enables sprint default-view seeding with backlog status collapsed columns.
+// WithSprintDefaultTaskStatuses enables sprint default-view seeding with backlog and refinement status columns collapsed.
 func WithSprintDefaultTaskStatuses(taskStatusSvc taskStatusLister) SprintHandlerOption {
 	return func(h *SprintHandler) {
 		h.taskStatusSvc = taskStatusSvc
@@ -69,16 +70,55 @@ func (h *SprintHandler) ListSprints(w http.ResponseWriter, r *http.Request) {
 		presenter.Error(w, r, err)
 		return
 	}
-	sprints, err := h.svc.ListSprints(ctx, projectID)
+	pageSize, err := parsePageSize(r, 30, 100)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	ids, err := parseIDsParam(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	q := r.URL.Query()
+	filter := sprintdom.SprintFilter{Search: strings.TrimSpace(q.Get("search")), IDs: ids}
+	for _, raw := range strings.Split(q.Get("status"), ",") {
+		if raw = strings.TrimSpace(raw); raw == "" {
+			continue
+		}
+		st := sprintdom.SprintStatus(raw)
+		if !sprintdom.ValidSprintStatuses[st] {
+			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid status"))
+			return
+		}
+		filter.Statuses = append(filter.Statuses, st)
+	}
+	if raw := q.Get("sort"); raw != "" {
+		filter.Sort = sprintdom.SprintSort(raw)
+		if !sprintdom.ValidSprintSorts[filter.Sort] {
+			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "sort must be name or recent"))
+			return
+		}
+	}
+	var cursor *string
+	if raw := q.Get("cursor"); raw != "" {
+		cursor = &raw
+	}
+	sprints, hasMore, total, err := h.svc.ListSprints(ctx, projectID, filter, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
 	resp := make([]dto.SprintResponse, 0, len(sprints))
-	for _, s := range sprints {
-		resp = append(resp, dto.SprintFromEntity(s))
+	for _, sp := range sprints {
+		resp = append(resp, dto.SprintFromEntity(sp))
 	}
-	presenter.OK(w, r, map[string]any{"items": resp})
+	var nextCursor *string
+	if hasMore && len(sprints) > 0 {
+		c := sprintdom.EncodeCursor(sprints[len(sprints)-1])
+		nextCursor = &c
+	}
+	presenter.OK(w, r, map[string]any{"items": resp, "page_size": pageSize, "next_cursor": nextCursor, "total_count": total})
 }
 
 // CreateSprint handles POST /projects/:projectId/sprints.
@@ -140,7 +180,13 @@ func (h *SprintHandler) UpdateSprint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ifVersion, err := ifMatchVersion(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
 	s, err := h.svc.UpdateSprint(r.Context(), projectID, sprintID, sprintdom.UpdateSprintInput{
+		IfVersion: ifVersion,
 		Name:      req.Name,
 		StartDate: req.StartDate.Ptr(),
 		EndDate:   req.EndDate.Ptr(),

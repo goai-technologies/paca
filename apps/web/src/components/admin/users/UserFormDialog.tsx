@@ -40,6 +40,7 @@ import {
 } from "@/lib/admin-api";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
 import { validateUsername } from "@/lib/auth-validation";
+import { copyToClipboard } from "@/lib/clipboard";
 import { generatePassword } from "@/lib/generate-password";
 import type { Role, RoleSummary } from "@/lib/role-api";
 
@@ -153,6 +154,7 @@ export function UserFormDialog({
 	};
 
 	const mutation = useMutation({
+		meta: { success: "saved", subject: "user" },
 		mutationFn: async (): Promise<{ user: User; password?: string }> => {
 			if (isEdit && user) {
 				const updated = await updateUser(user.id, {
@@ -236,7 +238,8 @@ export function UserFormDialog({
 
 	const handleCopy = () => {
 		if (step.phase !== "password") return;
-		void navigator.clipboard.writeText(step.account.password).then(() => {
+		void copyToClipboard(step.account.password).then((ok) => {
+			if (!ok) return;
 			setCopied(true);
 			setTimeout(() => setCopied(false), 2000);
 		});
@@ -503,7 +506,7 @@ export function UserFormDialog({
 									aria-label={t("users.formDialog.copyPassword")}
 								>
 									{copied ? (
-										<Check className="size-4 text-emerald-500" />
+										<Check className="size-4 text-success" />
 									) : (
 										<Copy className="size-4" />
 									)}

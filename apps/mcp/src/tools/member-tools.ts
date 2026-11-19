@@ -1,10 +1,12 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PacaAPIExtendedClient } from "../api/index.js";
+import { moreNotice, pagingFields, pagingProperties } from "../api/paginate.js";
 import { formatList } from "../utils/index.js";
 
 const ListProjectMembersSchema = z.object({
 	projectId: z.string(),
+	...pagingFields,
 });
 
 const AddProjectMemberSchema = z.object({
@@ -30,6 +32,7 @@ const RemoveProjectMemberSchema = z.object({
 
 const ListProjectRolesSchema = z.object({
 	projectId: z.string(),
+	...pagingFields,
 });
 
 const POLICY_VERSION = "2026-10-01";
@@ -74,7 +77,8 @@ export function getProjectMemberTools(): Tool[] {
 	return [
 		{
 			name: "list_project_members",
-			description: "List all members of a project",
+			description:
+				"List the members of a project, one page at a time. When more remain, the reply says so and gives a cursor to pass to the next call.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -83,6 +87,7 @@ export function getProjectMemberTools(): Tool[] {
 						description:
 							"The technical UUID of the project (e.g., '550e8400-e29b-41d4-a716-446655440000'). Use list_projects to get the project ID. Do NOT use the project name.",
 					},
+					...pagingProperties,
 				},
 				required: ["projectId"],
 			},
@@ -186,7 +191,8 @@ export function getProjectRoleTools(): Tool[] {
 	return [
 		{
 			name: "list_project_roles",
-			description: "List all roles in a project",
+			description:
+				"List the roles in a project, one page at a time. When more remain, the reply says so and gives a cursor to pass to the next call.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -195,6 +201,7 @@ export function getProjectRoleTools(): Tool[] {
 						description:
 							"The technical UUID of the project (e.g., '550e8400-e29b-41d4-a716-446655440000'). Use list_projects to get the project ID. Do NOT use the project name.",
 					},
+					...pagingProperties,
 				},
 				required: ["projectId"],
 			},
@@ -354,14 +361,18 @@ export async function handleProjectMemberTool(
 ): Promise<any> {
 	switch (toolName) {
 		case "list_project_members": {
-			const { projectId } = ListProjectMembersSchema.parse(args);
-			const members = await client.listProjectMembers(projectId);
-			const formatted = formatList(members, formatProjectMember);
+			const { projectId, cursor, pageSize } =
+				ListProjectMembersSchema.parse(args);
+			const page = await client.listProjectMembers(projectId, {
+				cursor,
+				pageSize,
+			});
+			const formatted = formatList(page.items, formatProjectMember);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Project Members:\n\n${formatted}`,
+						text: `Project Members:\n\n${formatted}${moreNotice(page, "list_project_members")}`,
 					},
 				],
 			};
@@ -426,14 +437,18 @@ export async function handleProjectMemberTool(
 		}
 
 		case "list_project_roles": {
-			const { projectId } = ListProjectRolesSchema.parse(args);
-			const roles = await client.listProjectRoles(projectId);
-			const formatted = formatList(roles, formatProjectRole);
+			const { projectId, cursor, pageSize } =
+				ListProjectRolesSchema.parse(args);
+			const page = await client.listProjectRoles(projectId, {
+				cursor,
+				pageSize,
+			});
+			const formatted = formatList(page.items, formatProjectRole);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Project Roles:\n\n${formatted}`,
+						text: `Project Roles:\n\n${formatted}${moreNotice(page, "list_project_roles")}`,
 					},
 				],
 			};

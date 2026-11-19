@@ -90,7 +90,7 @@ func (r *ServiceAccountRepository) FindByID(ctx context.Context, id uuid.UUID) (
 // List implements accountdom.ServiceAccountRepository: one keyset page
 // ordered by (LOWER(name), id), optionally narrowed by a search over name and
 // description.
-func (r *ServiceAccountRepository) List(ctx context.Context, filter accountdom.ServiceAccountFilter, cursorAfter *string, limit int) ([]*accountdom.Account, bool, error) {
+func (r *ServiceAccountRepository) List(ctx context.Context, filter accountdom.ServiceAccountFilter, cursorAfter *string, limit int) ([]*accountdom.Account, bool, int, error) {
 	if limit <= 0 {
 		limit = 30
 	}
@@ -100,19 +100,23 @@ func (r *ServiceAccountRepository) List(ctx context.Context, filter accountdom.S
 		args = append(args, "%"+escapeLike(word)+"%")
 		where += fmt.Sprintf(` AND (LOWER(name) LIKE LOWER($%[1]d) ESCAPE '\' OR LOWER(COALESCE(description, '')) LIKE LOWER($%[1]d) ESCAPE '\')`, len(args))
 	}
-	if cursorAfter != nil {
+	var total int
+	if err := r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM accounts WHERE `+where, args...); err != nil {
+		return nil, false, 0, fmt.Errorf("service account repo: count: %w", err)
+	}
+	if cursorAfter != nil && filter.Offset == 0 {
 		name, id, err := accountdom.DecodeServiceAccountCursor(*cursorAfter)
 		if err != nil {
-			return nil, false, err
+			return nil, false, 0, err
 		}
 		args = append(args, name, id.String())
 		where += fmt.Sprintf(` AND (LOWER(name), id) > ($%d, $%d::uuid)`, len(args)-1, len(args))
 	}
-	args = append(args, limit+1)
+	args = append(args, limit+1, filter.Offset)
 	var recs []accountRecord
 	if err := r.db.SelectContext(ctx, &recs, `SELECT `+serviceAccountCols+` FROM accounts WHERE `+where+
-		fmt.Sprintf(` ORDER BY LOWER(name), id LIMIT $%d`, len(args)), args...); err != nil {
-		return nil, false, fmt.Errorf("service account repo: list: %w", err)
+		fmt.Sprintf(` ORDER BY LOWER(name), id LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...); err != nil {
+		return nil, false, 0, fmt.Errorf("service account repo: list: %w", err)
 	}
 	hasMore := len(recs) > limit
 	if hasMore {
@@ -123,9 +127,9 @@ func (r *ServiceAccountRepository) List(ctx context.Context, filter accountdom.S
 		out[i] = recs[i].entity()
 	}
 	if err := r.loadRoles(ctx, out); err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
-	return out, hasMore, nil
+	return out, hasMore, total, nil
 }
 
 // loadRoles fills Roles on the accounts: the platform-wide roles attached to

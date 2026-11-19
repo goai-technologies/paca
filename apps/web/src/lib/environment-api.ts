@@ -479,6 +479,11 @@ export function resolveWsUrl(wsUrl: string): string {
 export interface EnvironmentDeploymentConfig {
 	ssh_bastion_host: string;
 	port_forward_host: string;
+	// False when this deployment's sandbox namespace cannot run the
+	// privileged DinD sidecar a docker-enabled sandbox needs — the docker
+	// toggles stay hidden rather than offering a setting agent-runner will
+	// refuse.
+	docker_in_sandbox: boolean;
 }
 
 export async function getEnvironmentConfig(): Promise<EnvironmentDeploymentConfig> {

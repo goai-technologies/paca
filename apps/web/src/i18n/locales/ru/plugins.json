@@ -7,6 +7,7 @@
 			"installed": "Установлен",
 			"updateAvailable": "Доступно обновление",
 			"source": "Источник",
+			"official": "Официальный плагин Paca",
 			"upgrading": "Обновление...",
 			"upgradeTo": "Обновить до {{version}}",
 			"uninstalling": "Удаление...",

@@ -10,7 +10,14 @@ import type {
 	Task,
 	TaskListResult,
 } from "@/lib/interaction-api";
+import type { TaskStatus } from "@/lib/project-api";
 import {
+	buildDynamicGroupDefs,
+	defaultCreateStatusId,
+	getColumnGroupDefs,
+	getSwimlaneDefs,
+	getTaskColumnKeys,
+	hasApiColumns,
 	isAutoAssignPending,
 	keepPreviousDataOnPageSizeChangeOnly,
 	resolveSelectedTask,
@@ -208,5 +215,143 @@ describe("isAutoAssignPending", () => {
 		expect(
 			isAutoAssignPending({ assignment_mode: "manual", assignee_ids: [] }),
 		).toBe(false);
+	});
+});
+
+describe("grouping by tags", () => {
+	const ctx = { statuses: [], taskTypes: [], members: [], customFields: [] };
+	const t = ((k: string) => k) as never;
+
+	it("puts a multi-tag task in every tag group and untagged tasks in __none", () => {
+		expect(
+			getTaskColumnKeys(makeTask({ tags: ["a", "b"] }), "tags", ctx),
+		).toEqual(["a", "b"]);
+		expect(getTaskColumnKeys(makeTask({ tags: [] }), "tags", ctx)).toEqual([
+			"__none",
+		]);
+		expect(getTaskColumnKeys(makeTask(), "tags", ctx)).toEqual(["__none"]);
+	});
+
+	it("builds dynamic groups from loaded tags plus a trailing None group", () => {
+		const defs = buildDynamicGroupDefs(
+			[makeTask({ tags: ["a", "b"] }), makeTask({ id: "t2", tags: ["b"] })],
+			"tags",
+			ctx,
+			t,
+		);
+		expect(defs.map((d) => d.key)).toEqual(["a", "b", "__none"]);
+	});
+});
+
+describe("API-listed columns", () => {
+	const t = ((k: string) => k) as never;
+	const ctx = { statuses: [], taskTypes: [], members: [], customFields: [] };
+
+	it("uses the columns the API listed, plus a None column", () => {
+		const defs = getColumnGroupDefs(
+			"tags",
+			{ ...ctx, dynamicColumns: [{ key: "a", label: "a" }] },
+			t,
+		);
+		expect(defs.map((d) => d.key)).toEqual(["a", "__none"]);
+		const people = getColumnGroupDefs(
+			"assignee",
+			{ ...ctx, dynamicColumns: [{ key: "m1", label: "Mia" }] },
+			t,
+		);
+		expect(people.map((d) => d.label)).toEqual([
+			"Mia",
+			"viewUtils.groups.unassigned",
+		]);
+	});
+
+	it("has no tags columns until the API has listed them", () => {
+		expect(getColumnGroupDefs("tags", ctx, t)).toEqual([]);
+	});
+
+	it("builds swimlanes without the view's API-listed columns", () => {
+		const defs = getSwimlaneDefs(
+			"assignee",
+			{
+				...ctx,
+				members: [{ id: "m1", username: "mia", full_name: "Mia" } as never],
+				dynamicColumns: [{ key: "some-tag", label: "some-tag" }],
+			},
+			t,
+		);
+		expect(defs.map((d) => d.key)).toEqual(["m1", "__unassigned"]);
+	});
+
+	it("knows which column_bys the API lists the columns of", () => {
+		expect(hasApiColumns("tags", [])).toBe(true);
+		expect(hasApiColumns("assignee", [])).toBe(true);
+		expect(hasApiColumns("reporter", [])).toBe(true);
+		expect(hasApiColumns("status", [])).toBe(false);
+		expect(hasApiColumns("importance", [])).toBe(false);
+	});
+
+	it("puts a multi-assignee task in every assignee's column", () => {
+		expect(
+			getTaskColumnKeys(
+				makeTask({ assignee_ids: ["a", "b"] }),
+				"assignee",
+				ctx,
+			),
+		).toEqual(["a", "b"]);
+		expect(getTaskColumnKeys(makeTask(), "assignee", ctx)).toEqual([
+			"__unassigned",
+		]);
+	});
+
+	it("treats an unset checkbox as No", () => {
+		const cf = [
+			{ field_key: "done", field_type: "boolean", options: [] },
+		] as never;
+		expect(
+			getTaskColumnKeys(makeTask({ custom_fields: {} }), "done", {
+				...ctx,
+				customFields: cf,
+			}),
+		).toEqual(["false"]);
+	});
+});
+
+describe("defaultCreateStatusId", () => {
+	const status = (
+		id: string,
+		category: string,
+		position: number,
+		is_default = false,
+	) =>
+		({
+			id,
+			project_id: PROJECT_ID,
+			name: id,
+			color: "#000",
+			position,
+			category,
+			is_default,
+		}) as unknown as TaskStatus;
+
+	it("prefers the project's default status over an earlier open one", () => {
+		const statuses = [
+			status("refinement", "refinement", 1),
+			status("backlog", "backlog", 2, true),
+			status("done", "done", 5),
+		];
+		expect(defaultCreateStatusId(statuses)).toBe("backlog");
+	});
+
+	it("falls back to the first non-done status when none is default", () => {
+		expect(
+			defaultCreateStatusId([
+				status("done", "done", 1),
+				status("todo", "todo", 2),
+			]),
+		).toBe("todo");
+	});
+
+	it("returns an empty string for no statuses", () => {
+		expect(defaultCreateStatusId([])).toBe("");
 	});
 });

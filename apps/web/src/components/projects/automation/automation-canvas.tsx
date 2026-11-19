@@ -13,7 +13,7 @@ import {
 	useUpdateNodeInternals,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { AlertCircle, GitBranch, Play, Trash2, X, Zap } from "lucide-react";
+import { GitBranch, Play, Trash2, Zap } from "lucide-react";
 import {
 	type CSSProperties,
 	useCallback,
@@ -41,6 +41,7 @@ interface BaseNodeData extends Record<string, unknown> {
 	node: AutomationNode;
 	label: string;
 	description?: string;
+	matchLabel?: string;
 	canEdit: boolean;
 	selected: boolean;
 	onSelect: () => void;
@@ -64,16 +65,24 @@ const KIND_STYLES: Record<
 		icon: GitBranch,
 	},
 	action: {
-		border: "border-amber-500/50",
-		bg: "bg-amber-500/10",
-		text: "text-amber-600 dark:text-amber-400",
+		border: "border-warning/50",
+		bg: "bg-warning/10",
+		text: "text-warning",
 		icon: Play,
 	},
 };
 
 function NodeShell({ data }: NodeProps<Node<BaseNodeData>>) {
-	const { node, label, description, canEdit, selected, onSelect, onDelete } =
-		data;
+	const {
+		node,
+		label,
+		description,
+		matchLabel,
+		canEdit,
+		selected,
+		onSelect,
+		onDelete,
+	} = data;
 	const style = KIND_STYLES[node.kind];
 	const Icon = style.icon;
 
@@ -146,7 +155,7 @@ function NodeShell({ data }: NodeProps<Node<BaseNodeData>>) {
 				</button>
 			)}
 			{node.kind === "condition" ? (
-				<ConditionBranchRows node={node} />
+				<ConditionBranchRows node={node} matchLabel={matchLabel} />
 			) : (
 				<Handle
 					type="source"
@@ -208,7 +217,13 @@ function branchesForNode(
 	}
 }
 
-function ConditionBranchRows({ node }: { node: AutomationNode }) {
+function ConditionBranchRows({
+	node,
+	matchLabel,
+}: {
+	node: AutomationNode;
+	matchLabel?: string;
+}) {
 	const { t } = useTranslation("projects");
 	const branches = branchesForNode(node).map((b) =>
 		b.label !== undefined
@@ -218,7 +233,8 @@ function ConditionBranchRows({ node }: { node: AutomationNode }) {
 					label:
 						node.type === JEV_CONDITION_NODE_TYPE
 							? t("automation.nodeConfig.description.jevNoulTrue")
-							: t("automation.nodeConfig.description.pluginConditionMatched"),
+							: (matchLabel ??
+								t("automation.nodeConfig.description.pluginConditionMatched")),
 				},
 	);
 	const updateNodeInternals = useUpdateNodeInternals();
@@ -244,7 +260,10 @@ function ConditionBranchRows({ node }: { node: AutomationNode }) {
 					key={b.handle}
 					className="relative flex items-center gap-2 border-b border-border/20 px-3 py-1.5"
 				>
-					<span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+					<span
+						className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
+						title={b.label || undefined}
+					>
 						{b.label ||
 							t("automation.nodeConfig.description.branchFallback", {
 								n: i + 1,
@@ -280,6 +299,7 @@ interface AutomationCanvasProps {
 	edges: AutomationEdge[];
 	nodeLabel: (node: AutomationNode) => string;
 	nodeDescription?: (node: AutomationNode) => string | undefined;
+	conditionMatchLabel?: (node: AutomationNode) => string | undefined;
 	canEdit: boolean;
 	selectedNodeId: string | null;
 	onSelectNode: (nodeId: string) => void;
@@ -291,8 +311,6 @@ interface AutomationCanvasProps {
 	onMoveNode: (nodeId: string, posX: number, posY: number) => void;
 	onDeleteNode: (nodeId: string) => void;
 	onDeleteEdge: (edgeId: string) => void;
-	errorMessage?: string | null;
-	onDismissError?: () => void;
 }
 
 export function AutomationCanvas({
@@ -300,6 +318,7 @@ export function AutomationCanvas({
 	edges,
 	nodeLabel,
 	nodeDescription,
+	conditionMatchLabel,
 	canEdit,
 	selectedNodeId,
 	onSelectNode,
@@ -307,8 +326,6 @@ export function AutomationCanvas({
 	onMoveNode,
 	onDeleteNode,
 	onDeleteEdge,
-	errorMessage,
-	onDismissError,
 }: AutomationCanvasProps) {
 	const { t } = useTranslation("projects");
 	const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
@@ -325,6 +342,7 @@ export function AutomationCanvas({
 					node: n,
 					label: nodeLabel(n),
 					description: nodeDescription?.(n),
+					matchLabel: conditionMatchLabel?.(n),
 					canEdit,
 					selected: n.id === selectedNodeId,
 					onSelect: () => onSelectNode(n.id),
@@ -335,6 +353,7 @@ export function AutomationCanvas({
 			nodes,
 			nodeLabel,
 			nodeDescription,
+			conditionMatchLabel,
 			canEdit,
 			selectedNodeId,
 			onSelectNode,
@@ -401,17 +420,6 @@ export function AutomationCanvas({
 
 	return (
 		<div className="relative flex-1 min-h-0">
-			{errorMessage && (
-				<div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive shadow-lg max-w-md">
-					<AlertCircle className="size-3.5 shrink-0" />
-					<span className="flex-1">{errorMessage}</span>
-					{onDismissError && (
-						<button type="button" onClick={onDismissError} className="shrink-0">
-							<X className="size-3.5" />
-						</button>
-					)}
-				</div>
-			)}
 			{selectedEdgeId && canEdit && (
 				<div className="absolute top-3 right-3 z-10">
 					<button

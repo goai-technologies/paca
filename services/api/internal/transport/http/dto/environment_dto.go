@@ -242,4 +242,8 @@ type EnvironmentDeploymentConfigResponse struct {
 	// client uses to reach any of an environment's user-added port
 	// forwards, e.g. "<port_forward_host>:<host_port>".
 	PortForwardHost string `json:"port_forward_host"`
+	// DockerInSandbox is SANDBOX_DOCKER_IN_SANDBOX — false means this
+	// deployment's sandbox namespace cannot admit the privileged DinD
+	// sidecar, so the frontend must not offer the docker toggle.
+	DockerInSandbox bool `json:"docker_in_sandbox"`
 }

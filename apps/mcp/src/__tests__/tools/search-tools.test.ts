@@ -23,7 +23,19 @@ function block(text: string) {
 function makeDocClient(hits: any[]) {
 	return {
 		searchDocuments: vi.fn().mockResolvedValue(hits),
-		listFolders: vi.fn().mockResolvedValue(FOLDERS),
+		// A hit's location is its folder chain from the top level, read per folder.
+		getFolderPath: vi
+			.fn()
+			.mockImplementation(async (_p: string, id: string) => {
+				const byId = new Map(FOLDERS.map((f) => [f.id, f]));
+				const chain = [];
+				let cur = byId.get(id);
+				while (cur) {
+					chain.unshift(cur);
+					cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+				}
+				return chain;
+			}),
 	} as any;
 }
 
@@ -69,6 +81,7 @@ describe("search_docs", () => {
 				title: "Endpoints",
 				matched_in: "content",
 				snippet: "…call the /login endpoint…",
+				block: 4,
 			},
 			{ id: "d2", folder_id: null, title: "Login", matched_in: "title" },
 		]);
@@ -80,11 +93,42 @@ describe("search_docs", () => {
 		);
 		const out = result.content[0].text;
 		expect(docClient.searchDocuments).toHaveBeenCalledWith("p1", "login", 20);
+		// One path lookup per distinct folder, not a read of the whole tree.
+		expect(docClient.getFolderPath).toHaveBeenCalledTimes(1);
 		expect(out).toContain(
-			"Architecture/API/Endpoints  (content match, id: d1)",
+			"Architecture/API/Endpoints  (content match, block 4, id: d1)",
 		);
 		expect(out).toContain("…call the /login endpoint…");
 		expect(out).toContain("📄 Login  (title match, id: d2)");
+	});
+
+	it("prints no block for a content hit from a server without one", async () => {
+		const result = await handleSearchTool(
+			"search_docs",
+			{ projectId: "p1", query: "x" },
+			{} as any,
+			makeDocClient([
+				{
+					id: "d3",
+					folder_id: null,
+					title: "Old",
+					matched_in: "content",
+					snippet: "x",
+				},
+			]),
+		);
+		expect(result.content[0].text).toContain("📄 Old  (content match, id: d3)");
+	});
+
+	it("describes phrase matching across formatting", () => {
+		const tool = getSearchTools().find((t) => t.name === "search_docs");
+		const query = (tool?.inputSchema.properties as any).query.description;
+		expect(query).not.toContain("single run of text");
+		// Not promised unconditionally: older servers and rows not yet
+		// indexed still match within one run of text.
+		expect(query).not.toContain("so a phrase works");
+		expect(query).toContain("retry with one or two distinctive words");
+		expect(tool?.description).toContain("block");
 	});
 
 	it("reports no matches helpfully", async () => {

@@ -15,9 +15,10 @@ dist-ssr
 __unconfig*
 todos.json
 
-# air (Go hot-reload) build artifacts
+# air (Go hot-reload) and `make build` artifacts
 services/api/tmp/
 services/agent-runner/tmp/
+services/api/bin/
 
 # Local database dumps from the dev db-backup service
 deploy/backups/

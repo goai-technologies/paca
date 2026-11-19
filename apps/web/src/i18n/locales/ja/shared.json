@@ -1,6 +1,8 @@
 {
 	"activityPane": {
+		"resize": "アクティビティパネルのサイズを変更",
 		"title": "アクティビティ",
+		"actions": "エントリーの操作",
 		"empty": "アクティビティはまだありません",
 		"emptyComments": "コメントはまだありません",
 		"showAllActivity": "すべてのアクティビティを表示",
@@ -194,5 +196,14 @@
 		"minOne": "ロールは1つ以上必要です。",
 		"clear": "クリア",
 		"placeholder": "ロールを選択"
+	},
+	"askQuestion": {
+		"otherPlaceholder": "または自分の回答を入力…",
+		"submit": "回答を送信",
+		"answered": "回答しました: {{answer}}"
+	},
+	"paneResize": {
+		"sidebar": "サイドバーのサイズを変更",
+		"taskColumn": "タスク列のサイズを変更"
 	}
 }

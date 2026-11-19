@@ -12,6 +12,8 @@ import (
 	"github.com/Paca-AI/api/internal/apierr"
 	agentdom "github.com/Paca-AI/api/internal/domain/agent"
 	domainauth "github.com/Paca-AI/api/internal/domain/auth"
+	docdom "github.com/Paca-AI/api/internal/domain/doc"
+	gitdom "github.com/Paca-AI/api/internal/domain/git"
 	roledom "github.com/Paca-AI/api/internal/domain/role"
 	taskdom "github.com/Paca-AI/api/internal/domain/task"
 	userdom "github.com/Paca-AI/api/internal/domain/user"
@@ -324,5 +326,32 @@ func TestError_FieldNotSupportedForAgentType(t *testing.T) {
 	}
 	if env.ErrorDetails["fields"] != "system_prompt,git_committer_email" {
 		t.Fatalf("unexpected fields detail: %q", env.ErrorDetails["fields"])
+	}
+}
+
+func TestError_GitDetailBecomesProviderMessage(t *testing.T) {
+	w := httptest.NewRecorder()
+	Error(w, newTestRequest(""), gitdom.WithDetail(gitdom.ErrNotVisible, "token covers only acme/ui"))
+	var env envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusConflict || env.ErrorCode != string(apierr.CodeGitRepositoryNotVisible) || env.Error != gitdom.ErrNotVisible.Error() ||
+		env.ErrorDetails["provider_message"] != "token covers only acme/ui" {
+		t.Fatalf("got %d %+v", w.Code, env)
+	}
+	w = httptest.NewRecorder()
+	Error(w, newTestRequest(""), gitdom.ErrNotVisible)
+	if jsonHasKey(t, w.Body.String(), "error_details") {
+		t.Fatalf("no detail, no error_details: %s", w.Body)
+	}
+}
+
+// A by-path write that keeps losing the race to another writer is a 409 the
+// caller can retry, not a 500.
+func TestStatusAndCodeFor_DocPathChanged(t *testing.T) {
+	status, code := statusAndCodeFor(docdom.ErrDocPathChanged)
+	if status != http.StatusConflict || code != apierr.CodeDocPathChanged {
+		t.Errorf("expected (409,%s), got (%d,%s)", apierr.CodeDocPathChanged, status, code)
 	}
 }

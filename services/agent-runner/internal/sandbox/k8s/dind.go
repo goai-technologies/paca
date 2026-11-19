@@ -22,6 +22,7 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -68,6 +69,23 @@ func dindContainer(resources corev1.ResourceRequirements) corev1.Container {
 			Privileged: ptr.To(true),
 		},
 	}
+}
+
+// requireDockerInSandboxAllowed refuses a docker_enabled sandbox on a
+// deployment whose sandbox namespace cannot admit a privileged Pod at all.
+// The DinD sidecar needs Privileged: true, which Pod Security Admission
+// rejects under every standard except "privileged" — so submitting the
+// workload can only fail later (for a Deployment, after the PVC is already
+// created), with an error that says nothing about the cause. Refusing here
+// keeps that failure actionable and leaves nothing behind.
+func (m *Manager) requireDockerInSandboxAllowed(enabled bool) error {
+	if !enabled || m.dockerInSandbox {
+		return nil
+	}
+	return errors.New("sandbox/k8s: docker-in-sandbox is disabled on this deployment " +
+		"(SANDBOX_DOCKER_IN_SANDBOX=false): its sandbox namespace enforces a Pod Security " +
+		"Standard that forbids the privileged DinD sidecar a docker-enabled sandbox needs; " +
+		"create the environment or agent without docker enabled")
 }
 
 // waitForDindReady polls by exec'ing `docker info` inside the dind

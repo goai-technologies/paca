@@ -62,8 +62,11 @@
 		"errors": {
 			"titleInvalid": "Ese título no es válido.",
 			"folderNameInvalid": "Ese nombre de carpeta no es válido.",
-			"renameFailed": "No se pudo cambiar el nombre. Inténtalo de nuevo."
-		}
+			"renameFailed": "No se pudo cambiar el nombre. Inténtalo de nuevo.",
+			"moveIntoSelf": "Una carpeta no se puede mover dentro de sí misma ni de una de sus subcarpetas.",
+			"moveFailed": "No se pudo mover el elemento. Inténtalo de nuevo."
+		},
+		"moveToTop": "Mover al nivel superior"
 	},
 	"notifications": {
 		"title": "Notificaciones",
@@ -74,14 +77,21 @@
 		"unmuteSound": "Activar sonido de notificaciones",
 		"text": {
 			"assigned": "{{actor}} te asignó la tarea #{{taskNumber}} — {{taskTitle}}",
-			"mentioned": "{{actor}} te mencionó en #{{taskNumber}} — {{taskTitle}}"
-		}
+			"mentioned": "{{actor}} te mencionó en #{{taskNumber}} — {{taskTitle}}",
+			"question": "{{actor}} te hizo una pregunta en {{title}}",
+			"mentionedInDoc": "{{actor}} te mencionó en el documento {{title}}",
+			"automation": "Automatización: {{message}} (#{{taskNumber}} — {{taskTitle}})"
+		},
+		"untitledConversation": "Conversación sin título",
+		"globalChat": "Chat global",
+		"untitledDocument": "Documento sin título"
 	},
 	"userMenu": {
 		"signIn": "Iniciar sesión",
-		"myProfile": "Mi perfil",
+		"myProfile": "Cuenta",
 		"apiKeys": "Claves de API",
 		"logOut": "Cerrar sesión",
-		"loggingOut": "Cerrando sesión…"
+		"loggingOut": "Cerrando sesión…",
+		"sendFeedback": "Enviar comentarios"
 	}
 }

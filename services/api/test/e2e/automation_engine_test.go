@@ -1071,6 +1071,40 @@ func TestE2EAutomation_UpdateNode_ClearingTargetTaskRejectedWhenDownstreamNeedsT
 		map[string]any{"cron_expression": "* * * * *"}, http.StatusBadRequest)
 }
 
+func TestE2EAutomation_UpdateNode_SelfParentRejected(t *testing.T) {
+	t.Parallel()
+	env := newE2EEnv(t)
+	ownerUsername := "automation-selfparent-owner-" + uuid.NewString()
+	seedTaskMemberUser(t, env, ownerUsername, "automationselfparent1")
+	ownerClient, ownerToken := taskMemberLogin(t, env, ownerUsername, "automationselfparent1")
+	projID := createProjectForTasksViaAPI(t, env, ownerClient, ownerToken)
+
+	task := createTaskViaAPIWithBody(t, env, ownerClient, ownerToken, projID, map[string]any{"title": "Self Parent Target Task"})
+	taskID, _ := task["id"].(string)
+
+	automationID := createAutomationViaAPI(t, env, ownerClient, ownerToken, projID, "Self Parent Automation")
+	trigger := addAutomationNodeViaAPI(t, env, ownerClient, ownerToken, projID, automationID,
+		"trigger", "cron", map[string]any{"cron_expression": "0 0 * * *", "target_task_id": taskID})
+	action := addAutomationNodeViaAPI(t, env, ownerClient, ownerToken, projID, automationID,
+		"action", "update_task", map[string]any{"update": map[string]any{"tags": []string{"x"}}})
+	triggerID, _ := trigger["id"].(string)
+	actionID, _ := action["id"].(string)
+	addAutomationEdgeViaAPI(t, env, ownerClient, ownerToken, projID, automationID, triggerID, actionID)
+
+	// The run's task is the trigger's target task, so parenting it to that
+	// same task can only ever fail at runtime ("a task cannot be its own
+	// parent") — it has to be rejected when the node is saved.
+	updateAutomationNodeConfigViaAPIExpect(t, env, ownerClient, ownerToken, projID, automationID, actionID,
+		map[string]any{"update": map[string]any{"tags": []string{"x"}, "parent_task_id": taskID}}, http.StatusBadRequest)
+
+	// A real parent stays accepted, so the rejection above isn't just
+	// "update_task may never set a parent".
+	parent := createTaskViaAPIWithBody(t, env, ownerClient, ownerToken, projID, map[string]any{"title": "Self Parent Epic"})
+	parentID, _ := parent["id"].(string)
+	updateAutomationNodeConfigViaAPIExpect(t, env, ownerClient, ownerToken, projID, automationID, actionID,
+		map[string]any{"update": map[string]any{"tags": []string{"x"}, "parent_task_id": parentID}}, http.StatusOK)
+}
+
 func TestE2EAutomationEngine_CronTriggerWithNoTargetTask_FiresCallAPIOnlyWithNilRunTask(t *testing.T) {
 	t.Parallel()
 	env := newE2EEnv(t)

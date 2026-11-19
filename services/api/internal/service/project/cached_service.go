@@ -89,8 +89,8 @@ func (c *CachedService) List(ctx context.Context, page, pageSize int) ([]*projec
 }
 
 // ListAccessible delegates directly to the underlying service (not cached).
-func (c *CachedService) ListAccessible(ctx context.Context, userID uuid.UUID, page, pageSize int) ([]*projectdom.Project, int64, error) {
-	return c.svc.ListAccessible(ctx, userID, page, pageSize)
+func (c *CachedService) ListAccessible(ctx context.Context, accountID uuid.UUID, page, pageSize int) ([]*projectdom.Project, int64, error) {
+	return c.svc.ListAccessible(ctx, accountID, page, pageSize)
 }
 
 // GetByID returns a project by its ID, reading from cache when available and
@@ -267,8 +267,8 @@ func (c *CachedService) UpdateMemberDescription(ctx context.Context, projectID, 
 }
 
 // RemoveMember delegates to the underlying service and invalidates the members cache.
-func (c *CachedService) RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error {
-	if err := c.svc.RemoveMember(ctx, projectID, userID); err != nil {
+func (c *CachedService) RemoveMember(ctx context.Context, projectID, accountID uuid.UUID) error {
+	if err := c.svc.RemoveMember(ctx, projectID, accountID); err != nil {
 		return err
 	}
 	if err := c.st.Delete(ctx, membersKey(projectID)); err != nil {

@@ -14,11 +14,10 @@ import (
 )
 
 type memberServiceRepoMock struct {
-	findByID          func(ctx context.Context, id uuid.UUID) (*projectdom.Project, error)
-	findMember        func(ctx context.Context, projectID, userID uuid.UUID) (*projectdom.ProjectMember, error)
-	findMemberByAgent func(ctx context.Context, projectID, agentID uuid.UUID) (*projectdom.ProjectMember, error)
-	updateMemberRole  func(ctx context.Context, projectID, userID, roleID uuid.UUID) error
-	addMember         func(ctx context.Context, m *projectdom.ProjectMember) error
+	findByID         func(ctx context.Context, id uuid.UUID) (*projectdom.Project, error)
+	findMember       func(ctx context.Context, projectID, userID uuid.UUID) (*projectdom.ProjectMember, error)
+	updateMemberRole func(ctx context.Context, projectID, userID, roleID uuid.UUID) error
+	addMember        func(ctx context.Context, m *projectdom.ProjectMember) error
 }
 
 func (m *memberServiceRepoMock) List(context.Context, int, int) ([]*projectdom.Project, int64, error) {
@@ -72,30 +71,6 @@ func (m *memberServiceRepoMock) FindMember(ctx context.Context, projectID, userI
 	if m.findMember != nil {
 		return m.findMember(ctx, projectID, userID)
 	}
-	return nil, projectdom.ErrMemberNotFound
-}
-
-func (m *memberServiceRepoMock) FindMemberByAgent(ctx context.Context, projectID, agentID uuid.UUID) (*projectdom.ProjectMember, error) {
-	if m.findMemberByAgent != nil {
-		return m.findMemberByAgent(ctx, projectID, agentID)
-	}
-	return nil, projectdom.ErrMemberNotFound
-}
-
-func (m *memberServiceRepoMock) FindMemberByActor(_ context.Context, projectID, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error) {
-	if agentID != nil {
-		if m.findMemberByAgent != nil {
-			return m.findMemberByAgent(context.Background(), projectID, *agentID)
-		}
-		return nil, projectdom.ErrMemberNotFound
-	}
-	if m.findMember != nil {
-		return m.findMember(context.Background(), projectID, actorID)
-	}
-	return nil, projectdom.ErrMemberNotFound
-}
-
-func (m *memberServiceRepoMock) FindMemberByUserProject(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
 	return nil, projectdom.ErrMemberNotFound
 }
 
@@ -193,14 +168,14 @@ func TestAddMember_InvitesGlobalAgent(t *testing.T) {
 	agent := &agentdom.Agent{ID: agentID, AgentScope: agentdom.AgentScopeGlobal, Handle: "global-bot"}
 	addedMember := &projectdom.ProjectMember{ID: uuid.New(), ProjectID: projectID, AgentID: &agentID, MemberType: "agent"}
 
-	findMemberByAgentCalls := 0
+	findMemberCalls := 0
 	repo := &memberServiceRepoMock{
 		findByID: func(_ context.Context, id uuid.UUID) (*projectdom.Project, error) {
 			return &projectdom.Project{ID: id}, nil
 		},
-		findMemberByAgent: func(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
-			findMemberByAgentCalls++
-			if findMemberByAgentCalls == 1 {
+		findMember: func(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
+			findMemberCalls++
+			if findMemberCalls == 1 {
 				return nil, projectdom.ErrMemberNotFound // not yet a member
 			}
 			return addedMember, nil // re-fetch after AddAgentMember
@@ -263,7 +238,7 @@ func TestAddMember_RejectsAlreadyInvitedAgent(t *testing.T) {
 		findByID: func(_ context.Context, id uuid.UUID) (*projectdom.Project, error) {
 			return &projectdom.Project{ID: id}, nil
 		},
-		findMemberByAgent: func(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
 			return &projectdom.ProjectMember{ID: uuid.New()}, nil // already a member
 		},
 	}
@@ -295,7 +270,7 @@ func TestAddMember_RejectsAgentHandleConflict(t *testing.T) {
 		findByID: func(_ context.Context, id uuid.UUID) (*projectdom.Project, error) {
 			return &projectdom.Project{ID: id}, nil
 		},
-		findMemberByAgent: func(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
 			return nil, projectdom.ErrMemberNotFound
 		},
 	}

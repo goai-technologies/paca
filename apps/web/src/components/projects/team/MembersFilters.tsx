@@ -1,6 +1,7 @@
 import { Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -11,6 +12,13 @@ interface MembersFiltersProps {
 	 *  members hold the role (over the whole team, so chips don't shift as the
 	 *  search narrows); chips without a count simply don't show one. */
 	roles: { name: string; count?: number }[];
+	/** Load-more state for `roles`, which page in from the server. */
+	rolesPagination?: {
+		hasMore: boolean;
+		isLoadingMore: boolean;
+		isError?: boolean;
+		onLoadMore: () => void;
+	};
 	/** Size of the whole team, shown on the "All" chip when given. */
 	totalCount?: number;
 	selectedRole: string;
@@ -24,6 +32,7 @@ interface MembersFiltersProps {
 export function MembersFilters({
 	search,
 	roles,
+	rolesPagination,
 	totalCount,
 	selectedRole,
 	shownCount,
@@ -104,6 +113,9 @@ export function MembersFilters({
 							</Button>
 						);
 					})}
+					{rolesPagination ? (
+						<LoadMoreSentinel compact {...rolesPagination} />
+					) : null}
 				</fieldset>
 			) : null}
 			{isFiltering ? (

@@ -38,17 +38,17 @@ type mockAgentSvc struct {
 	listConversations             func(ctx context.Context, filter agentdom.ListConversationsFilter, limit int) ([]*agentdom.AgentConversation, bool, error)
 	listConversationEvents        func(ctx context.Context, conversationID uuid.UUID, window agentdom.ConversationEventWindow) ([]*agentdom.AgentConversationEvent, int64, error)
 	getConversation               func(ctx context.Context, projectID, conversationID, memberID uuid.UUID) (*agentdom.AgentConversation, error)
-	getConversationForAgent       func(ctx context.Context, conversationID, callerAgentID, currentConversationID uuid.UUID) (*agentdom.AgentConversation, error)
+	getConversationForAgent       func(ctx context.Context, conversationID, callerAgentID uuid.UUID) (*agentdom.AgentConversation, error)
 	updateConversationTitle       func(ctx context.Context, projectID, conversationID, memberID uuid.UUID, title string) (*agentdom.AgentConversation, error)
 	deleteConversation            func(ctx context.Context, projectID, conversationID, memberID uuid.UUID) error
-	getGlobalConversation         func(ctx context.Context, conversationID, actorUserID uuid.UUID) (*agentdom.AgentConversation, error)
-	listGlobalConversations       func(ctx context.Context, actorUserID uuid.UUID, filter agentdom.ListConversationsFilter, limit int) ([]*agentdom.AgentConversation, bool, error)
-	stopGlobalConversation        func(ctx context.Context, conversationID, actorUserID uuid.UUID) error
-	updateGlobalConversationTitle func(ctx context.Context, conversationID, actorUserID uuid.UUID, title string) (*agentdom.AgentConversation, error)
-	deleteGlobalConversation      func(ctx context.Context, conversationID, actorUserID uuid.UUID) error
-	pauseGlobalConversation       func(ctx context.Context, conversationID, actorUserID uuid.UUID) error
-	globalHeartbeat               func(ctx context.Context, conversationID, actorUserID uuid.UUID) error
-	sendGlobalConversationMessage func(ctx context.Context, conversationID uuid.UUID, message string, actorUserID uuid.UUID, onBusy string) error
+	getGlobalConversation         func(ctx context.Context, conversationID, actorAccountID uuid.UUID) (*agentdom.AgentConversation, error)
+	listGlobalConversations       func(ctx context.Context, actorAccountID uuid.UUID, filter agentdom.ListConversationsFilter, limit int) ([]*agentdom.AgentConversation, bool, error)
+	stopGlobalConversation        func(ctx context.Context, conversationID, actorAccountID uuid.UUID) error
+	updateGlobalConversationTitle func(ctx context.Context, conversationID, actorAccountID uuid.UUID, title string) (*agentdom.AgentConversation, error)
+	deleteGlobalConversation      func(ctx context.Context, conversationID, actorAccountID uuid.UUID) error
+	pauseGlobalConversation       func(ctx context.Context, conversationID, actorAccountID uuid.UUID) error
+	globalHeartbeat               func(ctx context.Context, conversationID, actorAccountID uuid.UUID) error
+	sendGlobalConversationMessage func(ctx context.Context, conversationID uuid.UUID, message string, actorAccountID uuid.UUID, onBusy string) error
 	getGlobalAgent                func(ctx context.Context, agentID uuid.UUID) (*agentdom.Agent, error)
 	generateGlobalACPBridgeToken  func(ctx context.Context, agentID uuid.UUID) (string, error)
 	generateGlobalAgentMCPKey     func(ctx context.Context, agentID uuid.UUID) (string, error)
@@ -151,9 +151,9 @@ func (m *mockAgentSvc) GetConversation(ctx context.Context, projectID, conversat
 	// gate passes by default; tests asserting rejection configure getConversation.
 	return &agentdom.AgentConversation{ID: conversationID, ProjectID: projectID}, nil
 }
-func (m *mockAgentSvc) GetConversationForAgent(ctx context.Context, conversationID, callerAgentID, currentConversationID uuid.UUID) (*agentdom.AgentConversation, error) {
+func (m *mockAgentSvc) GetConversationForAgent(ctx context.Context, conversationID, callerAgentID uuid.UUID) (*agentdom.AgentConversation, error) {
 	if m.getConversationForAgent != nil {
-		return m.getConversationForAgent(ctx, conversationID, callerAgentID, currentConversationID)
+		return m.getConversationForAgent(ctx, conversationID, callerAgentID)
 	}
 	return &agentdom.AgentConversation{ID: conversationID, AgentID: callerAgentID}, nil
 }
@@ -240,51 +240,51 @@ func (m *mockAgentSvc) GenerateGlobalAgentMCPKey(ctx context.Context, agentID uu
 	}
 	return "", nil
 }
-func (m *mockAgentSvc) ListGlobalConversations(ctx context.Context, actorUserID uuid.UUID, filter agentdom.ListConversationsFilter, limit int) ([]*agentdom.AgentConversation, bool, error) {
+func (m *mockAgentSvc) ListGlobalConversations(ctx context.Context, actorAccountID uuid.UUID, filter agentdom.ListConversationsFilter, limit int) ([]*agentdom.AgentConversation, bool, error) {
 	if m.listGlobalConversations != nil {
-		return m.listGlobalConversations(ctx, actorUserID, filter, limit)
+		return m.listGlobalConversations(ctx, actorAccountID, filter, limit)
 	}
 	return nil, false, nil
 }
-func (m *mockAgentSvc) GetGlobalConversation(ctx context.Context, conversationID, actorUserID uuid.UUID) (*agentdom.AgentConversation, error) {
+func (m *mockAgentSvc) GetGlobalConversation(ctx context.Context, conversationID, actorAccountID uuid.UUID) (*agentdom.AgentConversation, error) {
 	if m.getGlobalConversation != nil {
-		return m.getGlobalConversation(ctx, conversationID, actorUserID)
+		return m.getGlobalConversation(ctx, conversationID, actorAccountID)
 	}
 	return nil, nil
 }
-func (m *mockAgentSvc) UpdateGlobalConversationTitle(ctx context.Context, conversationID, actorUserID uuid.UUID, title string) (*agentdom.AgentConversation, error) {
+func (m *mockAgentSvc) UpdateGlobalConversationTitle(ctx context.Context, conversationID, actorAccountID uuid.UUID, title string) (*agentdom.AgentConversation, error) {
 	if m.updateGlobalConversationTitle != nil {
-		return m.updateGlobalConversationTitle(ctx, conversationID, actorUserID, title)
+		return m.updateGlobalConversationTitle(ctx, conversationID, actorAccountID, title)
 	}
-	return &agentdom.AgentConversation{ID: conversationID, ActorUserID: &actorUserID, Title: &title}, nil
+	return &agentdom.AgentConversation{ID: conversationID, ActorAccountID: &actorAccountID, Title: &title}, nil
 }
-func (m *mockAgentSvc) DeleteGlobalConversation(ctx context.Context, conversationID, actorUserID uuid.UUID) error {
+func (m *mockAgentSvc) DeleteGlobalConversation(ctx context.Context, conversationID, actorAccountID uuid.UUID) error {
 	if m.deleteGlobalConversation != nil {
-		return m.deleteGlobalConversation(ctx, conversationID, actorUserID)
+		return m.deleteGlobalConversation(ctx, conversationID, actorAccountID)
 	}
 	return nil
 }
-func (m *mockAgentSvc) StopGlobalConversation(ctx context.Context, conversationID, actorUserID uuid.UUID) error {
+func (m *mockAgentSvc) StopGlobalConversation(ctx context.Context, conversationID, actorAccountID uuid.UUID) error {
 	if m.stopGlobalConversation != nil {
-		return m.stopGlobalConversation(ctx, conversationID, actorUserID)
+		return m.stopGlobalConversation(ctx, conversationID, actorAccountID)
 	}
 	return nil
 }
-func (m *mockAgentSvc) PauseGlobalConversation(ctx context.Context, conversationID, actorUserID uuid.UUID) error {
+func (m *mockAgentSvc) PauseGlobalConversation(ctx context.Context, conversationID, actorAccountID uuid.UUID) error {
 	if m.pauseGlobalConversation != nil {
-		return m.pauseGlobalConversation(ctx, conversationID, actorUserID)
+		return m.pauseGlobalConversation(ctx, conversationID, actorAccountID)
 	}
 	return nil
 }
-func (m *mockAgentSvc) GlobalHeartbeat(ctx context.Context, conversationID, actorUserID uuid.UUID) error {
+func (m *mockAgentSvc) GlobalHeartbeat(ctx context.Context, conversationID, actorAccountID uuid.UUID) error {
 	if m.globalHeartbeat != nil {
-		return m.globalHeartbeat(ctx, conversationID, actorUserID)
+		return m.globalHeartbeat(ctx, conversationID, actorAccountID)
 	}
 	return nil
 }
-func (m *mockAgentSvc) SendGlobalConversationMessage(ctx context.Context, conversationID uuid.UUID, message string, actorUserID uuid.UUID, _ []agentdom.ContextItemRef, onBusy string) error {
+func (m *mockAgentSvc) SendGlobalConversationMessage(ctx context.Context, conversationID uuid.UUID, message string, actorAccountID uuid.UUID, _ []agentdom.ContextItemRef, onBusy string) error {
 	if m.sendGlobalConversationMessage != nil {
-		return m.sendGlobalConversationMessage(ctx, conversationID, message, actorUserID, onBusy)
+		return m.sendGlobalConversationMessage(ctx, conversationID, message, actorAccountID, onBusy)
 	}
 	return nil
 }
@@ -415,12 +415,11 @@ func newGlobalAgentAdminRouter(svc agentdom.Service) chi.Router {
 }
 
 // fakeMemberRepo implements projectdom.MemberRepository, letting tests
-// control FindMemberByUserProject (used by resolveMemberID) and
-// FindMemberByAgent (used by ListAgentActivities). Every other method
+// control FindMember (used by callerMemberID and ListAgentActivities). Every other method
 // panics if invoked, since those tests should never reach them.
 type fakeMemberRepo struct {
-	findByUserProject func(ctx context.Context, userID, projectID uuid.UUID) (*projectdom.ProjectMember, error)
-	findByAgent       func(ctx context.Context, projectID, agentID uuid.UUID) (*projectdom.ProjectMember, error)
+	findMember     func(ctx context.Context, projectID, accountID uuid.UUID) (*projectdom.ProjectMember, error)
+	findMemberByID func(ctx context.Context, memberID uuid.UUID) (*projectdom.ProjectMember, error)
 }
 
 func (f *fakeMemberRepo) CountMembers(context.Context, uuid.UUID, projectdom.MemberFilter) (int64, error) {
@@ -437,22 +436,16 @@ func (f *fakeMemberRepo) ListAllMembers(context.Context, uuid.UUID) ([]*projectd
 func (f *fakeMemberRepo) CountDistinctAgentsByProjects(context.Context, []uuid.UUID) (int64, error) {
 	panic("fakeMemberRepo: CountDistinctAgentsByProjects not used by resolveMemberID tests")
 }
-func (f *fakeMemberRepo) FindMember(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
-	panic("fakeMemberRepo: FindMember not used by resolveMemberID tests")
-}
-func (f *fakeMemberRepo) FindMemberByAgent(ctx context.Context, projectID, agentID uuid.UUID) (*projectdom.ProjectMember, error) {
-	if f.findByAgent != nil {
-		return f.findByAgent(ctx, projectID, agentID)
+func (f *fakeMemberRepo) FindMember(ctx context.Context, projectID, accountID uuid.UUID) (*projectdom.ProjectMember, error) {
+	if f.findMember != nil {
+		return f.findMember(ctx, projectID, accountID)
 	}
-	panic("fakeMemberRepo: FindMemberByAgent not configured")
+	panic("fakeMemberRepo: FindMember not configured")
 }
-func (f *fakeMemberRepo) FindMemberByUserProject(ctx context.Context, userID, projectID uuid.UUID) (*projectdom.ProjectMember, error) {
-	return f.findByUserProject(ctx, userID, projectID)
-}
-func (f *fakeMemberRepo) FindMemberByActor(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID) (*projectdom.ProjectMember, error) {
-	panic("fakeMemberRepo: FindMemberByActor not used by resolveMemberID tests")
-}
-func (f *fakeMemberRepo) FindMemberByID(context.Context, uuid.UUID) (*projectdom.ProjectMember, error) {
+func (f *fakeMemberRepo) FindMemberByID(ctx context.Context, id uuid.UUID) (*projectdom.ProjectMember, error) {
+	if f.findMemberByID != nil {
+		return f.findMemberByID(ctx, id)
+	}
 	panic("fakeMemberRepo: FindMemberByID not used by resolveMemberID tests")
 }
 func (f *fakeMemberRepo) AddMember(context.Context, *projectdom.ProjectMember, []uuid.UUID, *uuid.UUID) error {
@@ -898,10 +891,10 @@ func TestResolveMemberID_NoMemberRepoConfigured_Returns500(t *testing.T) {
 	}
 }
 
-func TestResolveMemberID_InvalidSubjectClaim_Returns400(t *testing.T) {
+func TestResolveMemberID_InvalidSubjectClaim_Returns401(t *testing.T) {
 	memberRepo := &fakeMemberRepo{
-		findByUserProject: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
-			t.Fatal("FindMemberByUserProject should not be called when the subject claim itself is unparsable")
+		findMember: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
+			t.Fatal("FindMember should not be called when the subject claim itself is unparsable")
 			return nil, nil
 		},
 	}
@@ -912,14 +905,14 @@ func TestResolveMemberID_InvalidSubjectClaim_Returns400(t *testing.T) {
 	w := doAgentRequest(t, r, http.MethodPost,
 		"/projects/"+projectID.String()+"/agents/"+agentID.String()+"/chat-sessions",
 		map[string]any{"message": "hello"})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for an unparsable subject claim, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for an unparsable subject claim, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
 func TestResolveMemberID_LookupFails_PropagatesError(t *testing.T) {
 	memberRepo := &fakeMemberRepo{
-		findByUserProject: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
 			return nil, errors.New("db unavailable")
 		},
 	}
@@ -940,7 +933,7 @@ func TestResolveMemberID_Resolved_PassesMemberIDToService(t *testing.T) {
 	resolvedMemberID := uuid.New()
 	var gotMemberID uuid.UUID
 	memberRepo := &fakeMemberRepo{
-		findByUserProject: func(_ context.Context, gotUserID, _ uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(_ context.Context, _, gotUserID uuid.UUID) (*projectdom.ProjectMember, error) {
 			if gotUserID != userID {
 				t.Fatalf("expected lookup for user %v, got %v", userID, gotUserID)
 			}
@@ -1004,7 +997,7 @@ func TestListAgentActivities_WrongProject_Returns404(t *testing.T) {
 
 func TestListAgentActivities_MemberNotFound_Returns404(t *testing.T) {
 	memberRepo := &fakeMemberRepo{
-		findByAgent: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
 			return nil, projectdom.ErrMemberNotFound
 		},
 	}
@@ -1022,7 +1015,7 @@ func TestListAgentActivities_MemberNotFound_Returns404(t *testing.T) {
 func TestListAgentActivities_InvalidType_Returns400(t *testing.T) {
 	memberID := uuid.New()
 	memberRepo := &fakeMemberRepo{
-		findByAgent: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
 			return &projectdom.ProjectMember{ID: memberID}, nil
 		},
 	}
@@ -1051,7 +1044,7 @@ func (f *fakeActivityLister) List(_ context.Context, filter activitydom.ListFilt
 func TestListAgentActivities_Success_ResolvesMemberAndForwardsFilters(t *testing.T) {
 	memberID := uuid.New()
 	memberRepo := &fakeMemberRepo{
-		findByAgent: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
 			return &projectdom.ProjectMember{ID: memberID}, nil
 		},
 	}
@@ -1100,7 +1093,7 @@ func TestListAgentActivities_Success_ResolvesMemberAndForwardsFilters(t *testing
 
 func TestListAgentActivities_NoTypeFilter_DefaultsToTaskAndDoc(t *testing.T) {
 	memberRepo := &fakeMemberRepo{
-		findByAgent: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
 			return &projectdom.ProjectMember{ID: uuid.New()}, nil
 		},
 	}
@@ -1536,7 +1529,7 @@ func TestSendChatMessage_PassesURLAgentAndMapsForeignSessionToNotFound(t *testin
 		return &agentdom.AgentConversation{ID: uuid.New()}, nil
 	}}
 	h := handler.NewAgentHandler(svc, "", "", "").WithMemberRepo(&fakeMemberRepo{
-		findByUserProject: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
+		findMember: func(context.Context, uuid.UUID, uuid.UUID) (*projectdom.ProjectMember, error) {
 			return &projectdom.ProjectMember{ID: memberID}, nil
 		},
 	})
@@ -1603,5 +1596,40 @@ func TestListGlobalAgents_IsPaginated(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"next_cursor":null`) {
 		t.Fatalf("last page must report next_cursor null: %s", w.Body.String())
+	}
+}
+
+func TestGetLLMModels_RunnerUnreachableReturnsEmptyList(t *testing.T) {
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+
+	h := handler.NewAgentHandler(&mockAgentSvc{}, down.URL, "test-internal-key", "")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/agents/llm-models", nil)
+	h.GetLLMModels(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body %s)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "{}" {
+		t.Fatalf("body = %q, want {}", got)
+	}
+}
+
+func TestGetLLMModels_ClientCancelWritesNothing(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer slow.Close()
+
+	h := handler.NewAgentHandler(&mockAgentSvc{}, slow.URL, "test-internal-key", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/agents/llm-models", nil)
+	h.GetLLMModels(rec, req)
+
+	if got := rec.Body.String(); got != "" {
+		t.Fatalf("body = %q, want nothing written after the client cancelled", got)
 	}
 }

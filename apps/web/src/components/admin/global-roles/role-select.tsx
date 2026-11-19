@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { PermissionSummary } from "@/components/admin/global-roles/permission-summary";
 import { isFullAccessRole } from "@/components/admin/global-roles/utils";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import {
 	RoleBadgeList,
 	RoleTag,
@@ -33,8 +34,27 @@ export interface RoleOption {
 /** How many of a role's permissions an option lists when it has no description. */
 const PREVIEW_COUNT = 3;
 
+/** Server-driven search and paging for a role list too large to hold whole:
+ *  the caller owns the query text and fetches matching roles page by page, so
+ *  the panel neither filters locally nor hides the search box. */
+export interface RemoteRoleSearch {
+	query: string;
+	onQueryChange: (query: string) => void;
+	hasMore: boolean;
+	isLoadingMore: boolean;
+	isError?: boolean;
+	onLoadMore: () => void;
+}
+
 export interface RoleSelectPanelProps<T extends RoleOption> {
+	/** The roles offered (with `remote`, the ones matching the search so far). */
 	roles: T[];
+	/** Roles that may be picked or held but are not necessarily in `roles`
+	 *  (not on a loaded page): used to resolve the picked ones to badges and to
+	 *  report them to `onChange`. */
+	knownRoles?: T[];
+	/** Search and page `roles` on the server instead of filtering them here. */
+	remote?: RemoteRoleSearch;
 	/** Ids of the roles picked. A holder may have several, or none. */
 	values: string[];
 	/** Called with the new set of picked role ids, and those roles. */
@@ -63,6 +83,8 @@ export interface RoleSelectPanelProps<T extends RoleOption> {
  */
 export function RoleSelectPanel<T extends RoleOption>({
 	roles,
+	knownRoles = [],
+	remote,
 	values,
 	onChange,
 	currentRoleIds = [],
@@ -77,18 +99,25 @@ export function RoleSelectPanel<T extends RoleOption>({
 	const baseId = useId();
 	const listRef = useRef<HTMLDivElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
-	const [query, setQuery] = useState("");
+	const [localQuery, setLocalQuery] = useState("");
+	const query = remote ? remote.query : localQuery;
+	const setQuery = remote ? remote.onQueryChange : setLocalQuery;
 	const [active, setActive] = useState(0);
+	const pickable = useMemo(() => {
+		const byId = new Map<string, T>();
+		for (const r of [...knownRoles, ...roles]) byId.set(r.id, r);
+		return [...byId.values()];
+	}, [knownRoles, roles]);
 
 	const visible = useMemo(() => {
 		const q = query.trim().toLowerCase();
-		if (!q) return roles;
+		if (remote || !q) return roles;
 		return roles.filter(
 			(r) =>
 				r.name.toLowerCase().includes(q) ||
 				(r.description ?? "").toLowerCase().includes(q),
 		);
-	}, [roles, query]);
+	}, [roles, query, remote]);
 
 	// Keep the highlighted option in range as the list narrows.
 	const activeIndex = Math.min(active, Math.max(visible.length - 1, 0));
@@ -113,7 +142,7 @@ export function RoleSelectPanel<T extends RoleOption>({
 			: [...values, role.id];
 		onChange(
 			next,
-			roles.filter((r) => next.includes(r.id)),
+			pickable.filter((r) => next.includes(r.id)),
 		);
 	};
 
@@ -314,6 +343,15 @@ export function RoleSelectPanel<T extends RoleOption>({
 						</div>
 					);
 				})}
+				{remote ? (
+					<LoadMoreSentinel
+						compact
+						hasMore={remote.hasMore}
+						isLoadingMore={remote.isLoadingMore}
+						isError={remote.isError}
+						onLoadMore={remote.onLoadMore}
+					/>
+				) : null}
 			</div>
 
 			<div className="flex items-center justify-between gap-2 border-t pt-2 text-xs text-muted-foreground">
@@ -357,8 +395,12 @@ export function RoleMultiSelect<T extends RoleOption>({
 }: RoleMultiSelectProps<T>) {
 	const { t } = useTranslation("shared");
 	const [open, setOpen] = useState(false);
-	const picked = panel.roles
-		.filter((r) => panel.values.includes(r.id))
+	const picked = [...(panel.knownRoles ?? []), ...panel.roles]
+		.filter(
+			(r, i, all) =>
+				panel.values.includes(r.id) &&
+				all.findIndex((x) => x.id === r.id) === i,
+		)
 		.map(toRoleBadgeData);
 
 	return (

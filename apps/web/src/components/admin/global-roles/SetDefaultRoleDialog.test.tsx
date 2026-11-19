@@ -8,7 +8,7 @@ vi.mock("@/lib/role-api", async () => {
 	return { ...actual, setDefaultRole: vi.fn() };
 });
 
-import { platformRolesQueryOptions, setDefaultRole } from "@/lib/role-api";
+import { platformRolesKey, setDefaultRole } from "@/lib/role-api";
 import { makeRole, renderWithQueries } from "@/test/render-with-queries";
 import { SetDefaultRoleDialog } from "./SetDefaultRoleDialog";
 
@@ -58,7 +58,7 @@ describe("SetDefaultRoleDialog", () => {
 		await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 		expect(setDefaultRole).toHaveBeenCalledWith("role-admin");
 		expect(invalidate).toHaveBeenCalledWith({
-			queryKey: platformRolesQueryOptions.queryKey,
+			queryKey: platformRolesKey,
 		});
 	});
 

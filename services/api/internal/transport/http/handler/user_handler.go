@@ -84,15 +84,8 @@ func (h *UserHandler) toUserResponse(ctx context.Context, u *domainuser.User) dt
 
 // GetMe handles GET /users/me — returns the caller's own profile.
 func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-
-	id, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+	id, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -107,15 +100,8 @@ func (h *UserHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 
 // UpdateMe handles PATCH /users/me — lets users update their own profile.
 func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-
-	id, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+	id, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -144,15 +130,8 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 // GetMyGlobalPermissions handles GET /users/me/global-permissions. It returns
 // {"actions": [...]}: the caller's effective platform-level IAM actions.
 func (h *UserHandler) GetMyGlobalPermissions(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-
-	id, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+	id, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -376,15 +355,8 @@ func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 // ChangeMyPassword handles PATCH /users/me/password — lets a user change their own password.
 // After a successful change the current session is revoked and the user must re-authenticate.
 func (h *UserHandler) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-
-	id, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+	id, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -409,7 +381,7 @@ func (h *UserHandler) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 	// Revoke the current session so old tokens cannot be reused after the
 	// password change. The client must re-authenticate with the new password.
 	if h.authSvc != nil {
-		if err := h.authSvc.Logout(r.Context(), claims.FamilyID); err != nil {
+		if err := h.authSvc.Logout(r.Context(), middleware.ClaimsFrom(r).FamilyID); err != nil {
 			presenter.Error(w, r, err)
 			return
 		}
@@ -444,14 +416,8 @@ func (h *UserHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 
 // InitiateAvatarUpload handles POST /users/me/avatar/initiate-upload.
 func (h *UserHandler) InitiateAvatarUpload(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-	id, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+	id, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -471,14 +437,8 @@ func (h *UserHandler) InitiateAvatarUpload(w http.ResponseWriter, r *http.Reques
 
 // CompleteAvatarUpload handles POST /users/me/avatar/complete-upload.
 func (h *UserHandler) CompleteAvatarUpload(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-	id, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+	id, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -498,14 +458,8 @@ func (h *UserHandler) CompleteAvatarUpload(w http.ResponseWriter, r *http.Reques
 
 // DeleteAvatar handles DELETE /users/me/avatar.
 func (h *UserHandler) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-	id, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+	id, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 

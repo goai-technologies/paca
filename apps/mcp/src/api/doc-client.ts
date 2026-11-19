@@ -1,5 +1,7 @@
 import type {
 	CreateFolderInput,
+	DocSource,
+	Document,
 	DocumentActivity,
 	DocumentFolder,
 	DocumentSearchHit,
@@ -9,14 +11,109 @@ import type {
 	UpdateFolderInput,
 } from "../types/index.js";
 import { formatApiRequestError, markdownToBlocknote } from "../utils/index.js";
-import { fetchAllPages, MAX_LISTED_ITEMS, withPaging } from "./paginate.js";
+import { type Page, type PageOptions, toPage, withPaging } from "./paginate.js";
+
+/** An error answer from the Paca API, with its status, code and details. */
+export class PacaAPIError extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+		readonly code?: string,
+		readonly details?: Record<string, string>,
+	) {
+		super(message);
+		this.name = "PacaAPIError";
+	}
+}
+
+/** One document in the change feed (metadata only). A tombstone has
+ *  `deleted: true`, an empty title and null folder_id and content_hash. */
+export interface DocChange {
+	id: string;
+	folder_id: string | null;
+	title: string;
+	content_hash: string | null;
+	updated_at: string;
+	deleted: boolean;
+}
+
+/** One folder of the tree the change feed sends. */
+export interface DocChangeFolder {
+	id: string;
+	parent_id: string | null;
+	name: string;
+}
+
+/** A write by path: the document at `path` is created or updated. */
+export interface PutByPathInput {
+	/** "Folder/Sub folder/Title"; missing folders are created. */
+	path: string;
+	/** BlockNote blocks. */
+	content: unknown[];
+	/** The repository file this document is a managed copy of. */
+	source?: DocSource;
+	/** Lock the managed copy (needs `source`). */
+	lock?: boolean;
+	/** Why the write was made (plain text, at most 500 characters). */
+	note?: string;
+	/** What made it: an opaque label such as "claude-code/<session>" (at most 200). */
+	client?: string;
+	/** The task it belongs to, such as "PACA-88" (at most 50). */
+	task?: string;
+}
+
+/** What GET /docs/by-path answered. `unsupported`: the server is older and
+ *  has no by-path routes, so the caller walks the folders instead. */
+export type GetByPathResult =
+	| { status: "found"; doc: Document; etag?: string }
+	| { status: "not_found" }
+	| { status: "folder" }
+	| { status: "unsupported" };
+
+/** What PUT /docs/by-path answered (`unsupported` as for GetByPathResult). */
+export type PutByPathResult =
+	| {
+			status: "written";
+			doc: Document;
+			created: boolean;
+			/** false when the content, title, folder and position are as they were. */
+			changed: boolean;
+			etag?: string;
+	  }
+	| { status: "unsupported" };
+
+/** A content write to one document by id (PATCH /docs/{docId}). */
+export interface PatchDocumentInput {
+	/** BlockNote blocks, sent as they are. */
+	content: unknown[];
+	/** Why the write was made (plain text, at most 500 characters). */
+	note?: string;
+	/** What made it: an opaque label (at most 200). */
+	client?: string;
+	/** The task it belongs to, such as "PACA-88" (at most 50). */
+	task?: string;
+}
+
+/**
+ * Reports whether an error answer means the server has no by-path route (a
+ * Paca from before it). Such a server reads GET /docs/by-path as a document
+ * whose id is "by-path" (400 "invalid document id") and has no PUT on it (405). A
+ * 404 without an API error code is a route the server (or a proxy) does not
+ * know. A 404 DOC_NOT_FOUND is a real answer from a newer server.
+ */
+function isMissingByPathRoute(err: PacaAPIError): boolean {
+	if (err.status === 405) return true;
+	if (err.status === 404) return !err.code;
+	return (
+		err.status === 400 &&
+		err.code === "BAD_REQUEST" &&
+		/invalid document id/i.test(err.message)
+	);
+}
 
 /**
  * Extended API client for Document features.
  */
-/** Most timeline entries a tool call collects (the newest ones). */
-const MAX_ACTIVITY_ITEMS = 500;
-
 export class PacaAPIDocClient {
 	private config: PacaConfig;
 
@@ -75,6 +172,52 @@ export class PacaAPIDocClient {
 		return jsonResponse;
 	}
 
+	/** Sends a request and returns its status, headers and unwrapped data; an
+	 *  error answer is thrown as a PacaAPIError. */
+	private async send(
+		method: string,
+		path: string,
+		body?: unknown,
+		extraHeaders: Record<string, string> = {},
+	): Promise<{ status: number; headers: Headers | undefined; data: any }> {
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+			"X-API-Key": this.config.apiKey,
+			...extraHeaders,
+		};
+		const response = await fetch(`${this.config.baseURL}${path}`, {
+			method,
+			headers,
+			body: body === undefined ? undefined : JSON.stringify(body),
+		});
+		if (!response.ok) {
+			const text = await response.text();
+			let code: string | undefined;
+			let details: Record<string, string> | undefined;
+			try {
+				const parsed = JSON.parse(text);
+				if (parsed && typeof parsed === "object") {
+					if (typeof parsed.error_code === "string") code = parsed.error_code;
+					if (parsed.error_details && typeof parsed.error_details === "object")
+						details = parsed.error_details;
+				}
+			} catch {
+				// Not the JSON error envelope.
+			}
+			throw new PacaAPIError(
+				formatApiRequestError(response.status, response.statusText, text),
+				response.status,
+				code,
+				details,
+			);
+		}
+		const text = await response.text();
+		const json = text ? JSON.parse(text) : undefined;
+		const data =
+			json && typeof json === "object" && "success" in json ? json.data : json;
+		return { status: response.status, headers: response.headers, data };
+	}
+
 	private async get(path: string): Promise<any> {
 		return this.request("GET", path);
 	}
@@ -91,40 +234,172 @@ export class PacaAPIDocClient {
 		return this.request("DELETE", path);
 	}
 
+	// ==================== Documents by path ====================
+
+	/** Reads the document at `path` ("Folder/Title") in one request. */
+	async getByPath(projectId: string, path: string): Promise<GetByPathResult> {
+		try {
+			const res = await this.send(
+				"GET",
+				`/api/v1/projects/${projectId}/docs/by-path?path=${encodeURIComponent(path)}`,
+			);
+			return {
+				status: "found",
+				doc: res.data,
+				etag: res.headers?.get("ETag") ?? undefined,
+			};
+		} catch (err) {
+			if (!(err instanceof PacaAPIError)) throw err;
+			if (isMissingByPathRoute(err)) return { status: "unsupported" };
+			if (err.code === "DOC_NOT_FOUND") return { status: "not_found" };
+			if (err.code === "DOC_PATH_IS_FOLDER") return { status: "folder" };
+			throw err;
+		}
+	}
+
+	/** Creates or updates the document at `input.path` (and any missing
+	 *  folder) in one request. `ifMatch` is a content hash or ETag the
+	 *  stored content must still have; a mismatch throws a PacaAPIError with
+	 *  status 412 and the current version in `details`. */
+	async putByPath(
+		projectId: string,
+		input: PutByPathInput,
+		opts: { ifMatch?: string } = {},
+	): Promise<PutByPathResult> {
+		const headers: Record<string, string> = {};
+		if (opts.ifMatch) headers["If-Match"] = opts.ifMatch;
+		try {
+			const res = await this.send(
+				"PUT",
+				`/api/v1/projects/${projectId}/docs/by-path`,
+				input,
+				headers,
+			);
+			return {
+				status: "written",
+				doc: res.data,
+				created: res.status === 201,
+				changed: res.data?.changed !== false,
+				etag: res.headers?.get("ETag") ?? undefined,
+			};
+		} catch (err) {
+			if (err instanceof PacaAPIError && isMissingByPathRoute(err))
+				return { status: "unsupported" };
+			throw err;
+		}
+	}
+
+	/** Writes `input.content` (BlockNote blocks, untouched) to the document.
+	 *  `ifMatch` is a content hash or ETag the stored content must still
+	 *  have; a mismatch throws a PacaAPIError with status 412 and the current
+	 *  version in `details`, a locked managed copy one with 409 DOC_LOCKED. */
+	async patchDocument(
+		projectId: string,
+		docId: string,
+		input: PatchDocumentInput,
+		opts: { ifMatch?: string } = {},
+	): Promise<{ doc: Document; etag?: string }> {
+		const headers: Record<string, string> = {};
+		if (opts.ifMatch) headers["If-Match"] = opts.ifMatch;
+		const res = await this.send(
+			"PATCH",
+			`/api/v1/projects/${projectId}/docs/${docId}`,
+			input,
+			headers,
+		);
+		return { doc: res.data, etag: res.headers?.get("ETag") ?? undefined };
+	}
+
+	// ==================== Change feed and batch read ====================
+
+	/** What changed in the documents the caller can read since `since` (the
+	 *  cursor of the last call). Without `since`, or when the server cannot
+	 *  use it, `reset` is true and `docs` is the whole visible list.
+	 *  `folders: null` means the folder tree did not change. */
+	async getChanges(
+		projectId: string,
+		since?: string,
+	): Promise<
+		| {
+				status: "ok";
+				cursor: string;
+				reset: boolean;
+				docs: DocChange[];
+				folders: DocChangeFolder[] | null;
+		  }
+		| { status: "unsupported" }
+	> {
+		const query = since ? `?since=${encodeURIComponent(since)}` : "";
+		try {
+			const res = await this.send(
+				"GET",
+				`/api/v1/projects/${projectId}/docs/changes${query}`,
+			);
+			return {
+				status: "ok",
+				cursor: res.data?.cursor ?? "",
+				reset: res.data?.reset === true,
+				docs: res.data?.docs ?? [],
+				folders: res.data?.folders ?? null,
+			};
+		} catch (err) {
+			if (err instanceof PacaAPIError && isMissingByPathRoute(err))
+				return { status: "unsupported" };
+			throw err;
+		}
+	}
+
+	/** The listed documents with their content, in the order asked for (at
+	 *  most 100 ids; the caller chunks). Ids the caller cannot read are left
+	 *  out. */
+	async batchGet(
+		projectId: string,
+		ids: string[],
+	): Promise<{ status: "ok"; items: Document[] } | { status: "unsupported" }> {
+		try {
+			const res = await this.send(
+				"POST",
+				`/api/v1/projects/${projectId}/docs/batch-get`,
+				{ ids },
+			);
+			return { status: "ok", items: res.data?.items ?? [] };
+		} catch (err) {
+			if (err instanceof PacaAPIError && isMissingByPathRoute(err))
+				return { status: "unsupported" };
+			throw err;
+		}
+	}
+
 	// ==================== Document Folders ====================
 
-	async listFolders(projectId: string): Promise<DocumentFolder[]> {
-		// The API lists one level of the tree per call, so walk it level by level.
-		const all: DocumentFolder[] = [];
-		let parents: (string | null)[] = [null];
-		while (parents.length > 0 && all.length < MAX_LISTED_ITEMS) {
-			const next: string[] = [];
-			for (let i = 0; i < parents.length; i += 8) {
-				const levels = await Promise.all(
-					parents
-						.slice(i, i + 8)
-						.map((parent) =>
-							fetchAllPages<DocumentFolder>((cursor) =>
-								this.get(
-									withPaging(
-										`/api/v1/projects/${projectId}/docs/folders?parent_id=${parent ?? "null"}`,
-										cursor,
-										200,
-									),
-								),
-							),
-						),
-				);
-				for (const folders of levels) {
-					for (const f of folders) {
-						all.push(f);
-						next.push(f.id);
-					}
-				}
-			}
-			parents = next;
-		}
-		return all;
+	/** One page of the folders directly inside `parentId` (the top level when
+	 *  omitted). `name` narrows to an exact, case-insensitive folder name. */
+	async listFolders(
+		projectId: string,
+		opts: PageOptions & { parentId?: string | null; name?: string } = {},
+	): Promise<Page<DocumentFolder>> {
+		const filters = new URLSearchParams();
+		filters.set("parent_id", opts.parentId ?? "null");
+		if (opts.name) filters.set("name", opts.name);
+		return toPage<DocumentFolder>(
+			await this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/docs/folders?${filters.toString()}`,
+					opts,
+				),
+			),
+		);
+	}
+
+	/** The folders from the top level down to (and including) `folderId`. */
+	async getFolderPath(
+		projectId: string,
+		folderId: string,
+	): Promise<DocumentFolder[]> {
+		const response = await this.get(
+			`/api/v1/projects/${projectId}/docs/folders/${folderId}/path`,
+		);
+		return Array.isArray(response) ? response : (response?.items ?? []);
 	}
 
 	async createFolder(
@@ -154,18 +429,12 @@ export class PacaAPIDocClient {
 	async listSnapshots(
 		projectId: string,
 		docId: string,
-	): Promise<DocumentSnapshot[]> {
-		// Newest first; list items carry no body (getSnapshot returns it).
-		return fetchAllPages(
-			(cursor) =>
-				this.get(
-					withPaging(
-						`/api/v1/projects/${projectId}/docs/${docId}/snapshots`,
-						cursor,
-					),
-				),
-			MAX_ACTIVITY_ITEMS,
-		);
+		opts: PageOptions & { contentHash?: string } = {},
+	): Promise<Page<DocumentSnapshot>> {
+		// One page, newest first; list items carry no body (getSnapshot returns it).
+		const { contentHash, ...paging } = opts;
+		const url = `/api/v1/projects/${projectId}/docs/${docId}/snapshots${contentHash ? `?content_hash=${encodeURIComponent(contentHash)}` : ""}`;
+		return toPage<DocumentSnapshot>(await this.get(withPaging(url, paging)));
 	}
 
 	async getSnapshot(
@@ -183,19 +452,17 @@ export class PacaAPIDocClient {
 	async listDocumentActivities(
 		projectId: string,
 		docId: string,
-	): Promise<DocumentActivity[]> {
-		// The API pages newest first; callers read the timeline oldest first.
-		const newestFirst = await fetchAllPages<DocumentActivity>(
-			(cursor) =>
-				this.get(
-					withPaging(
-						`/api/v1/projects/${projectId}/docs/${docId}/activities`,
-						cursor,
-					),
+		opts: PageOptions = {},
+	): Promise<Page<DocumentActivity>> {
+		// One page, newest first; next pages reach further back in time.
+		return toPage<DocumentActivity>(
+			await this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/docs/${docId}/activities`,
+					opts,
 				),
-			MAX_ACTIVITY_ITEMS,
+			),
 		);
-		return newestFirst.reverse();
 	}
 
 	// ==================== Document Comments ====================

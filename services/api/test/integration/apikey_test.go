@@ -63,7 +63,7 @@ func (r *fakeAPIKeyRepo) FindByHash(_ context.Context, hash string) (*apikeydom.
 	return k, nil
 }
 
-func (r *fakeAPIKeyRepo) ListByAccountID(_ context.Context, accountID uuid.UUID, _ *string, _ int) ([]*apikeydom.APIKey, bool, int, error) {
+func (r *fakeAPIKeyRepo) ListByAccountID(_ context.Context, accountID uuid.UUID, _ apikeydom.KeyFilter, _ *string, _ int) ([]*apikeydom.APIKey, bool, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []*apikeydom.APIKey

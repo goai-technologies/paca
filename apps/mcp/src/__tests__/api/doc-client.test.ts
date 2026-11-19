@@ -95,14 +95,12 @@ describe("PacaAPIDocClient", () => {
 	});
 
 	it("returns raw JSON when not a SuccessEnvelope", async () => {
-		fetchMock
-			.mockResolvedValueOnce(
-				rawOk({ items: [{ id: "f1" }], next_cursor: null }),
-			)
-			.mockResolvedValueOnce(rawOk({ items: [], next_cursor: null }));
+		fetchMock.mockResolvedValueOnce(
+			rawOk({ items: [{ id: "f1" }], next_cursor: null }),
+		);
 		const client = new PacaAPIDocClient(CONFIG);
 		const result = await client.listFolders("p1");
-		expect(result).toEqual([{ id: "f1" }]);
+		expect(result.items).toEqual([{ id: "f1" }]);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -110,40 +108,47 @@ describe("PacaAPIDocClient", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("listFolders", () => {
-		it("walks the folder tree one level per request", async () => {
+		it("reads one level of the tree in a single request", async () => {
 			const client = new PacaAPIDocClient(CONFIG);
-			fetchMock
-				// root level
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "f1" }], next_cursor: null }),
-				)
-				// children of f1
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "f2" }], next_cursor: null }),
-				)
-				// children of f2
-				.mockResolvedValueOnce(okEnvelope({ items: [], next_cursor: null }));
+			fetchMock.mockResolvedValue(
+				okEnvelope({ items: [{ id: "f1" }], next_cursor: "c2" }),
+			);
 			const result = await client.listFolders("p1");
-			const urls = fetchMock.mock.calls.map((c) => c[0] as string);
-			expect(urls[0]).toContain("/docs/folders?parent_id=null&page_size=200");
-			expect(urls[1]).toContain("parent_id=f1");
-			expect(urls[2]).toContain("parent_id=f2");
-			expect(result).toEqual([{ id: "f1" }, { id: "f2" }]);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(fetchMock.mock.calls[0][0]).toContain(
+				"/docs/folders?parent_id=null&page_size=50",
+			);
+			expect(result).toEqual({ items: [{ id: "f1" }], nextCursor: "c2" });
 		});
 
-		it("follows next_cursor within a level", async () => {
+		it("lists a subfolder's children and resumes from a cursor", async () => {
 			const client = new PacaAPIDocClient(CONFIG);
-			fetchMock
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "f1" }], next_cursor: "c2" }),
-				)
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "f2" }], next_cursor: null }),
-				)
-				.mockResolvedValue(okEnvelope({ items: [], next_cursor: null }));
-			const result = await client.listFolders("p1");
-			expect(fetchMock.mock.calls[1][0]).toContain("cursor=c2");
-			expect(result).toEqual([{ id: "f1" }, { id: "f2" }]);
+			fetchMock.mockResolvedValue(okEnvelope({ items: [], next_cursor: null }));
+			await client.listFolders("p1", {
+				parentId: "f1",
+				cursor: "c2",
+				pageSize: 10,
+			});
+			const url = fetchMock.mock.calls[0][0] as string;
+			expect(url).toContain("parent_id=f1");
+			expect(url).toContain("page_size=10&cursor=c2");
+		});
+
+		it("looks a folder up by exact name", async () => {
+			const client = new PacaAPIDocClient(CONFIG);
+			fetchMock.mockResolvedValue(okEnvelope({ items: [{ id: "f9" }] }));
+			await client.listFolders("p1", { parentId: "f1", name: "Guides" });
+			expect(fetchMock.mock.calls[0][0]).toContain("name=Guides");
+		});
+	});
+
+	describe("getFolderPath", () => {
+		it("calls GET /docs/folders/:id/path", async () => {
+			const client = new PacaAPIDocClient(CONFIG);
+			fetchMock.mockResolvedValue(okEnvelope([{ id: "a" }, { id: "b" }]));
+			const result = await client.getFolderPath("p1", "b");
+			expect(fetchMock.mock.calls[0][0]).toContain("/docs/folders/b/path");
+			expect(result).toEqual([{ id: "a" }, { id: "b" }]);
 		});
 	});
 
@@ -195,21 +200,17 @@ describe("PacaAPIDocClient", () => {
 			fetchMock.mockResolvedValue(okEnvelope([{ id: "snap1" }]));
 			const result = await client.listSnapshots("p1", "doc1");
 			expect(fetchMock.mock.calls[0][0]).toContain("/docs/doc1/snapshots");
-			expect(result).toEqual([{ id: "snap1" }]);
+			expect(result.items).toEqual([{ id: "snap1" }]);
 		});
 
-		it("follows next_cursor across pages", async () => {
+		it("returns one page and the cursor for the next, without fetching it", async () => {
 			const client = new PacaAPIDocClient(CONFIG);
-			fetchMock
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "s2" }], next_cursor: "older" }),
-				)
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "s1" }], next_cursor: null }),
-				);
+			fetchMock.mockResolvedValue(
+				okEnvelope({ items: [{ id: "s2" }], next_cursor: "older" }),
+			);
 			const result = await client.listSnapshots("p1", "doc1");
-			expect(fetchMock.mock.calls[1][0]).toContain("cursor=older");
-			expect(result).toEqual([{ id: "s2" }, { id: "s1" }]);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(result.nextCursor).toBe("older");
 		});
 	});
 
@@ -235,22 +236,24 @@ describe("PacaAPIDocClient", () => {
 			);
 			const result = await client.listDocumentActivities("p1", "doc1");
 			expect(fetchMock.mock.calls[0][0]).toContain(
-				"/docs/doc1/activities?page_size=100",
+				"/docs/doc1/activities?page_size=50",
 			);
-			expect(result).toEqual([{ id: "act1" }]);
+			expect(result.items).toEqual([{ id: "act1" }]);
 		});
 
-		it("pages the newest-first timeline and returns it oldest first", async () => {
+		it("returns one newest-first page with the cursor for older ones", async () => {
 			const client = new PacaAPIDocClient(CONFIG);
-			fetchMock
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "b" }], next_cursor: "older" }),
-				)
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "a" }], next_cursor: null }),
-				);
-			const result = await client.listDocumentActivities("p1", "doc1");
-			expect(result.map((a: { id: string }) => a.id)).toEqual(["a", "b"]);
+			fetchMock.mockResolvedValue(
+				okEnvelope({ items: [{ id: "b" }, { id: "a" }], next_cursor: "older" }),
+			);
+			const result = await client.listDocumentActivities("p1", "doc1", {
+				cursor: "newer",
+				pageSize: 2,
+			});
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(fetchMock.mock.calls[0][0]).toContain("page_size=2&cursor=newer");
+			expect(result.items.map((a: { id: string }) => a.id)).toEqual(["b", "a"]);
+			expect(result.nextCursor).toBe("older");
 		});
 	});
 

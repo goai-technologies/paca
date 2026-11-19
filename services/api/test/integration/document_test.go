@@ -3,6 +3,7 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -52,7 +53,7 @@ func newFakeDocRepoIT() *fakeDocRepoIT {
 
 // ListFolders returns the project's direct children of parentID (root when
 // nil) in one page; the fake does not page.
-func (r *fakeDocRepoIT) ListFolders(_ context.Context, projectID uuid.UUID, parentID *uuid.UUID, _ *string, _ int) ([]*docdom.DocFolder, bool, error) {
+func (r *fakeDocRepoIT) ListFolders(_ context.Context, projectID uuid.UUID, parentID *uuid.UUID, _ docdom.FolderFilter, _ *string, _ int) ([]*docdom.DocFolder, bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []*docdom.DocFolder
@@ -207,9 +208,14 @@ func (r *fakeDocRepoIT) UpdateDocumentAtomic(ctx context.Context, id uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
-	if err := decide(cur); err != nil {
+	cp := *cur
+	if err := decide(&cp); err != nil {
+		if errors.Is(err, docdom.ErrNoChange) {
+			return cur, nil // nothing written, as the real repository does
+		}
 		return nil, err
 	}
+	cur = &cp
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	st := *cur
@@ -229,11 +235,14 @@ func (r *fakeDocRepoIT) DeleteDocument(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (r *fakeDocRepoIT) ListSnapshots(_ context.Context, documentID uuid.UUID, cursorAfter *string, limit int) ([]*docdom.DocSnapshot, bool, error) {
+func (r *fakeDocRepoIT) ListSnapshots(_ context.Context, documentID uuid.UUID, contentHash *string, cursorAfter *string, limit int) ([]*docdom.DocSnapshot, bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []*docdom.DocSnapshot
 	for _, s := range r.snapshots {
+		if contentHash != nil && (s.ContentHash == nil || *s.ContentHash != *contentHash) {
+			continue
+		}
 		if s.DocumentID == documentID {
 			cp := *s
 			out = append(out, &cp)
@@ -322,10 +331,7 @@ func (r *fakeDocRepoIT) DeleteRecentSnapshotsExcept(_ context.Context, documentI
 // resolves, since that identity is never itself a project member.
 type fakeDocMemberLookup struct{}
 
-func (f *fakeDocMemberLookup) FindMemberByActor(_ context.Context, _, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error) {
-	if agentID != nil {
-		return &projectdom.ProjectMember{ID: *agentID}, nil
-	}
+func (f *fakeDocMemberLookup) FindMember(_ context.Context, _, actorID uuid.UUID) (*projectdom.ProjectMember, error) {
 	if actorID == userdom.SystemActorUserID {
 		return nil, projectdom.ErrMemberNotFound
 	}
@@ -1088,4 +1094,12 @@ func TestIntegrationDocuments_CrossProjectAccessReturns404(t *testing.T) {
 	if docEnv.Data.Title != "Victim Doc" {
 		t.Errorf("victim doc title must be unchanged, got %q", docEnv.Data.Title)
 	}
+}
+
+func (r *fakeDocRepoIT) ResolveDocPath(context.Context, uuid.UUID, []string, string) (*docdom.DocPathResolution, error) {
+	return &docdom.DocPathResolution{}, nil
+}
+
+func (r *fakeDocRepoIT) WriteDocumentAtPath(context.Context, docdom.DocPathWrite) (*docdom.DocPathWriteResult, error) {
+	return nil, errors.New("by-path writes are not used by these tests")
 }

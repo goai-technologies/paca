@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions } from "@tanstack/react-query";
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
 
@@ -21,8 +21,14 @@ export interface TaskAttachment {
 	file: AttachmentFile;
 }
 
+export const TASK_ATTACHMENTS_PAGE_SIZE = 30;
+
+/** One page of a task's attachments; `total_count` covers all of them. */
 interface AttachmentListResult {
 	items: TaskAttachment[];
+	page_size: number;
+	next_cursor: string | null;
+	total_count: number;
 }
 
 interface PresignedPart {
@@ -58,11 +64,14 @@ const MULTIPART_CHUNK_SIZE = 5 * 1024 * 1024; // 5 MiB — matches server Defaul
 export async function listTaskAttachments(
 	projectId: string,
 	taskId: string,
-): Promise<TaskAttachment[]> {
+	cursor?: string,
+): Promise<AttachmentListResult> {
 	const { data } = await apiClient.instance.get<
 		SuccessEnvelope<AttachmentListResult>
-	>(`/projects/${projectId}/tasks/${taskId}/attachments`);
-	return data.data.items;
+	>(`/projects/${projectId}/tasks/${taskId}/attachments`, {
+		params: { page_size: TASK_ATTACHMENTS_PAGE_SIZE, cursor },
+	});
+	return data.data;
 }
 
 async function initiateUpload(
@@ -225,9 +234,12 @@ export const taskAttachmentsQueryOptions = (
 	projectId: string,
 	taskId: string,
 ) =>
-	queryOptions({
+	infiniteQueryOptions({
 		queryKey: ["projects", projectId, "tasks", taskId, "attachments"] as const,
-		queryFn: () => listTaskAttachments(projectId, taskId),
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listTaskAttachments(projectId, taskId, pageParam),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 		enabled: !!projectId && !!taskId,
 		staleTime: 30_000,
 	});

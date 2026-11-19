@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	domainauth "github.com/Paca-AI/api/internal/domain/auth"
+	mfadom "github.com/Paca-AI/api/internal/domain/mfa"
 	ssodom "github.com/Paca-AI/api/internal/domain/sso"
 	userdom "github.com/Paca-AI/api/internal/domain/user"
 	"github.com/Paca-AI/api/internal/platform/secret"
@@ -61,6 +62,33 @@ type UserCreator interface {
 	Create(ctx context.Context, in userdom.CreateInput) (*userdom.User, error)
 }
 
+// IPChecker enforces the login IP allow-lists on a user the identity provider
+// has already vouched for. Nil means SSO sign-in is not IP-restricted.
+type IPChecker interface {
+	CheckIP(ctx context.Context, u *userdom.User, clientIP string) error
+}
+
+// WithIPCheck applies the IP allow-lists to SSO sign-in, so they cannot be
+// sidestepped by signing in through the identity provider.
+func (s *Service) WithIPCheck(c IPChecker) *Service {
+	s.ipCheck = c
+	return s
+}
+
+// PasswordPolicy reports whether an account may use a password at all
+// (SSO-only mode). Nil means every account may.
+type PasswordPolicy interface {
+	CheckPasswordAllowed(ctx context.Context, u *userdom.User) error
+}
+
+// WithPasswordPolicy lets SSO sign-in drop a pending "change your password"
+// requirement from an account that SSO-only mode keeps off passwords: it
+// could never be met, since such an account cannot set a password.
+func (s *Service) WithPasswordPolicy(p PasswordPolicy) *Service {
+	s.passwords = p
+	return s
+}
+
 // Service implements provider management and SSO sign-in.
 type Service struct {
 	repo       ssodom.Repository
@@ -68,6 +96,8 @@ type Service struct {
 	users      userdom.Repository
 	creator    UserCreator
 	sessions   SessionIssuer
+	ipCheck    IPChecker
+	passwords  PasswordPolicy
 	encryptor  *secret.Encryptor
 	httpClient *http.Client
 	log        *slog.Logger
@@ -269,6 +299,17 @@ func applyInput(p *ssodom.Provider, in ssodom.ProviderInput) error {
 		}
 	}
 
+	groupClaim := strings.TrimSpace(in.GroupClaim)
+	groups := normalizeList(in.AllowedGroups, false)
+	if in.GroupPolicyEnabled {
+		if !validClaimPath(groupClaim) {
+			return fmt.Errorf("%w: group claim must be a claim name or a dotted path such as realm_access.roles", ssodom.ErrInvalidProvider)
+		}
+		if len(groups) == 0 {
+			return fmt.Errorf("%w: at least one allowed group is required when the group policy is enabled", ssodom.ErrInvalidProvider)
+		}
+	}
+
 	p.Slug = slug
 	p.DisplayName = name
 	p.IssuerURL = issuer
@@ -281,6 +322,9 @@ func applyInput(p *ssodom.Provider, in ssodom.ProviderInput) error {
 	p.AutoProvision = in.AutoProvision
 	p.LinkByEmail = in.LinkByEmail
 	p.AllowedDomains = domains
+	p.GroupPolicyEnabled = in.GroupPolicyEnabled
+	p.GroupClaim = groupClaim
+	p.AllowedGroups = groups
 	return nil
 }
 
@@ -374,7 +418,7 @@ func (s *Service) BeginLogin(ctx context.Context, slug, baseURL string, remember
 // state against this browser, exchanges the code, verifies the ID token,
 // resolves the Paca account and starts a session. It returns the session and
 // the in-app path to land on.
-func (s *Service) CompleteLogin(ctx context.Context, slug, baseURL, code, state, binding string) (*domainauth.TokenPair, string, error) {
+func (s *Service) CompleteLogin(ctx context.Context, slug, baseURL, code, state, binding, clientIP string) (*domainauth.TokenPair, string, error) {
 	if state == "" || binding == "" {
 		return nil, "", ssodom.ErrStateInvalid
 	}
@@ -430,8 +474,22 @@ func (s *Service) CompleteLogin(ctx context.Context, slug, baseURL, code, state,
 		}
 	}
 
+	// Before any account is looked up, linked or created, so the policy
+	// applies to returning and first-time users alike.
+	if err := s.checkGroupPolicy(p, idTok); err != nil {
+		return nil, "", err
+	}
+
 	u, err := s.ResolveUser(ctx, p, c)
 	if err != nil {
+		return nil, "", err
+	}
+	if s.ipCheck != nil {
+		if err := s.ipCheck.CheckIP(ctx, u, clientIP); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := s.dropUnmeetablePasswordChange(ctx, u); err != nil {
 		return nil, "", err
 	}
 	pair, err := s.sessions.IssueSession(u, attempt.RememberMe)
@@ -439,6 +497,29 @@ func (s *Service) CompleteLogin(ctx context.Context, slug, baseURL, code, state,
 		return nil, "", err
 	}
 	return pair, SafeRedirect(attempt.Redirect), nil
+}
+
+// dropUnmeetablePasswordChange clears u's must-change-password flag when
+// SSO-only mode keeps u off passwords. Otherwise the session would be stuck on
+// a password change the API refuses (for example, an account an admin created
+// with a temporary password, then linked by email on its first SSO sign-in).
+func (s *Service) dropUnmeetablePasswordChange(ctx context.Context, u *userdom.User) error {
+	if !u.MustChangePassword || s.passwords == nil {
+		return nil
+	}
+	err := s.passwords.CheckPasswordAllowed(ctx, u)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, mfadom.ErrPasswordLoginDisabled) {
+		return err
+	}
+	u.MustChangePassword = false
+	u.UpdatedAt = time.Now()
+	if err := s.users.Update(ctx, u); err != nil {
+		return fmt.Errorf("sso svc: clear must-change-password: %w", err)
+	}
+	return nil
 }
 
 // enabledProvider loads an enabled provider and its (cached) discovery

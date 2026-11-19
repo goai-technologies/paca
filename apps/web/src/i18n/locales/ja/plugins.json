@@ -7,6 +7,7 @@
 			"installed": "インストール済み",
 			"updateAvailable": "更新があります",
 			"source": "ソース",
+			"official": "Paca 公式プラグイン",
 			"upgrading": "アップグレード中...",
 			"upgradeTo": "{{version}}にアップグレード",
 			"uninstalling": "アンインストール中...",

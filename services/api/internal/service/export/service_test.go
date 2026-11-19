@@ -66,14 +66,18 @@ func (r *fakeRepo) FindByID(_ context.Context, id uuid.UUID) (*exportdom.Project
 	c := *e
 	return &c, nil
 }
-func (r *fakeRepo) ListByProject(_ context.Context, pid uuid.UUID, _ int) ([]*exportdom.ProjectExport, error) {
-	var out []*exportdom.ProjectExport
+func (r *fakeRepo) ListByProject(_ context.Context, pid uuid.UUID, offset, limit int) ([]*exportdom.ProjectExport, int, error) {
+	var all []*exportdom.ProjectExport
 	for _, e := range r.rows {
 		if e.ProjectID == pid {
-			out = append(out, e)
+			all = append(all, e)
 		}
 	}
-	return out, nil
+	end := min(offset+limit, len(all))
+	if offset > end {
+		offset = end
+	}
+	return all[offset:end], len(all), nil
 }
 func (r *fakeRepo) Claim(_ context.Context, id uuid.UUID) (bool, error) {
 	r.mu.Lock()
@@ -149,7 +153,7 @@ func (f fakeMembers) ListAllMembers(context.Context, uuid.UUID) ([]*projectdom.P
 
 type fakeSprints struct{ sprintdom.SprintRepository }
 
-func (fakeSprints) ListSprints(context.Context, uuid.UUID) ([]*sprintdom.Sprint, error) {
+func (fakeSprints) ListAllSprints(context.Context, uuid.UUID) ([]*sprintdom.Sprint, error) {
 	return nil, nil
 }
 
@@ -205,7 +209,7 @@ type fakeDocs struct {
 	docs    []*docdom.Document
 }
 
-func (f fakeDocs) ListFolders(context.Context, uuid.UUID, *uuid.UUID, *string, int) ([]*docdom.DocFolder, bool, error) {
+func (f fakeDocs) ListFolders(context.Context, uuid.UUID, *uuid.UUID, docdom.FolderFilter, *string, int) ([]*docdom.DocFolder, bool, error) {
 	return nil, false, nil
 }
 
@@ -732,5 +736,20 @@ func TestCapWriter_RefusesToGrowPastLimit(t *testing.T) {
 	}
 	if _, err := cw.Write([]byte("e")); !errors.Is(err, ErrArchiveTooLarge) {
 		t.Fatalf("err = %v, want ErrArchiveTooLarge", err)
+	}
+}
+
+func TestList_ReturnsTheRequestedPageAndTotal(t *testing.T) {
+	h := newHarness(0)
+	for i := 0; i < 5; i++ {
+		id := uuid.New()
+		h.repo.rows[id] = &exportdom.ProjectExport{ID: id, ProjectID: h.pid}
+	}
+	page, total, err := h.svc.List(t.Context(), h.pid, 3, 2)
+	if err != nil || total != 5 || len(page) != 1 {
+		t.Fatalf("page 3 of 2 = %d rows total=%d err=%v, want 1 row of 5", len(page), total, err)
+	}
+	if first, total, _ := h.svc.List(t.Context(), h.pid, 0, 2); total != 5 || len(first) != 2 {
+		t.Fatalf("a page below 1 reads the first page: %d rows total=%d", len(first), total)
 	}
 }

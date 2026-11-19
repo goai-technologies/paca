@@ -1,14 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { RolesQueryBoundary } from "@/components/admin/global-roles/role-option-list";
 import { isFullAccessRole } from "@/components/admin/global-roles/role-picker";
+import { useRoleChoices } from "@/components/admin/global-roles/use-role-choices";
 import { useAssignUserRole } from "@/components/admin/users/use-assign-user-role";
 import { InlineNotice } from "@/components/shared/inline-notice";
 import { RoleChangeDialog } from "@/components/shared/role-change-dialog";
 import type { User } from "@/lib/admin-api";
-import { isProjectTemplate } from "@/lib/policy";
 import { userAvatar } from "@/lib/provider-logos";
-import { platformRolesQueryOptions } from "@/lib/role-api";
 
 interface UserRoleDialogProps {
 	user: User;
@@ -31,13 +28,10 @@ export function UserRoleDialog({
 	onOpenChange,
 }: UserRoleDialogProps) {
 	const { t } = useTranslation("admin");
-	const rolesQuery = useQuery({ ...platformRolesQueryOptions, enabled: open });
 	const currentIds = user.roles.map((r) => r.id);
-	// A project template (project/*) only works attached per project; given
-	// platform-wide it would reach every project. One the user already holds
-	// stays listed, so saving never drops a role the person could not see.
-	const roles = (rolesQuery.data ?? []).filter(
-		(r) => !isProjectTemplate(r.policy) || currentIds.includes(r.id),
+	const { roles, knownRoles, remote, status } = useRoleChoices(
+		open,
+		currentIds,
 	);
 
 	const { assign, isPending, error, clearError } = useAssignUserRole({
@@ -59,13 +53,9 @@ export function UserRoleDialog({
 			})}
 			person={{ avatar: userAvatar(user), handle: user.username }}
 			roles={roles}
-			status={
-				roles.length === 0 ? (
-					<RolesQueryBoundary query={{ ...rolesQuery, data: roles }}>
-						{() => null}
-					</RolesQueryBoundary>
-				) : undefined
-			}
+			knownRoles={knownRoles}
+			remote={remote}
+			status={status}
 			currentIds={currentIds}
 			saveLabel={t("users.roleDialog.assign")}
 			savingLabel={t("users.roleDialog.assigning")}

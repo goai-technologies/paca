@@ -62,8 +62,11 @@
 		"errors": {
 			"titleInvalid": "Esse título não é válido.",
 			"folderNameInvalid": "Esse nome de pasta não é válido.",
-			"renameFailed": "Falha ao renomear. Tente novamente."
-		}
+			"renameFailed": "Falha ao renomear. Tente novamente.",
+			"moveIntoSelf": "Uma pasta não pode ser movida para dentro de si mesma ou de uma de suas subpastas.",
+			"moveFailed": "Não foi possível mover o item. Tente novamente."
+		},
+		"moveToTop": "Mover para o nível superior"
 	},
 	"notifications": {
 		"title": "Notificações",
@@ -74,14 +77,21 @@
 		"unmuteSound": "Ativar som das notificações",
 		"text": {
 			"assigned": "{{actor}} atribuiu você à tarefa #{{taskNumber}} — {{taskTitle}}",
-			"mentioned": "{{actor}} mencionou você em #{{taskNumber}} — {{taskTitle}}"
-		}
+			"mentioned": "{{actor}} mencionou você em #{{taskNumber}} — {{taskTitle}}",
+			"question": "{{actor}} fez uma pergunta a você em {{title}}",
+			"mentionedInDoc": "{{actor}} mencionou você no documento {{title}}",
+			"automation": "Automação: {{message}} (#{{taskNumber}} — {{taskTitle}})"
+		},
+		"untitledConversation": "Conversa sem título",
+		"globalChat": "Chat global",
+		"untitledDocument": "Documento sem título"
 	},
 	"userMenu": {
 		"signIn": "Entrar",
-		"myProfile": "Meu Perfil",
+		"myProfile": "Conta",
 		"apiKeys": "Chaves de API",
 		"logOut": "Sair",
-		"loggingOut": "Saindo…"
+		"loggingOut": "Saindo…",
+		"sendFeedback": "Enviar feedback"
 	}
 }

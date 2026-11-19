@@ -15,6 +15,7 @@ vi.mock("axios", () => ({
 }));
 
 import { ApiClient } from "./api-client";
+import { setCollabSocketProvider } from "./client-ops";
 
 type ResponseErrorHandler = (error: {
 	config: { url?: string; _retry?: boolean };
@@ -101,6 +102,26 @@ describe("ApiClient", () => {
 		const error = {
 			config: { url: "/auth/login" },
 			response: { status: 401 },
+		};
+
+		await expect(onResponseError(error)).rejects.toBe(error);
+		expect(mockInstance.post).not.toHaveBeenCalled();
+		expect(mockInstance.request).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		"/auth/mfa/verify",
+		"/auth/mfa/setup",
+		"/auth/mfa/setup/confirm",
+	])("passes a wrong-code 401 from %s through without refreshing", async (url) => {
+		const mockInstance = createAxiosInstanceMock();
+		vi.mocked(axios.create).mockReturnValue(mockInstance as never);
+
+		new ApiClient();
+		const onResponseError = getResponseErrorHandler(mockInstance);
+		const error = {
+			config: { url },
+			response: { status: 401, data: { error_code: "AUTH_MFA_INVALID_CODE" } },
 		};
 
 		await expect(onResponseError(error)).rejects.toBe(error);
@@ -216,5 +237,106 @@ describe("ApiClient", () => {
 		await expect(onResponseError(error)).rejects.toBe(error);
 		expect(mockInstance.post).not.toHaveBeenCalled();
 		expect(mockInstance.request).not.toHaveBeenCalled();
+	});
+});
+
+describe("ApiClient request stamping", () => {
+	type Config = {
+		method?: string;
+		headers: {
+			has: (k: string) => boolean;
+			set: (k: string, v: string) => void;
+			get: (k: string) => string | undefined;
+		};
+	};
+	const headers = () => {
+		const m = new Map<string, string>();
+		return {
+			has: (k: string) => m.has(k),
+			set: (k: string, v: string) => void m.set(k, v),
+			get: (k: string) => m.get(k),
+		};
+	};
+	function requestHandler() {
+		const mockInstance = createAxiosInstanceMock();
+		vi.mocked(axios.create).mockReturnValue(mockInstance as never);
+		new ApiClient();
+		return mockInstance.interceptors.request.use.mock.calls[0][0] as (
+			c: Config,
+		) => Config;
+	}
+
+	it("names the connected realtime socket on mutations only", () => {
+		setCollabSocketProvider(() => "sock-1");
+		const handle = requestHandler();
+		const patch = handle({ method: "patch", headers: headers() });
+		expect(patch.headers.get("X-Collab-Socket")).toBe("sock-1");
+		const get = handle({ method: "get", headers: headers() });
+		expect(get.headers.has("X-Collab-Socket")).toBe(false);
+		setCollabSocketProvider(null);
+	});
+
+	it("sends no socket header when the tab has no connected socket", () => {
+		setCollabSocketProvider(() => undefined);
+		const handle = requestHandler();
+		const post = handle({ method: "post", headers: headers() });
+		expect(post.headers.has("X-Collab-Socket")).toBe(false);
+		expect(post.headers.has("X-Client-Op-Id")).toBe(true);
+		setCollabSocketProvider(null);
+	});
+});
+
+describe("ApiClient.refreshSession", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("shares one POST /auth/refresh between concurrent callers, so the rotating refresh token is used once", async () => {
+		const mockInstance = createAxiosInstanceMock();
+		vi.mocked(axios.create).mockReturnValue(mockInstance as never);
+		let resolveRefresh: (() => void) | undefined;
+		mockInstance.post.mockReturnValue(
+			new Promise<void>((resolve) => {
+				resolveRefresh = resolve;
+			}),
+		);
+
+		const client = new ApiClient();
+		const first = client.refreshSession();
+		const second = client.refreshSession();
+		resolveRefresh?.();
+		await Promise.all([first, second]);
+
+		expect(mockInstance.post).toHaveBeenCalledTimes(1);
+
+		// A later refresh is a new request.
+		mockInstance.post.mockResolvedValue({});
+		await client.refreshSession();
+		expect(mockInstance.post).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not notify onTokenRefreshed listeners (the caller reconnects itself)", async () => {
+		const mockInstance = createAxiosInstanceMock();
+		vi.mocked(axios.create).mockReturnValue(mockInstance as never);
+		mockInstance.post.mockResolvedValue({});
+		const { onTokenRefreshed } = await import("./api-client");
+		const listener = vi.fn();
+		const off = onTokenRefreshed(listener);
+
+		await new ApiClient().refreshSession();
+
+		expect(listener).not.toHaveBeenCalled();
+		off();
+	});
+
+	it("rejects when the refresh fails and allows a retry afterwards", async () => {
+		const mockInstance = createAxiosInstanceMock();
+		vi.mocked(axios.create).mockReturnValue(mockInstance as never);
+		mockInstance.post.mockRejectedValueOnce(new Error("expired"));
+		mockInstance.post.mockResolvedValueOnce({});
+
+		const client = new ApiClient();
+		await expect(client.refreshSession()).rejects.toThrow("expired");
+		await expect(client.refreshSession()).resolves.toBeUndefined();
 	});
 });

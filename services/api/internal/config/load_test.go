@@ -32,11 +32,11 @@ func TestRequireEnv(t *testing.T) {
 	}
 }
 
-func TestParseCORSOrigins(t *testing.T) {
-	if got := parseCORSOrigins("*"); len(got) != 1 || got[0] != "*" {
+func TestParseCommaList(t *testing.T) {
+	if got := parseCommaList("*"); len(got) != 1 || got[0] != "*" {
 		t.Fatalf("expected [\"*\"], got %v", got)
 	}
-	got := parseCORSOrigins("https://a.example.com, https://b.example.com ,,")
+	got := parseCommaList("https://a.example.com, https://b.example.com ,,")
 	want := []string{"https://a.example.com", "https://b.example.com"}
 	if len(got) != len(want) {
 		t.Fatalf("expected %v, got %v", want, got)
@@ -97,6 +97,8 @@ func TestLoad_Success(t *testing.T) {
 	t.Setenv("ENV", "test")
 	t.Setenv("PORT", "9090")
 	t.Setenv("COOKIE_SECURE", "true")
+	t.Setenv("PUBLIC_URL", "https://paca.example.com")
+	t.Setenv("GIT_WEBHOOK_PUBLIC_URL", "https://paca-hooks.example.com")
 	t.Setenv("JWT_SECRET", "secret")
 	t.Setenv("JWT_ACCESS_TTL", "10m")
 	t.Setenv("JWT_REFRESH_TTL", "48h")
@@ -130,6 +132,9 @@ func TestLoad_Success(t *testing.T) {
 	}
 	if cfg.JWT.RefreshSessionTTL != 12*time.Hour {
 		t.Fatalf("unexpected RefreshSessionTTL: %v", cfg.JWT.RefreshSessionTTL)
+	}
+	if cfg.Server.PublicURL != "https://paca.example.com" || cfg.Server.WebhookPublicURL != "https://paca-hooks.example.com" {
+		t.Fatalf("public urls: %q / %q", cfg.Server.PublicURL, cfg.Server.WebhookPublicURL)
 	}
 }
 
@@ -168,6 +173,27 @@ func TestLoad_InvalidBoolOrDuration(t *testing.T) {
 	t.Setenv("JWT_ACCESS_TTL", "invalid")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected duration parse error")
+	}
+}
+
+func TestLoad_PluginFetchPrivateHosts(t *testing.T) {
+	setLoadDefaults(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Plugins.FetchPrivateHosts) != 0 {
+		t.Fatalf("expected no private hosts by default, got %v", cfg.Plugins.FetchPrivateHosts)
+	}
+
+	t.Setenv("PLUGIN_FETCH_PRIVATE_HOSTS", " gitlab.internal, git.corp.example ,,")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Plugins.FetchPrivateHosts; len(got) != 2 || got[0] != "gitlab.internal" || got[1] != "git.corp.example" {
+		t.Fatalf("unexpected private hosts: %v", got)
 	}
 }
 

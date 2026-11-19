@@ -111,30 +111,8 @@ func (h *AnnotationHandler) parseAnnotation(r *http.Request) (projectID, environ
 }
 
 func callerID(r *http.Request) uuid.UUID {
-	claims := middleware.ClaimsFrom(r)
-	id, _ := uuid.Parse(claims.Subject)
+	id, _ := middleware.ActorIDFromContext(r.Context())
 	return id
-}
-
-// resolveMemberID maps the authenticated caller's user ID to their
-// project_members.id within projectID. Mirrors AgentHandler/ConversationHandler's
-// own resolveMemberID — tasks.reporter_id has a foreign key to
-// project_members(id), never the raw user id, so CreateTask must not pass
-// callerID(r) (a users.id) straight through.
-func (h *AnnotationHandler) resolveMemberID(r *http.Request, projectID uuid.UUID) (uuid.UUID, error) {
-	if h.memberRepo == nil {
-		return uuid.Nil, apierr.New(apierr.CodeInternalError, "member resolver not available")
-	}
-	claims := middleware.ClaimsFrom(r)
-	userID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		return uuid.Nil, apierr.New(apierr.CodeBadRequest, "invalid subject claim")
-	}
-	member, err := h.memberRepo.FindMemberByUserProject(r.Context(), userID, projectID)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return member.ID, nil
 }
 
 // List handles GET .../port-forwards/:portForwardId/annotations. With a
@@ -398,11 +376,10 @@ func (h *AnnotationHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req dto.CreateTaskFromAnnotationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		presenter.Error(w, r, err)
+	if !middleware.BindJSON(w, r, &req) {
 		return
 	}
-	reporterID, err := h.resolveMemberID(r, projectID)
+	reporterID, err := callerMemberID(r, h.memberRepo, projectID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return

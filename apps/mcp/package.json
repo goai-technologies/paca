@@ -14,7 +14,7 @@
     "build"
   ],
   "scripts": {
-    "build": "tsc && node -e \"const fs=require('fs');fs.chmodSync('build/index.js','755');const p=JSON.parse(fs.readFileSync('package.json','utf8'));delete p.scripts;delete p.devDependencies;delete p.files;p.bin={paca:'./index.js'};fs.writeFileSync('build/package.json',JSON.stringify(p,null,2)+'\\n')\"",
+    "build": "tsc && mkdir -p build/git && cp src/git/credential-helper.mjs build/git/credential-helper.mjs && node -e \"const fs=require('fs');fs.chmodSync('build/index.js','755');const p=JSON.parse(fs.readFileSync('package.json','utf8'));delete p.scripts;delete p.devDependencies;delete p.files;p.bin={paca:'./index.js'};fs.writeFileSync('build/package.json',JSON.stringify(p,null,2)+'\\n')\"",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@blocknote/core": "^0.48.1",
-    "@modelcontextprotocol/sdk": "1.26.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "jsdom": "^29.0.2",
     "rehype-stringify": "^10.0.1",
     "remark-parse": "^11.0.0",
@@ -37,9 +37,10 @@
     "@biomejs/biome": "^2.4.12",
     "@types/jsdom": "^28.0.1",
     "@types/node": "^25.6.0",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.12",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.8"
+    "vite": "^8.3.5",
+    "vitest": "^4.1.12"
   },
   "repository": {
     "type": "git",

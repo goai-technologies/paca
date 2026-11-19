@@ -34,6 +34,12 @@ import {
 	uninstallPlugin,
 	upgradePlugin,
 } from "@/lib/plugin-api";
+import { PACA_AVATAR_LIGHT } from "@/lib/provider-logos";
+
+/** Plugins published under the com.paca namespace are first-party. */
+function isOfficialPlugin(name: string): boolean {
+	return name.startsWith("com.paca.");
+}
 
 /**
  * Resolves an install/upgrade mutation failure to a fully translated message
@@ -194,11 +200,23 @@ function PluginCard({
 	return (
 		<div className="rounded-lg border border-border/60 bg-card p-4 space-y-3 hover:border-border/80 transition-colors">
 			<div className="flex items-start gap-3">
-				<EntityAvatar
-					name={plugin.display_name}
-					avatarUrl={plugin.avatar_url}
-					size="lg"
-				/>
+				<div className="relative shrink-0">
+					<EntityAvatar
+						name={plugin.display_name}
+						avatarUrl={plugin.avatar_url}
+						size="lg"
+						shape="rounded"
+					/>
+					{isOfficialPlugin(plugin.name) ? (
+						<img
+							src={PACA_AVATAR_LIGHT}
+							alt={t("marketplace.card.official")}
+							title={t("marketplace.card.official")}
+							data-testid="paca-plugin-badge"
+							className="absolute -right-1 -bottom-1 size-4 rounded-full bg-white object-contain p-px ring-2 ring-white"
+						/>
+					) : null}
+				</div>
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2 flex-wrap">
 						<p className="font-medium text-sm truncate">
@@ -221,7 +239,7 @@ function PluginCard({
 						{isInstalled && legacyPermissions ? (
 							<Badge
 								variant="outline"
-								className="text-xs gap-1 border-amber-300/60 text-amber-700 dark:border-amber-700/50 dark:text-amber-400"
+								className="text-xs gap-1 border-warning/60 text-warning"
 							>
 								<AlertTriangle className="size-3" />
 								{t("marketplace.card.legacyPermissions.badge")}
@@ -237,7 +255,7 @@ function PluginCard({
 			{isInstalled && legacyPermissions ? (
 				<div
 					role="alert"
-					className="flex items-start gap-2 rounded-md border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-300"
+					className="flex items-start gap-2 rounded-md border border-warning/50 bg-warning/10 px-3 py-2 text-xs text-warning"
 				>
 					<AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
 					<span>{t("marketplace.card.legacyPermissions.description")}</span>

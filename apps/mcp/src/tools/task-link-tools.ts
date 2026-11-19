@@ -1,10 +1,12 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PacaAPITaskExtendedClient } from "../api/index.js";
+import { moreNotice, pagingFields, pagingProperties } from "../api/paginate.js";
 
 const ListTaskLinksSchema = z.object({
 	projectId: z.string(),
 	taskId: z.string(),
+	...pagingFields,
 });
 
 const CreateTaskLinkSchema = z.object({
@@ -34,12 +36,13 @@ export function getTaskLinkTools(): Tool[] {
 		{
 			name: "list_task_links",
 			description:
-				"List all links for a task, showing how it relates to other tasks (blocks, is blocked by, relates to, duplicates, is duplicated by)",
+				"List the links of a task, one page at a time, showing how it relates to other tasks (blocks, is blocked by, relates to, duplicates, is duplicated by). When more remain, the reply says so and gives a cursor to pass to the next call.",
 			inputSchema: {
 				type: "object",
 				properties: {
 					projectId: { type: "string", description: PROJECT_ID_DESC },
 					taskId: { type: "string", description: TASK_ID_DESC },
+					...pagingProperties,
 				},
 				required: ["projectId", "taskId"],
 			},
@@ -120,8 +123,13 @@ export async function handleTaskLinkTool(
 ): Promise<any> {
 	switch (toolName) {
 		case "list_task_links": {
-			const { projectId, taskId } = ListTaskLinksSchema.parse(args);
-			const links = await taskExtendedClient.listTaskLinks(projectId, taskId);
+			const { projectId, taskId, cursor, pageSize } =
+				ListTaskLinksSchema.parse(args);
+			const page = await taskExtendedClient.listTaskLinks(projectId, taskId, {
+				cursor,
+				pageSize,
+			});
+			const links = page.items;
 			if (links.length === 0) {
 				return {
 					content: [{ type: "text", text: "No links found for this task." }],
@@ -132,7 +140,7 @@ export async function handleTaskLinkTool(
 				content: [
 					{
 						type: "text",
-						text: `Task links (${links.length}):\n\n${formatted}`,
+						text: `Task links (${links.length}):\n\n${formatted}${moreNotice(page, "list_task_links")}`,
 					},
 				],
 			};

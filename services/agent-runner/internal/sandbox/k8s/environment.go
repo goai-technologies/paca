@@ -269,7 +269,7 @@ func (m *Manager) buildEnvironmentDeployment(name string, cfg sandbox.Environmen
 	containers := []corev1.Container{{
 		Name:         containerName,
 		Image:        image,
-		Args:         []string{"serve", "--host", "0.0.0.0", "--port", strconv.Itoa(sandbox.GooseServePort)},
+		Args:         []string{"serve", "--host", sandbox.GooseServeHost, "--port", strconv.Itoa(sandbox.GooseServePort)},
 		Env:          env,
 		Resources:    resources,
 		Ports:        []corev1.ContainerPort{{ContainerPort: int32(sandbox.GooseServePort)}},
@@ -354,6 +354,10 @@ func (m *Manager) CreateEnvironment(ctx context.Context, cfg sandbox.Environment
 			"see Manager.Start's identical guard in manager.go; use the docker backend for local apps/mcp development instead")
 	}
 
+	if err := m.requireDockerInSandboxAllowed(cfg.DockerEnabled); err != nil {
+		return nil, err
+	}
+
 	name := environmentName(cfg.EnvironmentID)
 	diskLimitGB := resolveEnvironmentDiskLimitGB(cfg.DiskLimitGB)
 	storageQty, err := resource.ParseQuantity(fmt.Sprintf("%dGi", diskLimitGB))
@@ -423,7 +427,7 @@ func (m *Manager) CreateEnvironment(ctx context.Context, cfg sandbox.Environment
 		return nil, fmt.Errorf("%w (%s)", err, diag)
 	}
 
-	baseURL, err := sandbox.WaitForReady(ctx, []string{fmt.Sprintf("http://%s:%d", podIP, sandbox.GooseServePort)}, cfg.SecretKey)
+	baseURL, err := sandbox.WaitForReady(ctx, []string{sandbox.GooseURL(podIP, sandbox.GooseServePort)}, cfg.SecretKey)
 	if err != nil {
 		diag := m.diagnoseUnreadyEnvironment(context.Background(), name)
 		cleanup()
@@ -461,7 +465,7 @@ func (m *Manager) RestartEnvironmentPorts(ctx context.Context, backendRef, volum
 		diag := m.diagnoseUnreadyEnvironment(context.Background(), backendRef)
 		return nil, fmt.Errorf("%w (%s)", err, diag)
 	}
-	baseURL, err := sandbox.WaitForReady(ctx, []string{fmt.Sprintf("http://%s:%d", podIP, sandbox.GooseServePort)}, cfg.SecretKey)
+	baseURL, err := sandbox.WaitForReady(ctx, []string{sandbox.GooseURL(podIP, sandbox.GooseServePort)}, cfg.SecretKey)
 	if err != nil {
 		diag := m.diagnoseUnreadyEnvironment(context.Background(), backendRef)
 		return nil, fmt.Errorf("%w (%s)", err, diag)
@@ -554,12 +558,14 @@ func (m *Manager) patchDeploymentContainers(ctx context.Context, name string, co
 
 // pacaInfraEnvKeys — see docker/environment.go's own copy of this exact
 // list and its doc comment for why these specifically need to stay in sync
-// with this process's own current config on every StartEnvironment call,
-// unlike GOOSE_PROVIDER/GOOSE_MODEL/the LLM API key (frozen forever to
-// whichever agent's conversation first attached this environment).
+// with this process's own current config on every StartEnvironment call.
+// GOOSE_PROVIDER stays frozen forever to whichever agent's conversation
+// first attached this environment; GOOSE_MODEL, OPENAI_HOST and the model
+// key var follow the attaching agent whenever its provider matches (see
+// infraEnvKeysFor), so an edited model or a rotated key still lands.
 // PACA_API_KEY/PACA_API_URL/PACA_GATEWAY_URL are deployment-level;
-// PACA_WORKDIR/PACA_REPO_PLUGIN_IDS are conversation-
-// scoped (track trigger.Workdir/RepoPluginIDs) but need the
+// PACA_WORKDIR/PACA_REPO_PLUGIN_IDS/PACA_OWNER_MEMBER_ID are conversation-
+// scoped (track trigger.Workdir/RepoPluginIDs/ActorMemberID) but need the
 // same treatment for the same reason: Goose's EnvKeys lookup reads each
 // from the Pod's own env, which is fixed at Pod-creation time.
 // PACA_AGENT_ID/PACA_PROJECT_ID are deliberately excluded — see docker/
@@ -567,27 +573,34 @@ func (m *Manager) patchDeploymentContainers(ctx context.Context, name string, co
 // would risk silently reassigning a live environment's frozen identity.
 var pacaInfraEnvKeys = []string{
 	"PACA_API_KEY", "PACA_API_URL", "PACA_GATEWAY_URL",
-	"PACA_WORKDIR", "PACA_REPO_PLUGIN_IDS",
+	"PACA_WORKDIR", "PACA_REPO_PLUGIN_IDS", "PACA_OWNER_MEMBER_ID",
 	// GOOSE_PATH_ROOT — see docker/environment.go's copy of this list for
 	// why it's included here rather than getting its own GOOSE_PROVIDER-
 	// style one-time backfill.
 	"GOOSE_PATH_ROOT",
 }
 
-// infraEnvKeysFor is pacaInfraEnvKeys plus GOOSE_MODEL when cfg targets the
-// same GOOSE_PROVIDER the container already has baked in. GOOSE_PROVIDER
-// stays frozen to whichever agent attached first (see
-// ensureEnvironmentEnv), but the model is per-agent config the
-// user edits after the fact (e.g. a provider_cli agent's cli_model) — left
-// frozen too, an edit never reaches a static environment, so a bad model
-// can't be fixed and a wrong one silently keeps working. Gated on a
-// matching provider because a model id from a different provider's agent
-// is meaningless to the provider the container is frozen to.
+// infraEnvKeysFor is pacaInfraEnvKeys plus the LLM keys that follow the
+// attaching agent: GOOSE_MODEL, OPENAI_HOST and the agent's own model key
+// var (cfg.LLMKeyEnvVar). GOOSE_PROVIDER stays frozen to whichever agent
+// attached first (see ensureEnvironmentEnv), and these three are gated on
+// a matching provider because a model id or base URL from a different
+// provider's agent is meaningless to the provider the container is frozen
+// to. Under that gate they must be reconciled, not frozen: the model is
+// per-agent config a user edits after the fact, the base URL follows the
+// provider, and a rotated or replaced API key otherwise never reaches the
+// container — which is exactly how a static environment ends up failing
+// every attach with "Authentication required" against a credential the
+// agent row no longer holds.
 func infraEnvKeysFor(cfg sandbox.EnvironmentConfig, existing map[string]string) []string {
 	if cfg.Env["GOOSE_PROVIDER"] == "" || cfg.Env["GOOSE_PROVIDER"] != existing["GOOSE_PROVIDER"] {
 		return pacaInfraEnvKeys
 	}
-	return append(append([]string(nil), pacaInfraEnvKeys...), "GOOSE_MODEL")
+	keys := append(append([]string(nil), pacaInfraEnvKeys...), "GOOSE_MODEL", "OPENAI_HOST")
+	if cfg.LLMKeyEnvVar != "" {
+		keys = append(keys, cfg.LLMKeyEnvVar)
+	}
+	return keys
 }
 
 // ensureEnvironmentInfraEnv keeps pacaInfraEnvKeys in sync with cfg.Env on
@@ -758,7 +771,7 @@ func (m *Manager) recreateGoneEnvironmentDeployment(ctx context.Context, cfg san
 		return nil, fmt.Errorf("%w (%s)", err, diag)
 	}
 
-	baseURL, err := sandbox.WaitForReady(ctx, []string{fmt.Sprintf("http://%s:%d", podIP, sandbox.GooseServePort)}, cfg.SecretKey)
+	baseURL, err := sandbox.WaitForReady(ctx, []string{sandbox.GooseURL(podIP, sandbox.GooseServePort)}, cfg.SecretKey)
 	if err != nil {
 		diag := m.diagnoseUnreadyEnvironment(context.Background(), name)
 		cleanup()
@@ -807,6 +820,9 @@ func (m *Manager) recreateGoneEnvironmentDeployment(ctx context.Context, cfg san
 // scaleDeployment ... surface this" comment), so this self-heal branch is
 // reachable exactly when they expect it to be.
 func (m *Manager) StartEnvironment(ctx context.Context, backendRef string, cfg sandbox.EnvironmentConfig) (*sandbox.EnvironmentHandle, error) {
+	if err := m.requireDockerInSandboxAllowed(cfg.DockerEnabled); err != nil {
+		return nil, err
+	}
 	if err := m.ensureEnvironmentEnv(ctx, backendRef, cfg); err != nil {
 		return nil, err
 	}
@@ -832,7 +848,7 @@ func (m *Manager) StartEnvironment(ctx context.Context, backendRef string, cfg s
 		return nil, fmt.Errorf("%w (%s)", err, diag)
 	}
 
-	baseURL, err := sandbox.WaitForReady(ctx, []string{fmt.Sprintf("http://%s:%d", podIP, sandbox.GooseServePort)}, cfg.SecretKey)
+	baseURL, err := sandbox.WaitForReady(ctx, []string{sandbox.GooseURL(podIP, sandbox.GooseServePort)}, cfg.SecretKey)
 	if err != nil {
 		diag := m.diagnoseUnreadyEnvironment(context.Background(), backendRef)
 		return nil, fmt.Errorf("%w (%s)", err, diag)

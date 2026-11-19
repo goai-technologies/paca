@@ -31,8 +31,7 @@ vi.mock("@tanstack/react-router", async () => {
 	};
 });
 
-// agentActivitiesQueryOptions/sprintsQueryOptions call their fetcher
-// (listAgentActivities/listSprints)
+// agentActivitiesQueryOptions calls its fetcher (listAgentActivities)
 // from within the *same* module, so mocking just the fetcher export doesn't
 // intercept that internal call (ESM same-module bindings aren't affected by
 // vi.mock's export override). Mock the *QueryOptions functions directly instead.
@@ -77,10 +76,9 @@ vi.mock("@/lib/interaction-api", async () => {
 	);
 	return {
 		...actual,
-		sprintsQueryOptions: () => ({
-			queryKey: ["test", "sprints"],
-			queryFn: mockListSprints,
-		}),
+		// Sprint names are resolved through the sprint directory, which calls
+		// listSprints from another module.
+		listSprints: mockListSprints,
 	};
 });
 
@@ -137,7 +135,12 @@ describe("AgentActivityTab", () => {
 			next_cursor: null,
 			total_count: 1,
 		});
-		mockListSprints.mockResolvedValue([]);
+		mockListSprints.mockResolvedValue({
+			items: [],
+			page_size: 30,
+			next_cursor: null,
+			total_count: 0,
+		});
 
 		render(<AgentActivityTab projectId={PROJECT_ID} agentId={AGENT_ID} />, {
 			wrapper,
@@ -177,7 +180,12 @@ describe("AgentActivityTab", () => {
 			next_cursor: null,
 			total_count: 0,
 		});
-		mockListSprints.mockResolvedValue([]);
+		mockListSprints.mockResolvedValue({
+			items: [],
+			page_size: 30,
+			next_cursor: null,
+			total_count: 0,
+		});
 
 		render(<AgentActivityTab projectId={PROJECT_ID} agentId={AGENT_ID} />, {
 			wrapper,
@@ -214,7 +222,12 @@ describe("AgentActivityTab", () => {
 			next_cursor: null,
 			total_count: 0,
 		});
-		mockListSprints.mockResolvedValue([]);
+		mockListSprints.mockResolvedValue({
+			items: [],
+			page_size: 30,
+			next_cursor: null,
+			total_count: 0,
+		});
 
 		render(<AgentActivityTab projectId={PROJECT_ID} agentId={AGENT_ID} />, {
 			wrapper,

@@ -17,6 +17,7 @@ func TestNewAttributeSchemaBuiltins(t *testing.T) {
 		"resource.id":                 {"", false},
 		"task.sprint_id":              {"task", false},
 		"task.status_id":              {"task", false},
+		"task.status_category":        {"task", false},
 		"task.type_id":                {"task", false},
 		"task.assignee_id":            {"task", true},
 		"view.sprint_id":              {"view", false},
@@ -25,6 +26,7 @@ func TestNewAttributeSchemaBuiltins(t *testing.T) {
 		"agent.environment_id":        {"agent", false},
 		"environment.type":            {"environment", false},
 		"conversation.environment_id": {"conversation", false},
+		"conversation.agent_id":       {"conversation", false},
 	}
 	if got := len(s.Defs()); got != len(want) {
 		t.Errorf("Defs len=%d want %d", got, len(want))

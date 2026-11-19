@@ -42,8 +42,47 @@ func (r *ConversationRepository) UpdateStatus(ctx context.Context, id uuid.UUID,
 	return nil
 }
 
+// RunningConversation is one agent_conversations row still marked "running",
+// with just the fields agent-runner's startup reconciliation needs to decide
+// whether the row is a leftover from a previous process or a turn some live
+// replica is actually running — see ListRunningConversations.
+type RunningConversation struct {
+	ID uuid.UUID `db:"id"`
+	// AgentID/AgentType come from the owning agent; AgentType gates the
+	// check (only llm-type turns get a per-conversation sandbox at all —
+	// acp and provider_cli turns run inside a daemon or a static
+	// environment).
+	AgentID     uuid.UUID     `db:"agent_id"`
+	AgentType   string        `db:"agent_type"`
+	ProjectID   uuid.NullUUID `db:"project_id"`
+	Environment uuid.NullUUID `db:"environment_id"`
+	UpdatedAt   time.Time     `db:"updated_at"`
+}
+
+// ListRunningConversations returns every conversation currently marked
+// "running", across agents and projects — the input to agent-runner's
+// startup reconciliation (see cmd/agent-runner's
+// reconcileRunningConversationsOnStartup). Unfiltered on purpose: which of
+// these are genuinely orphaned is a decision the caller makes against the
+// sandbox backend's own live set, not something this query can know.
+func (r *ConversationRepository) ListRunningConversations(ctx context.Context) ([]RunningConversation, error) {
+	var rows []RunningConversation
+	err := r.db.SelectContext(ctx, &rows, `
+		SELECT c.id, c.agent_id, a.agent_type, c.project_id, c.environment_id, c.updated_at
+		FROM agent_conversations c
+		JOIN agents a ON a.id = c.agent_id
+		WHERE c.status = 'running' AND c.deleted_at IS NULL
+		ORDER BY c.updated_at
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list running conversations: %w", err)
+	}
+	return rows, nil
+}
+
 // FailIfNotTerminal mirrors fail_if_not_terminal: atomically marks a
-// conversation failed unless it already reached a terminal status.
+// conversation failed unless it already reached a terminal status or was
+// paused (an idle conversation waiting for the user, not a stuck turn).
 // Race-safe against a legitimate terminal status landing concurrently —
 // see the Python docstring this mirrors for the watchdog use case this
 // exists for.
@@ -51,7 +90,7 @@ func (r *ConversationRepository) FailIfNotTerminal(ctx context.Context, id uuid.
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE agent_conversations
 		SET status = 'failed', error_message = $1, updated_at = now()
-		WHERE id = $2 AND status NOT IN ('finished', 'failed', 'stopped')
+		WHERE id = $2 AND status NOT IN ('finished', 'failed', 'stopped', 'paused')
 	`, errorMessage, id)
 	if err != nil {
 		return false, fmt.Errorf("postgres: fail-if-not-terminal conversation %s: %w", id, err)
@@ -101,10 +140,10 @@ func (r *ConversationRepository) GetConversationAgentType(ctx context.Context, c
 }
 
 // GetConversationRealtimeContext mirrors get_conversation_realtime_context:
-// returns (project_id, owner_user_id) for routing a realtime event about
-// conversationID. owner_user_id is the user whose private room should receive
-// the event — the chat-session owner's users.id for a project chat (resolved
-// chat_session_id → member_id → user_id), or actor_user_id for a global chat;
+// returns (project_id, owner_account_id) for routing a realtime event about
+// conversationID. owner_account_id is the account whose private room should receive
+// the event — the chat-session owner's account id for a project chat (resolved
+// chat_session_id → member_id → account_id), or actor_account_id for a global chat;
 // it is nil for a sessionless (project-shared) conversation, which has no
 // single owner. Used by the ACP bridge's WebSocket relay
 // (internal/acpbridge/server.go), which handles events/turn_status for
@@ -113,26 +152,25 @@ func (r *ConversationRepository) GetConversationAgentType(ctx context.Context, c
 // running, the bridge needs a fresh per-conversation lookup since one
 // bridge session (a global-scope ACP agent) can relay conversations with
 // different project contexts, or none.
-func (r *ConversationRepository) GetConversationRealtimeContext(ctx context.Context, conversationID uuid.UUID) (projectID uuid.UUID, ownerUserID *uuid.UUID, err error) {
+func (r *ConversationRepository) GetConversationRealtimeContext(ctx context.Context, conversationID uuid.UUID) (projectID uuid.UUID, ownerAccountID *uuid.UUID, err error) {
 	var row struct {
-		ProjectID   uuid.NullUUID `db:"project_id"`
-		OwnerUserID uuid.NullUUID `db:"owner_user_id"`
+		ProjectID      uuid.NullUUID `db:"project_id"`
+		OwnerAccountID uuid.NullUUID `db:"owner_account_id"`
 	}
 	err = r.db.GetContext(ctx, &row,
 		`SELECT c.project_id,
-		        COALESCE(u.id, c.actor_user_id) AS owner_user_id
+		        COALESCE(pm.account_id, c.actor_account_id) AS owner_account_id
 		 FROM agent_conversations c
 		 LEFT JOIN agent_chat_sessions s ON s.id = c.chat_session_id
 		 LEFT JOIN project_members pm ON pm.id = s.member_id
-		 LEFT JOIN users u ON u.id = pm.account_id
 		 WHERE c.id = $1`, conversationID)
 	if err != nil {
 		return uuid.Nil, nil, fmt.Errorf("postgres: get realtime context for conversation %s: %w", conversationID, err)
 	}
-	if row.OwnerUserID.Valid {
-		ownerUserID = &row.OwnerUserID.UUID
+	if row.OwnerAccountID.Valid {
+		ownerAccountID = &row.OwnerAccountID.UUID
 	}
-	return row.ProjectID.UUID, ownerUserID, nil
+	return row.ProjectID.UUID, ownerAccountID, nil
 }
 
 // InsertEvent mirrors insert_conversation_event. payload must already be

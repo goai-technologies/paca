@@ -176,6 +176,10 @@ func (s *stubTaskSvc) GetTaskByNumber(_ context.Context, projectID uuid.UUID, n 
 	return &taskdom.Task{ProjectID: projectID, TaskNumber: n}, nil
 }
 
+func (s *stubTaskSvc) GetTaskByKey(_ context.Context, _ string, n int64) (*taskdom.Task, error) {
+	return &taskdom.Task{TaskNumber: n}, nil
+}
+
 func (s *stubTaskSvc) CreateTask(_ context.Context, in taskdom.CreateTaskInput) (*taskdom.Task, error) {
 	return &taskdom.Task{ID: uuid.New(), ProjectID: in.ProjectID, Title: in.Title}, nil
 }
@@ -225,8 +229,12 @@ func (s *stubTaskSvc) DeleteCustomFieldDefinition(ctx context.Context, projectID
 
 // --- TaskLinkService stubs --------------------------------------------------
 
-func (s *stubTaskSvc) ListTaskLinks(_ context.Context, _, _ uuid.UUID) ([]*taskdom.TaskLink, error) {
-	return []*taskdom.TaskLink{}, nil
+func (s *stubTaskSvc) ListTaskLinks(_ context.Context, _, _ uuid.UUID, _ *string, _ int) ([]*taskdom.TaskLink, bool, int, error) {
+	return []*taskdom.TaskLink{}, false, 0, nil
+}
+
+func (s *stubTaskSvc) ListProjectTaskLinks(_ context.Context, _ uuid.UUID, _ taskdom.LinkType, _ *string, _ int) ([]*taskdom.TaskLink, bool, error) {
+	return []*taskdom.TaskLink{}, false, nil
 }
 
 func (s *stubTaskSvc) CreateTaskLink(_ context.Context, in taskdom.CreateTaskLinkInput) (*taskdom.TaskLink, error) {
@@ -669,3 +677,7 @@ func (s *stubTaskSvc) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom
 }
 
 func (s *stubTaskSvc) PrepareCommitmentsProject(context.Context, uuid.UUID) error { return nil }
+
+func (s *stubTaskSvc) ListGroupColumns(_ context.Context, _ uuid.UUID, _ taskdom.TaskFilter, _ string) ([]taskdom.GroupColumn, error) {
+	return nil, nil
+}

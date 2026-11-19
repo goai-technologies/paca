@@ -6,10 +6,12 @@ import "errors"
 var (
 	ErrFileNotFound       = errors.New("file not found")
 	ErrAttachmentNotFound = errors.New("attachment not found")
-	ErrUploadNotPending   = errors.New("file upload is not in pending state")
-	ErrFileSizeZero       = errors.New("file size must be greater than zero")
-	ErrFileNameEmpty      = errors.New("file name must not be empty")
-	ErrContentTypeEmpty   = errors.New("content type must not be empty")
+	// ErrInvalidCursor reports a malformed pagination cursor.
+	ErrInvalidCursor    = errors.New("attachment: invalid cursor")
+	ErrUploadNotPending = errors.New("file upload is not in pending state")
+	ErrFileSizeZero     = errors.New("file size must be greater than zero")
+	ErrFileNameEmpty    = errors.New("file name must not be empty")
+	ErrContentTypeEmpty = errors.New("content type must not be empty")
 
 	// ErrMultipartUploadIDRequired is returned when a file was initiated as a
 	// multipart upload but the caller did not supply an upload_id on complete.

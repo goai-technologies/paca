@@ -12,6 +12,7 @@ type Repository interface {
 	DocFolderRepository
 	DocumentRepository
 	DocSnapshotRepository
+	DocPathRepository
 }
 
 // DocFolderRepository defines persistence for document folders.
@@ -21,7 +22,7 @@ type DocFolderRepository interface {
 	// ListFolders returns up to limit direct child folders of parentID
 	// (nil = root level) in manual order (position, name, id), after the
 	// folder cursorAfter names (nil = first page), plus whether more follow.
-	ListFolders(ctx context.Context, projectID uuid.UUID, parentID *uuid.UUID, cursorAfter *string, limit int) ([]*DocFolder, bool, error)
+	ListFolders(ctx context.Context, projectID uuid.UUID, parentID *uuid.UUID, filter FolderFilter, cursorAfter *string, limit int) ([]*DocFolder, bool, error)
 	// FolderPath returns the chain of folders from the root down to folderID
 	// (inclusive), restricted to the project.
 	FolderPath(ctx context.Context, projectID, folderID uuid.UUID) ([]*DocFolder, error)
@@ -49,6 +50,15 @@ type DocumentFilter struct {
 	RootOnly bool
 	// Search keeps documents whose title contains it (case-insensitive).
 	Search string
+	// Title keeps documents whose title equals it (case-insensitive) — a
+	// by-name lookup that, unlike Search, never matches a longer title.
+	Title string
+}
+
+// FolderFilter narrows a folder-level listing.
+type FolderFilter struct {
+	// Name keeps folders whose name equals it (case-insensitive).
+	Name string
 }
 
 // DocumentRepository defines persistence for documents.
@@ -65,9 +75,12 @@ type DocumentRepository interface {
 	ListAllDocuments(ctx context.Context, projectID uuid.UUID) ([]*Document, error)
 	// SearchDocuments returns up to limit non-deleted documents of a project
 	// whose title OR body text contains query (case-insensitive, matched
-	// literally). Body text means the inline "text" nodes of the BlockNote
-	// JSON, not its structural keys. Results include Content so the caller can
-	// build snippets; ordered updated_at DESC, id ASC.
+	// literally). Body text is documents.content_text (ContentText: one line
+	// per block, a block's inline runs joined, so a phrase across formatting
+	// matches); a row whose content_text is not filled (NULL: not backfilled
+	// yet, or content changed by a writer that did not fill it) is matched
+	// against each "text" string of its JSON instead. Results include Content
+	// so the caller can build snippets; ordered updated_at DESC, id ASC.
 	SearchDocuments(ctx context.Context, projectID uuid.UUID, query string, limit int) ([]*Document, error)
 	// FindDocumentByID returns a single non-deleted document.
 	FindDocumentByID(ctx context.Context, id uuid.UUID) (*Document, error)
@@ -77,7 +90,9 @@ type DocumentRepository interface {
 	// calls decide to validate and mutate it, and writes it back in the same
 	// transaction, so a concurrent save or delete can neither be reverted nor
 	// have the document resurrected. Returns ErrDocNotFound when the document
-	// doesn't exist or is deleted. decide's error aborts the write.
+	// doesn't exist or is deleted. decide's error aborts the write, except
+	// ErrNoChange: the UPDATE is skipped, the transaction commits and the
+	// current row is returned with a nil error.
 	UpdateDocumentAtomic(ctx context.Context, id uuid.UUID, decide func(current *Document) error) (*Document, error)
 	// DeleteDocument soft-deletes a document (sets deleted_at).
 	DeleteDocument(ctx context.Context, id uuid.UUID) error
@@ -87,9 +102,10 @@ type DocumentRepository interface {
 type DocSnapshotRepository interface {
 	// ListSnapshots returns up to limit of a document's snapshots, newest
 	// first, after the snapshot cursorAfter names (nil = the newest), plus
-	// whether older ones remain. Snapshot bodies are not loaded — fetch one
-	// with FindSnapshotByID.
-	ListSnapshots(ctx context.Context, documentID uuid.UUID, cursorAfter *string, limit int) ([]*DocSnapshot, bool, error)
+	// whether older ones remain. contentHash, when non-nil, keeps only the
+	// snapshots holding that version (see DocSnapshot.ContentHash). Snapshot
+	// bodies are not loaded — fetch one with FindSnapshotByID.
+	ListSnapshots(ctx context.Context, documentID uuid.UUID, contentHash *string, cursorAfter *string, limit int) ([]*DocSnapshot, bool, error)
 	// FindSnapshotByID returns a single snapshot.
 	FindSnapshotByID(ctx context.Context, id uuid.UUID) (*DocSnapshot, error)
 	// FindLatestSnapshot returns the snapshot with the highest snapshot_number

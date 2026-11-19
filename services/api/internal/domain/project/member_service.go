@@ -40,7 +40,7 @@ type MemberService interface {
 	// across projectIDs — see MemberRepository.CountDistinctAgentsByProjects.
 	CountDistinctAgentsByProjects(ctx context.Context, projectIDs []uuid.UUID) (int64, error)
 	AddMember(ctx context.Context, projectID uuid.UUID, in AddMemberInput) (*ProjectMember, error)
-	RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error
+	RemoveMember(ctx context.Context, projectID, accountID uuid.UUID) error
 	// UpdateMemberDescription changes a member's Jev-facing description by
 	// their membership record ID — see ProjectMember.Description.
 	UpdateMemberDescription(ctx context.Context, projectID, memberID uuid.UUID, description string) (*ProjectMember, error)

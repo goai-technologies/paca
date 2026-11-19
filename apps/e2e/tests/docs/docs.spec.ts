@@ -499,11 +499,16 @@ test.describe('Document history', () => {
 
     const entry = page.getByText('updated content', { exact: true });
     await expect(entry).toBeVisible({ timeout: 15_000 });
-    // The options trigger has no accessible name and is only revealed on hover.
-    await entry
-      .locator(GROUP_ANCESTOR)
-      .getByRole('button')
-      .click({ force: true });
+    // The trigger is only revealed on hover on desktop. On narrow viewports the
+    // floating agent button sits over it, so even a forced click lands on that
+    // button instead. Open the menu from the keyboard, which doesn't depend on
+    // where the trigger is painted, and retry until it is actually open.
+    const trigger = entry.locator(GROUP_ANCESTOR).getByRole('button', { name: 'Entry actions' });
+    await expect(async () => {
+      await trigger.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('menuitem').first()).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
   };
 
   test('User can view what changed in a document update', async ({ page }) => {

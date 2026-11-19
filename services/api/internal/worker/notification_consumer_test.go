@@ -116,18 +116,13 @@ func (f *fakeMemberReader) FindMemberByID(_ context.Context, memberID uuid.UUID)
 	return m, nil
 }
 
-func (f *fakeMemberReader) FindMemberByUserProject(_ context.Context, userID, projectID uuid.UUID) (*projectdom.ProjectMember, error) {
-	return f.byUserProject(userID, projectID)
-}
-
-func (f *fakeMemberReader) FindMemberByActor(_ context.Context, projectID, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error) {
-	if agentID != nil {
-		if f.byAgentProject == nil {
-			return nil, errors.New("no agent found")
+func (f *fakeMemberReader) FindMember(_ context.Context, projectID, accountID uuid.UUID) (*projectdom.ProjectMember, error) {
+	if f.byAgentProject != nil {
+		if m, err := f.byAgentProject(accountID, projectID); err == nil {
+			return m, nil
 		}
-		return f.byAgentProject(*agentID, projectID)
 	}
-	return f.byUserProject(actorID, projectID)
+	return f.byUserProject(accountID, projectID)
 }
 
 type fakeAgentTaskTrigger struct {
@@ -208,7 +203,7 @@ func TestNotificationConsumer_AutomationTriggeredAssignment_PassesNilMemberID(t 
 		TaskID:              uuid.New().String(),
 		ProjectID:           uuid.New().String(),
 		NewAssigneeMemberID: agentMemberID.String(),
-		ActorUserID:         userdom.SystemActorUserID.String(),
+		ActorID:             userdom.SystemActorUserID.String(),
 		AutomationName:      "wf",
 	})
 	c.handle(msg)
@@ -229,13 +224,13 @@ func TestNotificationConsumer_HumanTriggeredAssignment_PassesResolvedMemberID(t 
 	agentID := uuid.New()
 	agentMember := &projectdom.ProjectMember{ID: agentMemberID, MemberType: "agent", AgentID: &agentID}
 
-	actorUserID := uuid.New()
+	actorAccountID := uuid.New()
 	actorMemberID := uuid.New()
 
 	memberRepo := &fakeMemberReader{
 		byID: map[uuid.UUID]*projectdom.ProjectMember{agentMemberID: agentMember},
 		byUserProject: func(userID, _ uuid.UUID) (*projectdom.ProjectMember, error) {
-			if userID != actorUserID {
+			if userID != actorAccountID {
 				return nil, errors.New("unexpected actor")
 			}
 			return &projectdom.ProjectMember{ID: actorMemberID}, nil
@@ -248,7 +243,7 @@ func TestNotificationConsumer_HumanTriggeredAssignment_PassesResolvedMemberID(t 
 		TaskID:              uuid.New().String(),
 		ProjectID:           uuid.New().String(),
 		NewAssigneeMemberID: agentMemberID.String(),
-		ActorUserID:         actorUserID.String(),
+		ActorID:             actorAccountID.String(),
 	})
 	c.handle(msg)
 
@@ -260,17 +255,16 @@ func TestNotificationConsumer_HumanTriggeredAssignment_PassesResolvedMemberID(t 
 	}
 }
 
-// TestNotificationConsumer_AgentAssignsHuman_PassesActorAgentID guards the
-// case a human user reported: when an AI agent (not a human) assigns a task
-// to a human, the resulting notification must carry the agent's ID so the
-// notification service can resolve the agent's own project-member record
-// (name + avatar) instead of failing to find a human member for the
-// agent-authenticated request's underlying actor_user_id. The assignee here
-// is a human, so this exercises the fall-through path to
-// c.notificationSvc.NotifyAssigned rather than the agent-assignee special case.
-func TestNotificationConsumer_AgentAssignsHuman_PassesActorAgentID(t *testing.T) {
+// TestNotificationConsumer_AgentAssignsHuman_PassesActorID guards the case
+// where an AI agent (not a human) assigns a task to a human: the actor in the
+// stream is the agent's own account id, and it must reach NotifyAssigned
+// unchanged so the notification service can resolve the agent's project-member
+// record (name + avatar). The assignee here is a human, so this exercises the
+// fall-through path to c.notificationSvc.NotifyAssigned rather than the
+// agent-assignee special case.
+func TestNotificationConsumer_AgentAssignsHuman_PassesActorID(t *testing.T) {
 	assigneeMemberID := uuid.New()
-	actorAgentID := uuid.New()
+	actorID := uuid.New()
 
 	// No entry for assigneeMemberID: FindMemberByID errors, so handle()
 	// falls through past the "assignee is an agent" branch to NotifyAssigned.
@@ -282,15 +276,33 @@ func TestNotificationConsumer_AgentAssignsHuman_PassesActorAgentID(t *testing.T)
 		TaskID:              uuid.New().String(),
 		ProjectID:           uuid.New().String(),
 		NewAssigneeMemberID: assigneeMemberID.String(),
-		ActorUserID:         uuid.New().String(),
-		ActorAgentID:        actorAgentID.String(),
+		ActorID:             actorID.String(),
 	})
 	c.handle(msg)
 
 	if !notificationSvc.called {
 		t.Fatalf("expected NotifyAssigned to be called")
 	}
-	if notificationSvc.gotInput.ActorAgentID == nil || *notificationSvc.gotInput.ActorAgentID != actorAgentID {
-		t.Fatalf("expected ActorAgentID %v, got %v", actorAgentID, notificationSvc.gotInput.ActorAgentID)
+	if notificationSvc.gotInput.ActorID != actorID {
+		t.Fatalf("expected ActorID %v, got %v", actorID, notificationSvc.gotInput.ActorID)
+	}
+}
+
+// A message queued before actor_user_id was renamed to actor_id still resolves.
+func TestNotificationConsumer_LegacyActorUserID(t *testing.T) {
+	actorID := uuid.New()
+	memberRepo := &fakeMemberReader{byID: map[uuid.UUID]*projectdom.ProjectMember{}}
+	notificationSvc := &fakeNotificationSvc{}
+	c := newTestNotificationConsumerWithNotificationSvc(t, notificationSvc, memberRepo, &fakeAgentTaskTrigger{})
+
+	c.handle(agentAssignmentMessage(t, assignmentStreamPayload{
+		TaskID:              uuid.New().String(),
+		ProjectID:           uuid.New().String(),
+		NewAssigneeMemberID: uuid.New().String(),
+		LegacyActorUserID:   actorID.String(),
+	}))
+
+	if !notificationSvc.called || notificationSvc.gotInput.ActorID != actorID {
+		t.Fatalf("legacy actor_user_id not honoured: called=%v got=%v", notificationSvc.called, notificationSvc.gotInput.ActorID)
 	}
 }

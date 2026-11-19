@@ -206,30 +206,20 @@ Note there is no `resume` control message the way `services/ai-agent` had one �
 
 ## Repository Access & PR Creation
 
-This describes the `llm` execution path. `acp` agents don't go through a repository plugin at all — they use whatever `git`/`gh` credentials are already configured on the user's own machine, exactly as if the user were driving the CLI themselves; see the [Execution Models](#execution-models) table.
+This describes the `llm` execution path. `acp` agents don't use Paca's Git credentials for their local `git` — they use whatever `git`/`gh` credentials are already configured on the user's own machine, exactly as if the user were driving the CLI themselves; see the [Execution Models](#execution-models) table.
 
-Agents must be able to read and write code without ever seeing VCS credentials directly. Unlike `services/ai-agent`, `agent-runner` never calls the repository plugin adapter itself — cloning and PR creation are tool calls the agent makes, executed inside its own sandbox container against the built-in Paca MCP server.
+Agents read and write code without ever seeing VCS credentials. `agent-runner` never clones for them: the agent calls the Git tools of the built-in Paca MCP server (`apps/mcp`) inside its sandbox, and those tools go through `services/api`, which resolves the repository's Git provider plugin.
 
-### Clone Flow
-
-1. The agent decides (from the `paca` skill's routing, or a coding-task trigger's context) that it needs the repository and invokes the Paca MCP server's clone tool.
-2. The Paca MCP server (`apps/mcp`, running as `npx @paca-ai/paca-mcp` inside the same container) calls `services/api` for a **short-lived scoped token** (e.g., a GitHub installation token with read/write on the repository, valid for 10 minutes) and the HTTPS clone URL.
-3. It runs `git clone` as a subprocess with the token embedded in the URL, then scrubs the token from any command output before it can reach the model's context or a log line — the token itself is never returned to the agent as text.
-4. When the conversation ends, the container (and any working tree inside it) is destroyed and the token expires automatically.
-
-### PR Creation Flow
-
-1. The agent completes coding work and invokes the Paca MCP server's PR-creation tool with the branch name and description it generated.
-2. The Paca MCP server calls the repository plugin adapter's **create PR endpoint** (via `services/api`).
-3. The plugin creates the PR and returns the PR URL to the tool call.
-4. The agent posts the PR URL as a comment on the Paca task itself (another Paca MCP tool call).
+- **Reading and working:** `workspace_inspect` and `workspace_prepare` decide whether the repository is already in the working folder and fetch, check out and fast-forward the branch needed; `git_commit` and `git_push` publish work to a branch. Git itself authenticates through a credential helper that asks core for a short-lived, repository-scoped credential for that one command, so remotes never contain a token.
+- **Pull requests and review:** `change_request_open`, `review_submit`, `comment_post`, `checks_get_logs` and the other `change_request_*` / `review_*` tools are neutral across platforms; the provider plugin turns them into the platform's API calls.
+- **Starting agents from the platform:** a mention, label, review feedback or CI failure on a linked repository starts an agent run (see the workflow document).
 
 This design means:
 - Agents never store credentials.
-- Credentials are not readable from container logs (scrubbed before the agent or any log can see them).
-- Plugin plugins remain the single source of truth for VCS auth.
+- Credentials are not readable from container logs, files or the environment.
+- Provider plugins remain the single source of truth for platform auth.
 
-See [repository-plugin-adapter.md](repository-plugin-adapter.md) for the full protocol.
+See [git-agent-workflow.md](git-agent-workflow.md) for the full protocol.
 
 ---
 
@@ -267,5 +257,5 @@ Each template also carries a set of trigger keywords (e.g. `developer` triggers 
 - [database-schema.md](database-schema.md) — Agent tables and modifications to `project_members`
 - [api-design.md](api-design.md) — REST endpoints for agent management
 - [agent-runner-service.md](agent-runner-service.md) — `services/agent-runner` implementation details
-- [repository-plugin-adapter.md](repository-plugin-adapter.md) — How agents access VCS credentials
+- [git-agent-workflow.md](git-agent-workflow.md) — How agents work with Git platforms: providers, credentials, triggers, tools, workspace
 - [realtime-events.md](realtime-events.md) — Socket.IO events emitted during conversations

@@ -99,7 +99,7 @@ async function createBacklogView(
   request: APIRequestContext,
   projectId: string,
   name: string,
-  view_type: 'board' | 'table' | 'roadmap',
+  view_type: 'board' | 'table' | 'gantt',
 ): Promise<InteractionView> {
   const resp = await request.post(`${BASE_URL}/api/v1/projects/${projectId}/views?context=backlog`, {
     data: { name, view_type },
@@ -223,17 +223,17 @@ test.describe('Entering an interaction opens its default view', () => {
     await expect(page.locator('[class*="overflow-auto"]').last()).toBeVisible();
   });
 
-  test('Roadmap view tab shows the roadmap timeline layout', async ({ page, request }) => {
-    // Create a roadmap view
-    await createBacklogView(request, projectId, 'Roadmap', 'roadmap');
+  test('Gantt view tab shows the Gantt timeline layout', async ({ page, request }) => {
+    // Create a Gantt view
+    await createBacklogView(request, projectId, 'Gantt', 'gantt');
 
     await signIn(page);
     await navigateToBacklog(page, projectId);
 
-    // Click the "Roadmap" view tab
-    await page.getByRole('button', { name: 'Roadmap' }).click();
+    // Click the "Gantt" view tab
+    await page.getByRole('button', { name: 'Gantt' }).click();
 
-    // The roadmap header row with month labels should be visible
+    // The Gantt header row with month labels should be visible
     await expect(page.locator('[class*="overflow-x-auto"]').last()).toBeVisible();
   });
 
@@ -769,10 +769,10 @@ test.describe('Managing views (create, rename, delete)', () => {
     // Popover should show layout options
     await expect(page.getByText('Table', { exact: true }).last()).toBeVisible();
     await expect(page.getByText('Board', { exact: true }).last()).toBeVisible();
-    await expect(page.getByText('Roadmap', { exact: true }).last()).toBeVisible();
+    await expect(page.getByText('Gantt', { exact: true }).last()).toBeVisible();
 
     // And a view name field
-    await expect(page.getByPlaceholder(/New (Board|Table|Roadmap)/)).toBeVisible();
+    await expect(page.getByPlaceholder(/New (Board|Table|Gantt)/)).toBeVisible();
   });
 
   test('Creating a Board view adds a new tab in the tab bar', async ({ page }) => {
@@ -781,7 +781,7 @@ test.describe('Managing views (create, rename, delete)', () => {
 
     await page.getByRole('button', { name: 'Add view' }).click();
     // Fill in view name
-    await page.getByPlaceholder(/New (Board|Table|Roadmap)/).fill(`${TEST_PROJECT_PREFIX}BOARD_VIEW`);
+    await page.getByPlaceholder(/New (Board|Table|Gantt)/).fill(`${TEST_PROJECT_PREFIX}BOARD_VIEW`);
     // Select Board layout
     await page.getByText('Board', { exact: true }).last().click();
     // Confirm creation
@@ -796,23 +796,23 @@ test.describe('Managing views (create, rename, delete)', () => {
     await navigateToBacklog(page, projectId);
 
     await page.getByRole('button', { name: 'Add view' }).click();
-    await page.getByPlaceholder(/New (Board|Table|Roadmap)/).fill(`${TEST_PROJECT_PREFIX}TABLE_VIEW`);
+    await page.getByPlaceholder(/New (Board|Table|Gantt)/).fill(`${TEST_PROJECT_PREFIX}TABLE_VIEW`);
     await page.getByText('Table', { exact: true }).last().click();
     await page.getByRole('button', { name: 'Create view' }).click();
 
     await expect(page.getByRole('button', { name: `${TEST_PROJECT_PREFIX}TABLE_VIEW` })).toBeVisible({ timeout: 10_000 });
   });
 
-  test('Creating a Roadmap view adds a new tab in the tab bar', async ({ page }) => {
+  test('Creating a Gantt view adds a new tab in the tab bar', async ({ page }) => {
     await signIn(page);
     await navigateToBacklog(page, projectId);
 
     await page.getByRole('button', { name: 'Add view' }).click();
-    await page.getByPlaceholder(/New (Board|Table|Roadmap)/).fill(`${TEST_PROJECT_PREFIX}ROADMAP_VIEW`);
-    await page.getByText('Roadmap', { exact: true }).last().click();
+    await page.getByPlaceholder(/New (Board|Table|Gantt)/).fill(`${TEST_PROJECT_PREFIX}GANTT_VIEW`);
+    await page.getByText('Gantt', { exact: true }).last().click();
     await page.getByRole('button', { name: 'Create view' }).click();
 
-    await expect(page.getByRole('button', { name: `${TEST_PROJECT_PREFIX}ROADMAP_VIEW` })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: `${TEST_PROJECT_PREFIX}GANTT_VIEW` })).toBeVisible({ timeout: 10_000 });
   });
 
   test('Creating a view without a name defaults to a generated name', async ({ page }) => {
@@ -821,11 +821,11 @@ test.describe('Managing views (create, rename, delete)', () => {
 
     await page.getByRole('button', { name: 'Add view' }).click();
     // Clear the name input
-    await page.getByPlaceholder(/New (Board|Table|Roadmap)/).clear();
+    await page.getByPlaceholder(/New (Board|Table|Gantt)/).clear();
     await page.getByRole('button', { name: 'Create view' }).click();
 
     // A new tab should appear with a default generated name ("New Board" when Board is selected)
-    await expect(page.getByRole('button', { name: /New (Board|Table|Roadmap)/ })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: /New (Board|Table|Gantt)/ })).toBeVisible({ timeout: 10_000 });
   });
 
   test('Renaming a view updates its tab label', async ({ page, request }) => {
@@ -1064,22 +1064,33 @@ test.describe('Filtering and searching tasks within a view', () => {
 test.describe('View settings panel', () => {
   let projectId: string;
 
-  // The panel's dropdowns are custom popovers (not native <select>): each row is
-  // a label followed by a trigger button showing the current value, and picking
-  // an option leaves the dropdown popover open until the panel title is clicked.
+  // The panel is a popover with Display / Fields / Filters tabs. Each Display
+  // row is a <label> followed by a base-ui Select (role=combobox) whose options
+  // are role=option and which closes itself once an option is picked.
   const openSettings = async (page: Page) => {
     await page.getByRole('button', { name: 'View settings', exact: true }).click();
     await expect(page.getByText('View settings', { exact: true })).toBeVisible();
   };
 
+  const rowLabel = (page: Page, label: string) =>
+    page.locator('[data-slot="label"]').getByText(label, { exact: true });
+
   const rowButton = (page: Page, label: string) =>
-    page.getByText(label, { exact: true }).locator('xpath=following-sibling::button');
+    rowLabel(page, label).locator('xpath=following-sibling::*[@role="combobox"]');
 
   const chooseOption = async (page: Page, row: string, option: string) => {
     await rowButton(page, row).click();
-    await page.getByRole('button', { name: option, exact: true }).last().click();
-    await page.getByText('View settings', { exact: true }).click();
-    await expect(rowButton(page, row)).toHaveText(option);
+    await page.getByRole('option', { name: option, exact: true }).click();
+    await expect(rowButton(page, row)).toContainText(option);
+  };
+
+  // Escape with unsaved edits asks before closing; throw the edits away.
+  const discardAndClose = async (page: Page) => {
+    await page.keyboard.press('Escape');
+    await page
+      .locator('[data-slot="alert-dialog-content"]')
+      .getByRole('button', { name: 'Discard', exact: true })
+      .click();
   };
 
   test.beforeEach(async ({ request, context }) => {
@@ -1101,11 +1112,11 @@ test.describe('View settings panel', () => {
     await openSettings(page);
 
     // All expected setting rows should be visible
-    await expect(page.getByText('Fields', { exact: true })).toBeVisible();
-    await expect(page.getByText('Column by', { exact: true })).toBeVisible();
-    await expect(page.getByText('Swimlanes', { exact: true })).toBeVisible();
-    await expect(page.getByText('Sort by', { exact: true })).toBeVisible();
-    await expect(page.getByText('Field sum', { exact: true })).toBeVisible();
+    await expect(rowLabel(page, 'Fields')).toBeVisible();
+    await expect(rowLabel(page, 'Column by')).toBeVisible();
+    await expect(rowLabel(page, 'Swimlanes')).toBeVisible();
+    await expect(rowLabel(page, 'Sort by')).toBeVisible();
+    await expect(rowLabel(page, 'Field sum')).toBeVisible();
   });
 
   test('The settings panel offers a Save action and shows Reset only once the draft differs from the team default', async ({ page }) => {
@@ -1128,10 +1139,10 @@ test.describe('View settings panel', () => {
     await navigateToBacklog(page, projectId);
 
     await openSettings(page);
-    await expect(rowButton(page, 'Sort by')).toHaveText('Manual');
+    await expect(rowButton(page, 'Sort by')).toContainText('Manual');
 
     await chooseOption(page, 'Sort by', 'Importance');
-    await expect(rowButton(page, 'Sort by')).toHaveText('Importance');
+    await expect(rowButton(page, 'Sort by')).toContainText('Importance');
   });
 
   test('Clicking "Save only for me" persists the settings and closes the popup', async ({ page }) => {
@@ -1148,7 +1159,7 @@ test.describe('View settings panel', () => {
 
     // After reopening, the saved setting should persist
     await openSettings(page);
-    await expect(rowButton(page, 'Sort by')).toHaveText('Importance');
+    await expect(rowButton(page, 'Sort by')).toContainText('Importance');
   });
 
   test('Clicking Reset reverts the draft to the team default', async ({ page }) => {
@@ -1161,7 +1172,7 @@ test.describe('View settings panel', () => {
     await chooseOption(page, 'Sort by', 'Importance');
 
     await page.getByRole('button', { name: 'Reset', exact: true }).click();
-    await expect(rowButton(page, 'Sort by')).toHaveText(initialValue.trim());
+    await expect(rowButton(page, 'Sort by')).toContainText(initialValue.trim());
     await expect(page.getByRole('button', { name: 'Reset', exact: true })).toHaveCount(0);
   });
 
@@ -1174,15 +1185,17 @@ test.describe('View settings panel', () => {
 
     await chooseOption(page, 'Sort by', 'Importance');
 
-    // Close by pressing Escape
-    await page.keyboard.press('Escape');
+    // Close by pressing Escape and confirm the discard
+    await discardAndClose(page);
 
-    // Panel should be closed
-    await expect(page.getByRole('button', { name: 'Save only for me' })).not.toBeVisible({ timeout: 5_000 });
+    // Confirm dialog and panel should both be gone (the dialog also has a
+    // "Save only for me" button, so assert on the dialog/panel title instead)
+    await expect(page.locator('[data-slot="alert-dialog-content"]')).toHaveCount(0);
+    await expect(page.getByText('View settings', { exact: true })).not.toBeVisible({ timeout: 5_000 });
 
     // Reopen and verify the change was discarded
     await openSettings(page);
-    await expect(rowButton(page, 'Sort by')).toHaveText(initialValue);
+    await expect(rowButton(page, 'Sort by')).toContainText(initialValue);
   });
 
   test('View settings are persisted per view', async ({ page, request }) => {
@@ -1204,13 +1217,13 @@ test.describe('View settings panel', () => {
     await page.getByRole('button', { name: 'MyTable', exact: true }).click();
     await openSettings(page);
     // MyTable view should have the default sort (manual), not the Board's explicit sort
-    await expect(rowButton(page, 'Sort by')).toHaveText('Manual');
+    await expect(rowButton(page, 'Sort by')).toContainText('Manual');
     await page.keyboard.press('Escape');
 
     // Switch back to Board view — its explicitly saved setting must be preserved
     await page.getByRole('button', { name: 'Board', exact: true }).click();
     await openSettings(page);
-    await expect(rowButton(page, 'Sort by')).toHaveText('Importance');
+    await expect(rowButton(page, 'Sort by')).toContainText('Importance');
   });
 });
 
@@ -1289,7 +1302,7 @@ test.describe('Reordering view tabs by dragging', () => {
     projectId = await createProject(request, `${TEST_PROJECT_PREFIX}REORDER_${RUN_ID}`);
     // Create two additional distinct named views (Board is seeded automatically)
     await createBacklogView(request, projectId, 'ReorderTable', 'table');
-    await createBacklogView(request, projectId, 'ReorderRoadmap', 'roadmap');
+    await createBacklogView(request, projectId, 'ReorderGantt', 'gantt');
     await context.clearCookies();
     await context.clearPermissions();
   });
@@ -1307,40 +1320,40 @@ test.describe('Reordering view tabs by dragging', () => {
     await expect(tabBar).toBeVisible();
 
     // Locate the source and target tabs
-    const roadmapTab = page.getByRole('button', { name: 'ReorderRoadmap', exact: true });
-    const tableTab   = page.getByRole('button', { name: 'ReorderTable',   exact: true });
-    await expect(roadmapTab).toBeVisible();
+    const ganttTab = page.getByRole('button', { name: 'ReorderGantt', exact: true });
+    const tableTab = page.getByRole('button', { name: 'ReorderTable',   exact: true });
+    await expect(ganttTab).toBeVisible();
     await expect(tableTab).toBeVisible();
 
-    // Drag ReorderRoadmap before ReorderTable using a dataTransfer drag
-    const roadmapBound = await roadmapTab.boundingBox();
-    const tableBound   = await tableTab.boundingBox();
-    if (!roadmapBound || !tableBound) { test.skip(); return; }
+    // Drag ReorderGantt before ReorderTable using a dataTransfer drag
+    const ganttBound = await ganttTab.boundingBox();
+    const tableBound = await tableTab.boundingBox();
+    if (!ganttBound || !tableBound) { test.skip(); return; }
 
-    await page.mouse.move(roadmapBound.x + roadmapBound.width / 2, roadmapBound.y + roadmapBound.height / 2);
+    await page.mouse.move(ganttBound.x + ganttBound.width / 2, ganttBound.y + ganttBound.height / 2);
     await page.mouse.down();
     await page.mouse.move(tableBound.x + 5, tableBound.y + tableBound.height / 2, { steps: 10 });
     await page.mouse.up();
 
     // After drop the tab bar should still show both tabs (order may have changed)
-    await expect(roadmapTab).toBeVisible();
+    await expect(ganttTab).toBeVisible();
     await expect(tableTab).toBeVisible();
   });
 
   test('The reordered tab order persists after a page refresh', async ({ page, request }) => {
-    // Reorder via API directly: put ReorderRoadmap first
+    // Reorder via API directly: put ReorderGantt first
     await authRequest(request);
     const listResp = await request.get(`${BASE_URL}/api/v1/projects/${projectId}/views?context=backlog`);
     const listBody = await listResp.json();
     const views: Array<{ id: string; name: string }> = listBody?.data?.items ?? [];
 
-    const roadmapView = views.find((v) => v.name === 'ReorderRoadmap');
-    const tableView   = views.find((v) => v.name === 'ReorderTable');
-    const boardView   = views.find((v) => !['ReorderRoadmap', 'ReorderTable'].includes(v.name));
-    if (!roadmapView || !tableView) { test.skip(); return; }
+    const ganttView = views.find((v) => v.name === 'ReorderGantt');
+    const tableView = views.find((v) => v.name === 'ReorderTable');
+    const boardView = views.find((v) => !['ReorderGantt', 'ReorderTable'].includes(v.name));
+    if (!ganttView || !tableView) { test.skip(); return; }
 
     const orderedIds = [
-      roadmapView.id,
+      ganttView.id,
       tableView.id,
       ...(boardView ? [boardView.id] : []),
     ];
@@ -1353,15 +1366,15 @@ test.describe('Reordering view tabs by dragging', () => {
     await signIn(page);
     await navigateToBacklog(page, projectId);
 
-    // Verify ReorderRoadmap tab appears in the DOM before ReorderTable
-    const roadmapTab = page.getByRole('button', { name: 'ReorderRoadmap', exact: true });
-    const tableTab   = page.getByRole('button', { name: 'ReorderTable',   exact: true });
-    await expect(roadmapTab).toBeVisible();
+    // Verify ReorderGantt tab appears in the DOM before ReorderTable
+    const ganttTab = page.getByRole('button', { name: 'ReorderGantt', exact: true });
+    const tableTab = page.getByRole('button', { name: 'ReorderTable',   exact: true });
+    await expect(ganttTab).toBeVisible();
     await expect(tableTab).toBeVisible();
 
     // Both tabs should still be present after page refresh
     await page.reload();
-    await expect(roadmapTab).toBeVisible();
+    await expect(ganttTab).toBeVisible();
     await expect(tableTab).toBeVisible();
   });
 });

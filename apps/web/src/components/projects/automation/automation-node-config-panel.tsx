@@ -1,13 +1,5 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import {
-	ChevronDown,
-	Copy,
-	Loader2,
-	Plus,
-	Search,
-	Trash2,
-	X,
-} from "lucide-react";
+import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
+import { ChevronDown, Copy, Plus, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -16,6 +8,7 @@ import {
 	PRIORITY_LEVELS,
 } from "@/components/projects/interactions/priority";
 import { MemberSelect } from "@/components/shared/member-select";
+import { SprintSelect } from "@/components/shared/sprint-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +34,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useTaskPickerSearch } from "@/hooks/use-task-picker-search";
@@ -48,6 +42,9 @@ import {
 	ACTION_TYPES,
 	type ActionConfig,
 	type AutomationNode,
+	CHANGED_FIELDS,
+	type ChangedField,
+	CLEARABLE_FIELDS,
 	CONDITION_NODE_TYPE,
 	type ConditionBranch,
 	type ConditionConfig,
@@ -56,12 +53,17 @@ import {
 	type ConditionOperator,
 	DEFAULT_JEV_CONFIDENCE_THRESHOLD,
 	DEFAULT_JEV_NOUL_THRESHOLD,
+	DYNAMIC_FIELD_SOURCES,
+	type DynamicValue,
 	generateWebhookToken,
 	JEV_ANSWER_TYPES,
 	JEV_CONDITION_NODE_TYPE,
 	type JevAnswerType,
 	type JevConditionConfig,
+	LINK_TYPES,
+	type LinkType,
 	MULTI_VALUED_TARGET_KINDS,
+	type NotifyRecipient,
 	type PluginNodeConfigSchema,
 	type PluginNodeConfigSchemaProperty,
 	type TaskFieldUpdate,
@@ -70,13 +72,13 @@ import {
 	TRIGGER_TYPES,
 	type TriggerConfig,
 } from "@/lib/automation-api";
+import { copyToClipboard } from "@/lib/clipboard";
 import {
-	listAllTasks,
-	sprintsQueryOptions,
 	type Task,
 	taskQueryOptions,
 	tasksPickerInfiniteQueryOptions,
 } from "@/lib/interaction-api";
+import { useMemberDirectory } from "@/lib/member-directory";
 import type {
 	CustomFieldDefinition,
 	TaskStatus,
@@ -106,23 +108,6 @@ interface AutomationNodeConfigPanelProps {
 	 * present with properties, drives SchemaConfigForm's UI-field
 	 * rendering instead of GenericConfigForm's raw JSON textarea. */
 	pluginConfigSchema?: PluginNodeConfigSchema;
-}
-
-// The task list API caps page_size at 200, so a full project task picker has
-// to page through — otherwise tasks past the first 200 are invisible to it.
-const MAX_TASK_PAGES = 25;
-
-async function fetchAllProjectTasks(projectId: string): Promise<Task[]> {
-	const all: Task[] = [];
-	let cursor: string | undefined;
-	for (let page = 0; page < MAX_TASK_PAGES; page++) {
-		const result = await listAllTasks(projectId, { pageSize: 200, cursor });
-		all.push(...result.items);
-		const next = result.next_cursor;
-		if (!next) break;
-		cursor = next;
-	}
-	return all;
 }
 
 function taskLabel(task: Task): string {
@@ -164,6 +149,7 @@ const CONDITION_FIELDS: ConditionField[] = [
 	"parent_task_id",
 	"start_date",
 	"due_date",
+	"child_count",
 	"custom_field",
 	"sprint_name",
 	"sprint_status",
@@ -210,6 +196,7 @@ const OPERATORS_BY_FIELD: Record<ConditionField, ConditionOperator[]> = {
 	],
 	sprint_id: ["equals", "not_equals", "is_empty", "is_not_empty"],
 	parent_task_id: ["equals", "not_equals", "is_empty", "is_not_empty"],
+	child_count: ["equals", "not_equals", "greater_than", "less_than"],
 	reporter_id: ["equals", "not_equals", "is_empty", "is_not_empty"],
 	start_date: [
 		"equals",
@@ -249,11 +236,119 @@ const OPERATORS_BY_FIELD: Record<ConditionField, ConditionOperator[]> = {
 };
 
 // UpdatableField enumerates every TaskFieldUpdate key with an editor in
-// this form — the same set the "add field" picker offers. Excludes
-// description (rich text, no dedicated editor here). Ordered to match
+// this form — the same set the "add field" picker offers. Ordered to match
 // CONDITION_FIELDS above for a consistent field-picking experience across
 // conditions and actions.
-type UpdatableField = Exclude<keyof TaskFieldUpdate, "description">;
+type UpdatableField = Exclude<
+	keyof TaskFieldUpdate,
+	"tags_mode" | "assignees_mode" | "clear" | "dynamic"
+>;
+
+// How a field row applies its value. "set" is the plain fixed value (for the
+// tags / assignee lists it replaces the whole list); add / remove edit the
+// list in place; clear empties the field; task / parent / now compute the
+// value when the automation runs (see DynamicValue).
+type FieldOp = "set" | "add" | "remove" | "clear" | "task" | "parent" | "now";
+
+const DATE_FIELDS: UpdatableField[] = ["start_date", "due_date"];
+
+function fieldOpsFor(key: UpdatableField, isCreate: boolean): FieldOp[] {
+	const ops: FieldOp[] = ["set"];
+	if (!isCreate && (key === "tags" || key === "assignee_ids")) {
+		ops.push("add", "remove");
+	}
+	if (!isCreate && (CLEARABLE_FIELDS as readonly string[]).includes(key)) {
+		ops.push("clear");
+	}
+	if (DYNAMIC_FIELD_SOURCES[key]) {
+		ops.push("task", "parent");
+		if (DATE_FIELDS.includes(key)) ops.push("now");
+	}
+	return ops;
+}
+
+interface ParsedFieldConfig {
+	fields: TaskFieldUpdate;
+	enabled: Set<UpdatableField>;
+	ops: Partial<Record<UpdatableField, FieldOp>>;
+	dyn: Partial<Record<UpdatableField, DynamicValue>>;
+}
+
+// Splits a stored update_task / create_task config into the editor's state:
+// the fixed values, which fields have a row, and each row's operation.
+function parseFieldConfig(
+	cfg: (TaskFieldUpdate & { link?: unknown }) | undefined,
+	isCreate: boolean,
+): ParsedFieldConfig {
+	const { clear, dynamic, tags_mode, assignees_mode, link, ...fixed } =
+		cfg ?? {};
+	void link;
+	const fields = fixed as TaskFieldUpdate;
+	const enabled = new Set<UpdatableField>(
+		(Object.keys(fields) as UpdatableField[]).filter(
+			(k) => fields[k] !== undefined,
+		),
+	);
+	const ops: ParsedFieldConfig["ops"] = {};
+	const dyn: ParsedFieldConfig["dyn"] = {};
+	for (const f of clear ?? []) {
+		enabled.add(f as UpdatableField);
+		ops[f as UpdatableField] = "clear";
+	}
+	for (const [f, dv] of Object.entries(dynamic ?? {})) {
+		enabled.add(f as UpdatableField);
+		ops[f as UpdatableField] = dv.source;
+		dyn[f as UpdatableField] = dv;
+	}
+	if (tags_mode && tags_mode !== "set") ops.tags = tags_mode;
+	if (assignees_mode && assignees_mode !== "set") {
+		ops.assignee_ids = assignees_mode;
+	}
+	if (isCreate) enabled.add("title");
+	return { fields, enabled, ops, dyn };
+}
+
+// The inverse of parseFieldConfig: the config to store for the rows the user
+// has added.
+function buildFieldConfig(
+	state: ParsedFieldConfig,
+	order: UpdatableField[],
+): TaskFieldUpdate {
+	const out: TaskFieldUpdate = {};
+	const clear: string[] = [];
+	const dynamic: Record<string, DynamicValue> = {};
+	for (const key of order) {
+		if (!state.enabled.has(key)) continue;
+		const op = state.ops[key] ?? "set";
+		if (op === "clear") {
+			clear.push(key);
+		} else if (op === "task" || op === "parent" || op === "now") {
+			const dv: DynamicValue = { source: op };
+			const d = state.dyn[key];
+			if (d?.field && d.field !== key && op !== "now") dv.field = d.field;
+			if (d?.offset_days) dv.offset_days = d.offset_days;
+			dynamic[key] = dv;
+		} else {
+			// biome-ignore lint/suspicious/noExplicitAny: TaskFieldUpdate values are heterogeneous per key
+			(out as any)[key] = state.fields[key];
+			if (key === "tags" && op !== "set") out.tags_mode = op;
+			if (key === "assignee_ids" && op !== "set") out.assignees_mode = op;
+		}
+	}
+	if (clear.length > 0) out.clear = clear;
+	if (Object.keys(dynamic).length > 0) out.dynamic = dynamic;
+	return out;
+}
+
+// True once a row has something to save: a value for a "set"/"add"/"remove"
+// row, or just the operation for clear / dynamic ones.
+function fieldRowComplete(state: ParsedFieldConfig, key: UpdatableField) {
+	const op = state.ops[key] ?? "set";
+	if (op !== "set" && op !== "add" && op !== "remove") return true;
+	const v = state.fields[key];
+	if (Array.isArray(v)) return v.length > 0;
+	return v !== undefined && v !== "";
+}
 const FIELD_UPDATE_ORDER: UpdatableField[] = [
 	"title",
 	"status_id",
@@ -267,8 +362,37 @@ const FIELD_UPDATE_ORDER: UpdatableField[] = [
 	"parent_task_id",
 	"start_date",
 	"due_date",
+	"description",
 	"custom_fields",
 ];
+
+// create_task offers every update_task field except parent_task_id (the new
+// task's parent is always the target).
+const CREATE_FIELD_ORDER: UpdatableField[] = FIELD_UPDATE_ORDER.filter(
+	(k) => k !== "parent_task_id",
+);
+
+// The description is stored as BlockNote JSON (one paragraph block per line);
+// the editor here is plain text, so convert both ways.
+function plainTextToBlocks(text: string): unknown[] | undefined {
+	if (text.trim() === "") return undefined;
+	return text.split("\n").map((line) => ({
+		type: "paragraph",
+		content: line ? [{ type: "text", text: line, styles: {} }] : [],
+	}));
+}
+
+function blocksToPlainText(blocks: unknown): string {
+	if (!Array.isArray(blocks)) return "";
+	return blocks
+		.map((b) => {
+			const content = (b as { content?: unknown }).content;
+			return Array.isArray(content)
+				? content.map((c) => (c as { text?: string }).text ?? "").join("")
+				: "";
+		})
+		.join("\n");
+}
 
 export function AutomationNodeConfigPanel({
 	node,
@@ -391,6 +515,8 @@ export function AutomationNodeConfigPanel({
 						onSave={onSave}
 						saving={saving}
 					/>
+				) : pluginConfigSchema ? (
+					<NodeNoConfigNotice />
 				) : (
 					<GenericConfigForm
 						config={node.config}
@@ -445,6 +571,8 @@ export function AutomationNodeConfigPanel({
 					onSave={onSave}
 					saving={saving}
 				/>
+			) : pluginConfigSchema ? (
+				<NodeNoConfigNotice />
 			) : (
 				<GenericConfigForm
 					config={node.config}
@@ -775,6 +903,19 @@ function PluginTriggerNoConfigNotice() {
 	);
 }
 
+// A plugin/Git condition or action that declares a configSchema with no
+// fields (Close/Reopen Pull Request, ...) has nothing to configure — say so
+// instead of offering the raw JSON editor, which is only for nodes that
+// declare no schema at all.
+function NodeNoConfigNotice() {
+	const { t } = useTranslation("projects");
+	return (
+		<p className="text-xs text-muted-foreground">
+			{t("automation.nodeConfig.noConfigNeeded")}
+		</p>
+	);
+}
+
 // GenericConfigForm is the fallback config editor for a plugin-contributed
 // condition or action node type that declares no configSchema (or one with
 // no properties): a raw JSON editor. Any plugin node with a real
@@ -957,6 +1098,7 @@ function TriggerConfigForm({
 	const { t } = useTranslation("projects");
 	const [statusId, setStatusId] = useState(config.status_id ?? "");
 	const [tag, setTag] = useState(config.tag ?? "");
+	const [watchedField, setWatchedField] = useState<string>(config.field ?? "");
 	const [offset, setOffset] = useState(
 		config.due_date_offset_minutes?.toString() ?? "0",
 	);
@@ -967,20 +1109,78 @@ function TriggerConfigForm({
 	const [cronExpression, setCronExpression] = useState(
 		config.cron_expression ?? "",
 	);
-	// Only predecessor_done still needs the full task list — for its watched-
-	// tasks multi-select. TargetTaskPicker (shared by predecessor_done, cron,
-	// and api_trigger) fetches its own paginated/searched list instead.
-	const { data: tasks = [] } = useQuery({
-		queryKey: ["projects", projectId, "tasks", "all-for-automation-picker"],
-		queryFn: () => fetchAllProjectTasks(projectId),
-		enabled: type === "predecessor_done",
+	// predecessor_done's watched tasks are added through TargetTaskPicker (a
+	// searched, paged list); only the already-watched ones are loaded, by id,
+	// to label their badges.
+	const watchedQueries = useQueries({
+		queries: watchedTaskIds.map((id) => ({
+			...taskQueryOptions(projectId, id),
+			enabled: type === "predecessor_done",
+		})),
 	});
 
-	if (type === "status_changed") {
+	if (type === "field_changed") {
 		return (
 			<div className="space-y-3">
 				<div className="space-y-1.5">
-					<Label>{t("automation.nodeConfig.trigger.statusLabel")}</Label>
+					<Label>{t("automation.nodeConfig.trigger.fieldLabel")}</Label>
+					<Select
+						value={watchedField}
+						onValueChange={(v) => setWatchedField(v ?? "")}
+						disabled={!canEdit}
+					>
+						<SelectTrigger className="w-full">
+							<SelectValue
+								placeholder={t(
+									"automation.nodeConfig.trigger.fieldPlaceholder",
+								)}
+							>
+								{watchedField
+									? t(
+											`automation.nodeConfig.trigger.changedFields.${watchedField as ChangedField}`,
+										)
+									: undefined}
+							</SelectValue>
+						</SelectTrigger>
+						<SelectContent>
+							{CHANGED_FIELDS.map((f) => (
+								<SelectItem key={f} value={f}>
+									{t(`automation.nodeConfig.trigger.changedFields.${f}`)}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					<p className="text-xs text-muted-foreground">
+						{t("automation.nodeConfig.trigger.fieldChangedHint")}
+					</p>
+				</div>
+				{canEdit && (
+					<SaveButton
+						saving={saving}
+						disabled={!watchedField}
+						onClick={() => onSave({ field: watchedField })}
+					/>
+				)}
+			</div>
+		);
+	}
+
+	if (type === "status_changed" || type === "child_changed") {
+		return (
+			<div className="space-y-3">
+				{type === "child_changed" && (
+					<p className="text-xs text-muted-foreground">
+						{t("automation.nodeConfig.trigger.childChangedHint")}
+					</p>
+				)}
+				<div className="space-y-1.5">
+					<Label>
+						{t(
+							type === "child_changed"
+								? "automation.nodeConfig.trigger.childStatusLabel"
+								: "automation.nodeConfig.trigger.statusLabel",
+						)}
+					</Label>
 					<Select
 						value={statusId || "__any__"}
 						onValueChange={(v) => setStatusId(!v || v === "__any__" ? "" : v)}
@@ -1065,12 +1265,9 @@ function TriggerConfigForm({
 	}
 
 	if (type === "predecessor_done") {
-		const watchedTasks = watchedTaskIds
-			.map((id) => tasks.find((t) => t.id === id))
+		const watchedTasks = watchedQueries
+			.map((q) => q.data)
 			.filter((t): t is Task => t != null);
-		const availableToWatch = tasks.filter(
-			(t) => !watchedTaskIds.includes(t.id),
-		);
 		return (
 			<div className="space-y-3">
 				<div className="space-y-1.5">
@@ -1088,27 +1285,19 @@ function TriggerConfigForm({
 				<div className="space-y-1.5">
 					<Label>{t("automation.nodeConfig.trigger.watchedTasksLabel")}</Label>
 					{canEdit && (
-						<Select
+						<TargetTaskPicker
+							projectId={projectId}
 							value=""
-							onValueChange={(v) => {
-								if (v) setWatchedTaskIds((prev) => [...prev, v]);
+							placeholder={t(
+								"automation.nodeConfig.trigger.addWatchedTaskPlaceholder",
+							)}
+							onChange={(id) => {
+								if (id && !watchedTaskIds.includes(id)) {
+									setWatchedTaskIds((prev) => [...prev, id]);
+								}
 							}}
-						>
-							<SelectTrigger className="w-full">
-								<SelectValue
-									placeholder={t(
-										"automation.nodeConfig.trigger.addWatchedTaskPlaceholder",
-									)}
-								/>
-							</SelectTrigger>
-							<SelectContent>
-								{availableToWatch.map((t) => (
-									<SelectItem key={t.id} value={t.id}>
-										{taskLabel(t)}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
+							canEdit={canEdit}
+						/>
 					)}
 					{watchedTasks.length > 0 && (
 						<div className="flex flex-wrap gap-1.5 pt-1">
@@ -1254,11 +1443,14 @@ function TargetTaskPicker({
 	value,
 	onChange,
 	canEdit,
+	placeholder,
 }: {
 	projectId: string;
 	value: string;
 	onChange: (value: string) => void;
 	canEdit: boolean;
+	/** Trigger text while nothing is selected; defaults to "Select a task". */
+	placeholder?: string;
 }) {
 	const { t } = useTranslation("projects");
 	const [open, setOpen] = useState(false);
@@ -1305,14 +1497,15 @@ function TargetTaskPicker({
 		<DropdownMenu open={open} onOpenChange={setOpen}>
 			<DropdownMenuTrigger
 				disabled={!canEdit}
-				className="flex h-8 w-full items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+				className="flex h-8 w-full items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
 			>
 				<span className="truncate text-left">
 					{selectedTask ? (
 						taskLabel(selectedTask)
 					) : (
 						<span className="text-muted-foreground">
-							{t("automation.nodeConfig.trigger.selectTaskPlaceholder")}
+							{placeholder ??
+								t("automation.nodeConfig.trigger.selectTaskPlaceholder")}
 						</span>
 					)}
 				</span>
@@ -1357,7 +1550,10 @@ function TargetTaskPicker({
 				>
 					{isSearching && searchLoading ? (
 						<div className="flex items-center justify-center py-4">
-							<Loader2 className="size-4 animate-spin text-muted-foreground/50" />
+							<Spinner
+								aria-hidden="true"
+								className="text-muted-foreground/50"
+							/>
 						</div>
 					) : (
 						<>
@@ -1380,7 +1576,7 @@ function TargetTaskPicker({
 					)}
 					{activePagination.isLoadingMore && (
 						<div className="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground/50">
-							<Loader2 className="size-3 animate-spin" />
+							<Spinner aria-hidden="true" className="size-3" />
 							{t("automation.nodeConfig.trigger.loadingMore")}
 						</div>
 					)}
@@ -1399,6 +1595,7 @@ const TASK_TARGET_KINDS: TaskTargetKind[] = [
 	"self",
 	"parent",
 	"children",
+	"siblings",
 	"blocks",
 	"is_blocked_by",
 	"relates_to",
@@ -1406,6 +1603,86 @@ const TASK_TARGET_KINDS: TaskTargetKind[] = [
 	"is_duplicated_by",
 	"other",
 ];
+
+// A date condition's value is either a fixed date (RFC 3339) or relative to
+// today: "now" or "now+3d" / "now-1d" (see ParseTimeValue in the Go domain).
+// Relative values let a rule mean "overdue" (due date is before today) or
+// "due within 3 days" without a hard-coded date.
+const RELATIVE_DATE = /^now([+-]\d+d)?$/;
+
+function DateConditionValue({
+	value,
+	onChange,
+	canEdit,
+}: {
+	value: string | undefined;
+	onChange: (value: string | undefined) => void;
+	canEdit: boolean;
+}) {
+	const { t } = useTranslation("projects");
+	const relative = typeof value === "string" && RELATIVE_DATE.test(value);
+	const days = relative
+		? Number.parseInt(value.slice(3, -1) || "0", 10) || 0
+		: 0;
+	return (
+		<div className="space-y-1.5">
+			<Select
+				value={relative ? "relative" : "fixed"}
+				onValueChange={(v) => onChange(v === "relative" ? "now" : undefined)}
+				disabled={!canEdit}
+			>
+				<SelectTrigger className="h-7 w-full text-xs">
+					<SelectValue>
+						{t(
+							relative
+								? "automation.nodeConfig.condition.dateMode.relative"
+								: "automation.nodeConfig.condition.dateMode.fixed",
+						)}
+					</SelectValue>
+				</SelectTrigger>
+				<SelectContent>
+					<SelectItem value="fixed">
+						{t("automation.nodeConfig.condition.dateMode.fixed")}
+					</SelectItem>
+					<SelectItem value="relative">
+						{t("automation.nodeConfig.condition.dateMode.relative")}
+					</SelectItem>
+				</SelectContent>
+			</Select>
+			{relative ? (
+				<div className="space-y-1">
+					<Input
+						type="number"
+						step={1}
+						value={days}
+						onChange={(e) => {
+							const n = Math.trunc(Number(e.target.value) || 0);
+							onChange(
+								n === 0 ? "now" : `now${n > 0 ? "+" : "-"}${Math.abs(n)}d`,
+							);
+						}}
+						disabled={!canEdit}
+						className="h-7 text-xs"
+					/>
+					<p className="text-[11px] text-muted-foreground">
+						{t("automation.nodeConfig.condition.relativeHint")}
+					</p>
+				</div>
+			) : (
+				<Input
+					type="date"
+					value={toDateInputValue(value)}
+					onChange={(e) => onChange(fromDateInputValue(e.target.value))}
+					disabled={!canEdit}
+					className="h-7 text-xs"
+				/>
+			)}
+		</div>
+	);
+}
+
+// The target kinds that resolve to exactly one task (link_task's "link to").
+const SINGLE_TASK_TARGET_KINDS: TaskTargetKind[] = ["self", "parent", "other"];
 
 // TaskTargetSelector is the shared "applies to" picker for both a
 // condition leaf and an action — every action except call_api, and every
@@ -1416,11 +1693,14 @@ function TaskTargetSelector({
 	target,
 	onChange,
 	canEdit,
+	kinds = TASK_TARGET_KINDS,
 }: {
 	projectId: string;
 	target: TaskTarget | undefined;
 	onChange: (target: TaskTarget | undefined) => void;
 	canEdit: boolean;
+	/** Restrict the choices (default: every kind). */
+	kinds?: TaskTargetKind[];
 }) {
 	const { t } = useTranslation("projects");
 	const kind = target?.kind ?? "self";
@@ -1441,7 +1721,7 @@ function TaskTargetSelector({
 					</SelectValue>
 				</SelectTrigger>
 				<SelectContent>
-					{TASK_TARGET_KINDS.map((k) => (
+					{kinds.map((k) => (
 						<SelectItem key={k} value={k}>
 							{t(`automation.nodeConfig.target.kinds.${k}`)}
 						</SelectItem>
@@ -1502,7 +1782,7 @@ function MatchModeSelector({
 // WebhookTokenSection generates/regenerates an api_trigger node's webhook
 // secret. The raw token is shown exactly once (right after generation) and
 // never fetched back afterward — mirrors the "show once" pattern used for
-// user API keys (apps/web/src/routes/_authenticated/profile/api-keys.tsx).
+// user API keys (apps/web/src/routes/_authenticated/account/api-keys.tsx).
 function WebhookTokenSection({
 	projectId,
 	automationId,
@@ -1540,13 +1820,8 @@ function WebhookTokenSection({
 	}
 
 	async function handleCopy(value: string, which: "token" | "url") {
-		try {
-			await navigator.clipboard.writeText(value);
-			setCopied(which);
-		} catch {
-			// Clipboard access can fail (permissions, insecure context); the
-			// user can still select-and-copy the visible text manually.
-		}
+		// On failure the user can still select-and-copy the visible text.
+		if (await copyToClipboard(value)) setCopied(which);
 	}
 
 	return (
@@ -1567,7 +1842,7 @@ function WebhookTokenSection({
 					</Button>
 				</div>
 				{copied === "url" && (
-					<p className="text-xs text-green-600">
+					<p className="text-xs text-success">
 						{t("automation.nodeConfig.trigger.copied")}
 					</p>
 				)}
@@ -1591,7 +1866,7 @@ function WebhookTokenSection({
 							</Button>
 						</div>
 						{copied === "token" && (
-							<p className="text-xs text-green-600">
+							<p className="text-xs text-success">
 								{t("automation.nodeConfig.trigger.copied")}
 							</p>
 						)}
@@ -1652,10 +1927,6 @@ function ConditionConfigForm({
 	const [branches, setBranches] = useState<ConditionBranch[]>(
 		config.branches ?? [],
 	);
-	const { data: sprints } = useQuery({
-		...sprintsQueryOptions(projectId),
-		enabled: !!projectId,
-	});
 
 	useEffect(() => {
 		setBranches(config.branches ?? []);
@@ -1738,9 +2009,13 @@ function ConditionConfigForm({
 								onValueChange={(v) => {
 									if (!v) return;
 									const f = v as ConditionField;
+									// The old value belongs to the old field (a status id is
+									// not a task type id), so clear it along with field_key.
 									updateLeaf(i, {
 										field: f,
 										operator: (OPERATORS_BY_FIELD[f] ?? [])[0],
+										value: undefined,
+										field_key: undefined,
 									});
 								}}
 								disabled={!canEdit}
@@ -1855,26 +2130,14 @@ function ConditionConfigForm({
 									placeholder={t("automation.nodeConfig.condition.value")}
 								/>
 							) : field === "sprint_id" ? (
-								<Select
+								<SprintSelect
+									projectId={projectId}
 									value={(leaf?.value as string) ?? ""}
-									onValueChange={(v) => updateLeaf(i, { value: v ?? "" })}
+									onChange={(v) => updateLeaf(i, { value: v })}
 									disabled={!canEdit}
-								>
-									<SelectTrigger className="h-7 w-full text-xs">
-										<SelectValue
-											placeholder={t("automation.nodeConfig.condition.value")}
-										>
-											{(sprints ?? []).find((s) => s.id === leaf?.value)?.name}
-										</SelectValue>
-									</SelectTrigger>
-									<SelectContent>
-										{(sprints ?? []).map((s) => (
-											<SelectItem key={s.id} value={s.id}>
-												{s.name}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
+									placeholder={t("automation.nodeConfig.condition.value")}
+									className="h-7 text-xs"
+								/>
 							) : field === "parent_task_id" ? (
 								<TargetTaskPicker
 									projectId={projectId}
@@ -1886,14 +2149,10 @@ function ConditionConfigForm({
 								field === "due_date" ||
 								field === "sprint_start_date" ||
 								field === "sprint_end_date" ? (
-								<Input
-									type="date"
-									value={toDateInputValue(leaf?.value as string)}
-									onChange={(e) =>
-										updateLeaf(i, { value: fromDateInputValue(e.target.value) })
-									}
-									disabled={!canEdit}
-									className="h-7 text-xs"
+								<DateConditionValue
+									value={leaf?.value as string | undefined}
+									onChange={(v) => updateLeaf(i, { value: v })}
+									canEdit={canEdit}
 								/>
 							) : field === "sprint_status" ? (
 								<Select
@@ -1918,11 +2177,19 @@ function ConditionConfigForm({
 										</SelectItem>
 									</SelectContent>
 								</Select>
-							) : field === "story_points" ? (
+							) : field === "story_points" || field === "child_count" ? (
 								<Input
 									type="number"
-									value={(leaf?.value as string) ?? ""}
-									onChange={(e) => updateLeaf(i, { value: e.target.value })}
+									min={field === "child_count" ? 0 : undefined}
+									value={(leaf?.value as string | number | undefined) ?? ""}
+									onChange={(e) =>
+										updateLeaf(i, {
+											value:
+												e.target.value === ""
+													? undefined
+													: Number(e.target.value),
+										})
+									}
 									placeholder={t("automation.nodeConfig.condition.value")}
 									disabled={!canEdit}
 									className="h-7 text-xs"
@@ -2377,31 +2644,62 @@ function ActionConfigForm({
 
 	// update_task's fields, each independently enabled — an unset field is
 	// left untouched on the task; only enabled fields are sent.
-	const initialFields = config.update ?? {};
+	const isCreate = type === "create_task";
 	const [memberId, setMemberId] = useState(config.member_id ?? "");
-	const [enabled, setEnabled] = useState<Set<keyof TaskFieldUpdate>>(
-		() => new Set(Object.keys(initialFields) as (keyof TaskFieldUpdate)[]),
+	const [rows, setRows] = useState<ParsedFieldConfig>(() =>
+		parseFieldConfig(config.update ?? config.create, isCreate),
 	);
-	const [fields, setFields] = useState<TaskFieldUpdate>(initialFields);
-	const { data: sprints } = useQuery({
-		...sprintsQueryOptions(projectId),
-		enabled: !!projectId,
-	});
+	const fields = rows.fields;
+	const enabled = rows.enabled;
+	const fieldOrder = isCreate ? CREATE_FIELD_ORDER : FIELD_UPDATE_ORDER;
+	const [createLink, setCreateLink] = useState<string>(
+		config.create?.link ?? "",
+	);
+	const [commentText, setCommentText] = useState(config.comment?.text ?? "");
+	const [notifyRecipients, setNotifyRecipients] = useState<NotifyRecipient[]>(
+		config.notify?.recipients ?? [],
+	);
+	const [notifyMembers, setNotifyMembers] = useState<string[]>(
+		config.notify?.member_ids ?? [],
+	);
+	const [notifyMessage, setNotifyMessage] = useState(
+		config.notify?.message ?? "",
+	);
+	const [linkType, setLinkType] = useState<LinkType>(
+		config.link?.type ?? "relates_to",
+	);
+	const [linkTo, setLinkTo] = useState<TaskTarget>(
+		config.link?.to ?? { kind: "parent" },
+	);
 
-	function toggleField(key: keyof TaskFieldUpdate, on: boolean) {
-		setEnabled((prev) => {
-			const next = new Set(prev);
-			if (on) next.add(key);
-			else next.delete(key);
-			return next;
+	function toggleField(key: UpdatableField, on: boolean) {
+		setRows((prev) => {
+			const nextEnabled = new Set(prev.enabled);
+			if (on) nextEnabled.add(key);
+			else nextEnabled.delete(key);
+			return { ...prev, enabled: nextEnabled };
 		});
 	}
 
-	function setFieldValue<K extends keyof TaskFieldUpdate>(
+	function setFieldValue<K extends UpdatableField>(
 		key: K,
 		value: TaskFieldUpdate[K],
 	) {
-		setFields((prev) => ({ ...prev, [key]: value }));
+		setRows((prev) => ({ ...prev, fields: { ...prev.fields, [key]: value } }));
+	}
+
+	function setFieldOp(key: UpdatableField, op: FieldOp) {
+		setRows((prev) => ({ ...prev, ops: { ...prev.ops, [key]: op } }));
+	}
+
+	function setFieldDynamic(key: UpdatableField, patch: Partial<DynamicValue>) {
+		setRows((prev) => ({
+			...prev,
+			dyn: {
+				...prev.dyn,
+				[key]: { source: "task", ...prev.dyn[key], ...patch },
+			},
+		}));
 	}
 
 	if (type === "trigger_ai_agent") {
@@ -2446,6 +2744,200 @@ function ActionConfigForm({
 						saving={saving}
 						disabled={!memberId}
 						onClick={() => onSave({ member_id: memberId, message, target })}
+					/>
+				)}
+			</div>
+		);
+	}
+
+	if (type === "add_comment") {
+		return (
+			<div className="space-y-3">
+				<p className="text-xs text-muted-foreground">
+					{t("automation.nodeConfig.action.commentHint")}
+				</p>
+				<div className="space-y-1.5">
+					<Label htmlFor="automation-comment-text">
+						{t("automation.nodeConfig.action.commentTextLabel")}
+					</Label>
+					<Textarea
+						id="automation-comment-text"
+						value={commentText}
+						onChange={(e) => setCommentText(e.target.value)}
+						placeholder={t("automation.nodeConfig.action.commentPlaceholder")}
+						rows={4}
+						disabled={!canEdit}
+					/>
+					<p className="text-xs text-muted-foreground">
+						{t("automation.nodeConfig.action.variablesHint")}
+					</p>
+				</div>
+				<ActionTargetField
+					projectId={projectId}
+					target={target}
+					onChange={setTarget}
+					canEdit={canEdit}
+				/>
+				{canEdit && (
+					<SaveButton
+						saving={saving}
+						disabled={commentText.trim() === ""}
+						onClick={() => onSave({ comment: { text: commentText }, target })}
+					/>
+				)}
+			</div>
+		);
+	}
+
+	if (type === "notify") {
+		const recipientOptions: NotifyRecipient[] = [
+			"assignees",
+			"reporter",
+			"parent_assignees",
+		];
+		return (
+			<div className="space-y-3">
+				<p className="text-xs text-muted-foreground">
+					{t("automation.nodeConfig.action.notifyHint")}
+				</p>
+				<div className="space-y-1.5">
+					<Label>
+						{t("automation.nodeConfig.action.notifyRecipientsLabel")}
+					</Label>
+					<div className="space-y-1.5 rounded-lg border border-border/60 p-2.5">
+						{recipientOptions.map((r) => (
+							<div
+								key={r}
+								className="flex items-center justify-between gap-2 text-xs"
+							>
+								<Label
+									htmlFor={`notify-recipient-${r}`}
+									className="text-xs font-normal"
+								>
+									{t(`automation.nodeConfig.action.notifyRecipients.${r}`)}
+								</Label>
+								<Switch
+									id={`notify-recipient-${r}`}
+									checked={notifyRecipients.includes(r)}
+									onCheckedChange={(on) =>
+										setNotifyRecipients((prev) =>
+											on ? [...prev, r] : prev.filter((x) => x !== r),
+										)
+									}
+									disabled={!canEdit}
+								/>
+							</div>
+						))}
+					</div>
+				</div>
+				<div className="space-y-1.5">
+					<Label>{t("automation.nodeConfig.action.notifyMembersLabel")}</Label>
+					<MemberListPicker
+						projectId={projectId}
+						value={notifyMembers}
+						onChange={setNotifyMembers}
+						canEdit={canEdit}
+					/>
+				</div>
+				<div className="space-y-1.5">
+					<Label htmlFor="automation-notify-message">
+						{t("automation.nodeConfig.action.notifyMessageLabel")}
+					</Label>
+					<Textarea
+						id="automation-notify-message"
+						value={notifyMessage}
+						onChange={(e) => setNotifyMessage(e.target.value)}
+						placeholder={t(
+							"automation.nodeConfig.action.notifyMessagePlaceholder",
+						)}
+						rows={3}
+						disabled={!canEdit}
+					/>
+					<p className="text-xs text-muted-foreground">
+						{t("automation.nodeConfig.action.variablesHint")}
+					</p>
+				</div>
+				<ActionTargetField
+					projectId={projectId}
+					target={target}
+					onChange={setTarget}
+					canEdit={canEdit}
+				/>
+				{canEdit && (
+					<SaveButton
+						saving={saving}
+						disabled={
+							notifyMessage.trim() === "" ||
+							(notifyRecipients.length === 0 && notifyMembers.length === 0)
+						}
+						onClick={() =>
+							onSave({
+								notify: {
+									recipients: notifyRecipients,
+									member_ids: notifyMembers,
+									message: notifyMessage,
+								},
+								target,
+							})
+						}
+					/>
+				)}
+			</div>
+		);
+	}
+
+	if (type === "link_task") {
+		return (
+			<div className="space-y-3">
+				<p className="text-xs text-muted-foreground">
+					{t("automation.nodeConfig.action.linkHint")}
+				</p>
+				<ActionTargetField
+					projectId={projectId}
+					target={target}
+					onChange={setTarget}
+					canEdit={canEdit}
+				/>
+				<div className="space-y-1.5">
+					<Label>{t("automation.nodeConfig.action.linkTypeLabel")}</Label>
+					<Select
+						value={linkType}
+						onValueChange={(v) => v && setLinkType(v as LinkType)}
+						disabled={!canEdit}
+					>
+						<SelectTrigger className="w-full">
+							<SelectValue>
+								{t(`automation.nodeConfig.action.linkTypes.${linkType}`)}
+							</SelectValue>
+						</SelectTrigger>
+						<SelectContent>
+							{LINK_TYPES.map((lt) => (
+								<SelectItem key={lt} value={lt}>
+									{t(`automation.nodeConfig.action.linkTypes.${lt}`)}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+				<div className="space-y-1">
+					<Label className="text-[10px] text-muted-foreground">
+						{t("automation.nodeConfig.action.linkToLabel")}
+					</Label>
+					<TaskTargetSelector
+						projectId={projectId}
+						target={linkTo}
+						onChange={(v) => setLinkTo(v ?? { kind: "self" })}
+						canEdit={canEdit}
+						kinds={SINGLE_TASK_TARGET_KINDS}
+					/>
+				</div>
+				{canEdit && (
+					<SaveButton
+						saving={saving}
+						disabled={linkTo.kind === "other" && !linkTo.other_task_id}
+						onClick={() =>
+							onSave({ link: { type: linkType, to: linkTo }, target })
+						}
 					/>
 				)}
 			</div>
@@ -2611,31 +3103,13 @@ function ActionConfigForm({
 				</p>
 				<div className="space-y-1.5">
 					<Label>{t("automation.nodeConfig.action.moveToSprintLabel")}</Label>
-					<Select
-						value={moveToSprintId || "__backlog__"}
-						onValueChange={(v) =>
-							setMoveToSprintId(!v || v === "__backlog__" ? "" : v)
-						}
+					<SprintSelect
+						projectId={projectId}
+						value={moveToSprintId}
+						onChange={setMoveToSprintId}
 						disabled={!canEdit}
-					>
-						<SelectTrigger className="w-full">
-							<SelectValue>
-								{moveToSprintId
-									? (sprints ?? []).find((s) => s.id === moveToSprintId)?.name
-									: t("automation.nodeConfig.action.moveToSprintBacklog")}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="__backlog__">
-								{t("automation.nodeConfig.action.moveToSprintBacklog")}
-							</SelectItem>
-							{(sprints ?? []).map((s) => (
-								<SelectItem key={s.id} value={s.id}>
-									{s.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+						emptyLabel={t("automation.nodeConfig.action.moveToSprintBacklog")}
+					/>
 					<p className="text-xs text-muted-foreground">
 						{t("automation.nodeConfig.action.moveToSprintHint")}
 					</p>
@@ -2793,11 +3267,14 @@ function ActionConfigForm({
 	// via the trash icon. Fields never added here are left untouched on
 	// the task (see TaskFieldUpdate — unset ≠ cleared).
 	const selectedCustomFieldKeys = Object.keys(fields.custom_fields ?? {});
-	const addableFields = FIELD_UPDATE_ORDER.filter((k) => !enabled.has(k));
+	const addableFields = fieldOrder.filter((k) => !enabled.has(k));
 
 	function fieldLabel(key: UpdatableField): string {
 		if (key === "custom_fields") {
 			return t("automation.nodeConfig.action.customFieldsLabel");
+		}
+		if (key === "description") {
+			return t("automation.nodeConfig.action.descriptionLabel");
 		}
 		return t(`automation.nodeConfig.condition.fields.${key}`);
 	}
@@ -2809,8 +3286,25 @@ function ActionConfigForm({
 					<Input
 						value={fields.title ?? ""}
 						onChange={(e) => setFieldValue("title", e.target.value)}
+						placeholder={
+							isCreate
+								? t("automation.nodeConfig.action.createTitlePlaceholder")
+								: undefined
+						}
 						disabled={!canEdit}
 						className="h-7 text-xs"
+					/>
+				);
+			case "description":
+				return (
+					<Textarea
+						value={blocksToPlainText(fields.description)}
+						onChange={(e) =>
+							setFieldValue("description", plainTextToBlocks(e.target.value))
+						}
+						rows={4}
+						disabled={!canEdit}
+						className="text-xs"
 					/>
 				);
 			case "status_id":
@@ -2857,12 +3351,13 @@ function ActionConfigForm({
 				);
 			case "assignee_ids":
 				return (
-					<MemberSelect
+					<MemberListPicker
 						projectId={projectId}
-						value={fields.assignee_ids?.[0] ?? ""}
-						onChange={(v) => setFieldValue("assignee_ids", v ? [v] : undefined)}
-						disabled={!canEdit}
-						size="sm"
+						value={fields.assignee_ids ?? []}
+						onChange={(ids) =>
+							setFieldValue("assignee_ids", ids.length > 0 ? ids : undefined)
+						}
+						canEdit={canEdit}
 					/>
 				);
 			case "importance":
@@ -2944,24 +3439,13 @@ function ActionConfigForm({
 				);
 			case "sprint_id":
 				return (
-					<Select
+					<SprintSelect
+						projectId={projectId}
 						value={fields.sprint_id ?? ""}
-						onValueChange={(v) => setFieldValue("sprint_id", v ?? undefined)}
+						onChange={(v) => setFieldValue("sprint_id", v || undefined)}
 						disabled={!canEdit}
-					>
-						<SelectTrigger className="h-7 w-full text-xs">
-							<SelectValue>
-								{(sprints ?? []).find((s) => s.id === fields.sprint_id)?.name}
-							</SelectValue>
-						</SelectTrigger>
-						<SelectContent>
-							{(sprints ?? []).map((s) => (
-								<SelectItem key={s.id} value={s.id}>
-									{s.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+						className="h-7 text-xs"
+					/>
 				);
 			case "parent_task_id":
 				return (
@@ -3071,7 +3555,11 @@ function ActionConfigForm({
 	return (
 		<div className="space-y-3">
 			<p className="text-xs text-muted-foreground">
-				{t("automation.nodeConfig.action.updateTaskHint")}{" "}
+				{t(
+					isCreate
+						? "automation.nodeConfig.action.createTaskHint"
+						: "automation.nodeConfig.action.updateTaskHint",
+				)}{" "}
 				{t("automation.nodeConfig.action.variablesHint")}
 			</p>
 			{canEdit && addableFields.length > 0 && (
@@ -3096,38 +3584,120 @@ function ActionConfigForm({
 					</SelectContent>
 				</Select>
 			)}
-			{FIELD_UPDATE_ORDER.filter((key) => enabled.has(key)).map((key) => (
-				<DynamicFieldRow
-					key={key}
-					label={fieldLabel(key)}
-					onRemove={() => toggleField(key, false)}
-					canEdit={canEdit}
-				>
-					{renderFieldEditor(key)}
-				</DynamicFieldRow>
-			))}
-			<div className="space-y-1">
-				<Label className="text-[10px] text-muted-foreground">
-					{t("automation.nodeConfig.target.label")}
-				</Label>
-				<TaskTargetSelector
-					projectId={projectId}
-					target={target}
-					onChange={setTarget}
-					canEdit={canEdit}
-				/>
-			</div>
+			{fieldOrder
+				.filter((key) => enabled.has(key))
+				.map((key) => {
+					const op = rows.ops[key] ?? "set";
+					const available = fieldOpsFor(key, isCreate);
+					return (
+						<DynamicFieldRow
+							key={key}
+							label={fieldLabel(key)}
+							onRemove={() => toggleField(key, false)}
+							removable={!(isCreate && key === "title")}
+							canEdit={canEdit}
+							operation={
+								available.length > 1 ? (
+									<FieldOperationSelect
+										fieldKey={key}
+										value={op}
+										options={available}
+										onChange={(v) => setFieldOp(key, v)}
+										canEdit={canEdit}
+									/>
+								) : undefined
+							}
+						>
+							{op === "clear" ? (
+								<p className="text-xs text-muted-foreground">
+									{t("automation.nodeConfig.action.clearHint")}
+								</p>
+							) : op === "task" || op === "parent" || op === "now" ? (
+								<DynamicSourceEditor
+									fieldKey={key}
+									op={op}
+									value={rows.dyn[key]}
+									onChange={(patch) => setFieldDynamic(key, patch)}
+									canEdit={canEdit}
+								/>
+							) : (
+								renderFieldEditor(key)
+							)}
+						</DynamicFieldRow>
+					);
+				})}
+			{isCreate && (
+				<div className="space-y-1.5">
+					<Label className="text-xs">
+						{t("automation.nodeConfig.action.createLinkLabel")}
+					</Label>
+					<Select
+						value={createLink || "__none__"}
+						onValueChange={(v) =>
+							setCreateLink(!v || v === "__none__" ? "" : v)
+						}
+						disabled={!canEdit}
+					>
+						<SelectTrigger className="h-7 w-full text-xs">
+							<SelectValue>
+								{createLink
+									? t(
+											`automation.nodeConfig.action.linkTypes.${createLink as LinkType}`,
+										)
+									: t("automation.nodeConfig.action.createLinkNone")}
+							</SelectValue>
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="__none__">
+								{t("automation.nodeConfig.action.createLinkNone")}
+							</SelectItem>
+							{LINK_TYPES.map((lt) => (
+								<SelectItem key={lt} value={lt}>
+									{t(`automation.nodeConfig.action.linkTypes.${lt}`)}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+					<p className="text-xs text-muted-foreground">
+						{t("automation.nodeConfig.action.createLinkHint")}
+					</p>
+				</div>
+			)}
+			<ActionTargetField
+				projectId={projectId}
+				target={target}
+				onChange={setTarget}
+				canEdit={canEdit}
+				labelKey={
+					isCreate
+						? "automation.nodeConfig.action.createParentLabel"
+						: undefined
+				}
+			/>
 			{canEdit && (
 				<SaveButton
 					saving={saving}
-					disabled={enabled.size === 0}
+					disabled={
+						isCreate
+							? !(fields.title ?? "").trim()
+							: enabled.size === 0 ||
+								[...enabled].some((k) => !fieldRowComplete(rows, k))
+					}
 					onClick={() => {
-						const savedFields: TaskFieldUpdate = {};
-						for (const key of enabled) {
-							// biome-ignore lint/suspicious/noExplicitAny: TaskFieldUpdate values are heterogeneous per key
-							(savedFields as any)[key] = fields[key];
+						const built = buildFieldConfig(rows, fieldOrder);
+						if (isCreate) {
+							const { title: _title, ...rest } = built;
+							onSave({
+								create: {
+									...rest,
+									title: (fields.title ?? "").trim(),
+									link: createLink || undefined,
+								},
+								target,
+							});
+							return;
 						}
-						onSave({ update: savedFields, target });
+						onSave({ update: built, target });
 					}}
 				/>
 			)}
@@ -3143,11 +3713,16 @@ function ActionConfigForm({
 function DynamicFieldRow({
 	label,
 	onRemove,
+	removable = true,
+	operation,
 	canEdit,
 	children,
 }: {
 	label: string;
 	onRemove: () => void;
+	removable?: boolean;
+	/** The row's "how to apply" control, shown beside the label. */
+	operation?: React.ReactNode;
 	canEdit: boolean;
 	children: React.ReactNode;
 }) {
@@ -3155,7 +3730,8 @@ function DynamicFieldRow({
 		<div className="group space-y-1.5 rounded-lg border border-border/60 bg-muted/20 p-2.5 transition-colors hover:border-border">
 			<div className="flex items-center justify-between gap-2">
 				<Label className="text-xs font-medium">{label}</Label>
-				{canEdit && (
+				<div className="ml-auto flex items-center gap-1">{operation}</div>
+				{canEdit && removable && (
 					<button
 						type="button"
 						onClick={onRemove}
@@ -3166,6 +3742,218 @@ function DynamicFieldRow({
 				)}
 			</div>
 			{children}
+		</div>
+	);
+}
+
+// The small "how to apply" dropdown in a field row's header: set / add /
+// remove / clear / copy from the triggering task or its parent / today.
+function FieldOperationSelect({
+	fieldKey,
+	value,
+	options,
+	onChange,
+	canEdit,
+}: {
+	fieldKey: string;
+	value: FieldOp;
+	options: FieldOp[];
+	onChange: (op: FieldOp) => void;
+	canEdit: boolean;
+}) {
+	const { t } = useTranslation("projects");
+	const isList = fieldKey === "tags" || fieldKey === "assignee_ids";
+	const label = (op: FieldOp): string =>
+		t(
+			(op === "set" && isList
+				? "automation.nodeConfig.action.ops.replace"
+				: `automation.nodeConfig.action.ops.${op}`) as "automation.nodeConfig.action.ops.set",
+		);
+	return (
+		<Select
+			value={value}
+			onValueChange={(v) => v && onChange(v as FieldOp)}
+			disabled={!canEdit}
+		>
+			<SelectTrigger
+				aria-label={t("automation.nodeConfig.action.opsLabel")}
+				className="h-6 gap-1 border-0 bg-muted/60 px-2 text-[11px] shadow-none"
+			>
+				<SelectValue>{label(value)}</SelectValue>
+			</SelectTrigger>
+			<SelectContent align="end">
+				{options.map((op) => (
+					<SelectItem key={op} value={op}>
+						{label(op)}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
+	);
+}
+
+// The body of a field row whose value is computed when the automation runs:
+// which field of the source to copy (when more than one makes sense) and, for
+// dates, how many days to shift it.
+function DynamicSourceEditor({
+	fieldKey,
+	op,
+	value,
+	onChange,
+	canEdit,
+}: {
+	fieldKey: string;
+	op: "task" | "parent" | "now";
+	value: DynamicValue | undefined;
+	onChange: (patch: Partial<DynamicValue>) => void;
+	canEdit: boolean;
+}) {
+	const { t } = useTranslation("projects");
+	const sources = DYNAMIC_FIELD_SOURCES[fieldKey] ?? [fieldKey];
+	const isDate = fieldKey === "start_date" || fieldKey === "due_date";
+	const sourceField = value?.field ?? fieldKey;
+	return (
+		<div className="space-y-2">
+			{op !== "now" && sources.length > 1 && (
+				<div className="space-y-1">
+					<Label className="text-[10px] text-muted-foreground">
+						{t("automation.nodeConfig.action.dynamicFieldLabel")}
+					</Label>
+					<Select
+						value={sourceField}
+						onValueChange={(v) => v && onChange({ source: op, field: v })}
+						disabled={!canEdit}
+					>
+						<SelectTrigger className="h-7 w-full text-xs">
+							<SelectValue>
+								{t(
+									`automation.nodeConfig.condition.fields.${sourceField as ConditionField}`,
+								)}
+							</SelectValue>
+						</SelectTrigger>
+						<SelectContent>
+							{sources.map((f) => (
+								<SelectItem key={f} value={f}>
+									{t(
+										`automation.nodeConfig.condition.fields.${f as ConditionField}`,
+									)}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+			)}
+			{isDate && (
+				<div className="space-y-1">
+					<Label className="text-[10px] text-muted-foreground">
+						{t("automation.nodeConfig.action.offsetDaysLabel")}
+					</Label>
+					<Input
+						type="number"
+						step={1}
+						value={value?.offset_days ?? 0}
+						onChange={(e) =>
+							onChange({
+								source: op,
+								offset_days: Math.trunc(Number(e.target.value) || 0),
+							})
+						}
+						disabled={!canEdit}
+						className="h-7 text-xs"
+					/>
+					<p className="text-[11px] text-muted-foreground">
+						{t("automation.nodeConfig.action.offsetDaysHint")}
+					</p>
+				</div>
+			)}
+			<p className="text-[11px] text-muted-foreground">
+				{t(`automation.nodeConfig.action.dynamicHint.${op}`)}
+			</p>
+		</div>
+	);
+}
+
+// A list of project members with an "add" picker underneath — assignees of
+// update_task, extra recipients of notify.
+function MemberListPicker({
+	projectId,
+	value,
+	onChange,
+	canEdit,
+}: {
+	projectId: string;
+	value: string[];
+	onChange: (ids: string[]) => void;
+	canEdit: boolean;
+}) {
+	const { t } = useTranslation("projects");
+	const getMember = useMemberDirectory(projectId);
+	return (
+		<div className="space-y-1.5">
+			{value.length > 0 && (
+				<div className="flex flex-wrap gap-1">
+					{value.map((id) => {
+						const m = getMember(id);
+						return (
+							<Badge key={id} variant="secondary" className="gap-1 pr-1">
+								{m ? m.full_name || m.username : id.slice(0, 8)}
+								{canEdit && (
+									<button
+										type="button"
+										aria-label={t("automation.nodeConfig.action.removeMember")}
+										onClick={() => onChange(value.filter((x) => x !== id))}
+										className="rounded-sm p-0.5 hover:bg-destructive/10 hover:text-destructive"
+									>
+										<X className="size-3" />
+									</button>
+								)}
+							</Badge>
+						);
+					})}
+				</div>
+			)}
+			{canEdit && (
+				<MemberSelect
+					projectId={projectId}
+					value=""
+					onChange={(id) =>
+						id && !value.includes(id) && onChange([...value, id])
+					}
+					size="sm"
+					placeholder={t("automation.nodeConfig.action.addMember")}
+				/>
+			)}
+		</div>
+	);
+}
+
+// The "applies to" picker as a labelled form section — shared by the action
+// forms that retarget onto another task.
+function ActionTargetField({
+	projectId,
+	target,
+	onChange,
+	canEdit,
+	labelKey = "automation.nodeConfig.target.label",
+}: {
+	projectId: string;
+	target: TaskTarget | undefined;
+	onChange: (target: TaskTarget | undefined) => void;
+	canEdit: boolean;
+	labelKey?: string;
+}) {
+	const { t } = useTranslation("projects");
+	return (
+		<div className="space-y-1">
+			<Label className="text-[10px] text-muted-foreground">
+				{t(labelKey as "automation.nodeConfig.target.label")}
+			</Label>
+			<TaskTargetSelector
+				projectId={projectId}
+				target={target}
+				onChange={onChange}
+				canEdit={canEdit}
+			/>
 		</div>
 	);
 }

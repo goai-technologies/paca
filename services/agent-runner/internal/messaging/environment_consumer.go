@@ -25,17 +25,17 @@ const (
 	// environmentCommandReplyTTL bounds how long an orphaned reply key
 	// lingers (the caller already gave up, or crashed before popping) —
 	// comfortably longer than services/api's own BRPOP timeout
-	// (aiAgentProvisionHTTPTimeout, 5 minutes) so it never expires while a
+	// (aiAgentProvisionHTTPTimeout, 10 minutes) so it never expires while a
 	// caller might still be waiting, short enough not to leak keys under
 	// sustained load.
-	environmentCommandReplyTTL = 10 * time.Minute
+	environmentCommandReplyTTL = 15 * time.Minute
 	// environmentCommandOpTimeout bounds each dispatched command's own
 	// context — deliberately larger than services/api's paired BRPOP
 	// timeout so this service never self-cancels an in-flight SandboxMgr
 	// call at the exact moment the caller's own wait would already have
 	// given up. See EnvironmentCommandConsumer's own doc comment on why
 	// that context is independent of Run's.
-	environmentCommandOpTimeout = 6 * time.Minute
+	environmentCommandOpTimeout = 11 * time.Minute
 	// environmentCommandFinalizeTimeout bounds the RPush/Expire/XAck calls
 	// that finalize a command — independent of Run's ctx (see process's
 	// own doc comment), so these need their own short-lived timeout rather

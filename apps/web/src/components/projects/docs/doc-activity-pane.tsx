@@ -42,6 +42,42 @@ function getDocActivityChanges(content: unknown): DocActivityChange[] {
 	);
 }
 
+/** A write's note, client label and task, as stored next to its changes. */
+export type DocActivityNote = { note?: string; client?: string; task?: string };
+
+/** Returns the note, client label and task a doc.created / doc.updated entry
+ *  recorded, or null when it recorded none. */
+export function getDocActivityNote(
+	entry: Pick<DocActivity, "activity_type" | "content">,
+): DocActivityNote | null {
+	if (
+		entry.activity_type !== "doc.created" &&
+		entry.activity_type !== "doc.updated"
+	)
+		return null;
+	if (!isRecord(entry.content) || Array.isArray(entry.content)) return null;
+	const out: DocActivityNote = {};
+	for (const key of ["note", "client", "task"] as const) {
+		const value = entry.content[key];
+		if (typeof value === "string" && value.trim()) out[key] = value;
+	}
+	return out.note || out.client || out.task ? out : null;
+}
+
+export function DocActivityNoteLine({ note }: { note: DocActivityNote }) {
+	const meta = [note.task, note.client].filter(Boolean).join(" · ");
+	return (
+		<div className="pl-0.5 pb-0.5 text-xs">
+			{note.note && (
+				<p className="text-foreground/70 whitespace-pre-wrap break-words">
+					{note.note}
+				</p>
+			)}
+			{meta && <p className="text-muted-foreground/50 break-all">{meta}</p>}
+		</div>
+	);
+}
+
 // Exported (and narrowed to just the fields it needs) so the agent activity
 // feed tab can reuse the same doc-activity copy without duplicating it — see
 // apps/web/src/components/projects/agents/agent-activity-tab.tsx.
@@ -75,12 +111,16 @@ interface DocActivityPaneProps {
 	projectId: string;
 	docId: string;
 	canEdit?: boolean;
+	/** Whether a past version may be restored. False on a locked managed copy:
+	 *  the lock covers content and title, not comments. Defaults to `canEdit`. */
+	canRevert?: boolean;
 }
 
 export function DocActivityPane({
 	projectId,
 	docId,
 	canEdit = true,
+	canRevert = canEdit,
 }: DocActivityPaneProps) {
 	const { t } = useTranslation("projects");
 	const qc = useQueryClient();
@@ -171,10 +211,14 @@ export function DocActivityPane({
 					? (commentId) => deleteDocComment(projectId, docId, commentId)
 					: undefined
 			}
-			onRevert={canEdit ? handleRevert : undefined}
+			onRevert={canRevert ? handleRevert : undefined}
 			getDiffContent={getDiffContent}
-			isRevertable={canEdit ? isRevertable : undefined}
+			isRevertable={canRevert ? isRevertable : undefined}
 			describeActivity={(entry) => describeDocActivity(entry, t)}
+			describeActivityDetail={(entry) => {
+				const note = getDocActivityNote(entry);
+				return note ? <DocActivityNoteLine note={note} /> : null;
+			}}
 			getCommentBlocks={(content) => {
 				if (Array.isArray(content)) return content;
 				if (content && typeof content === "object" && !("length" in content)) {

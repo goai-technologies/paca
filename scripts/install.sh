@@ -64,6 +64,13 @@
 #                                  container; leave unset for bundled Postgres.
 #     POSTGRES_PASSWORD            Bundled Postgres only (default: auto-generated)
 #
+#   Cache / event streams
+#     REDIS_URL                    Setting this selects external Redis/Valkey
+#                                  and suppresses the bundled Valkey container.
+#                                  Unset/empty uses bundled Valkey.
+#     VALKEY_PASSWORD              URL-safe password of the bundled Valkey
+#                                  (default: auto-generated)
+#
 #   Database backups (bundled Postgres only; skipped for external DB)
 #     BACKUP_ENABLED               true/false                          (default: true)
 #     BACKUP_DIR                   (default: ./backups)
@@ -82,6 +89,7 @@
 #     PACA_HTTPS                   yes/no; ignored for localhost        (default: yes)
 #     GATEWAY_PORT                 Only used when serving plain HTTP    (default: 80)
 #     PUBLIC_URL                   Full public URL, no trailing slash   (default: derived from the above)
+#     GIT_WEBHOOK_PUBLIC_URL       Optional separate Git webhook origin  (default: PUBLIC_URL)
 #
 #   Web app
 #     PACA_WEB                     bundled/external                    (default: bundled)
@@ -571,6 +579,43 @@ else
     fi
 fi
 
+# ── Cache / event streams ─────────────────────────────────────────────────────
+
+heading "Cache / event streams"
+
+CACHE_DEFAULT_IDX=1
+[[ -n "${REDIS_URL:-}" ]] && CACHE_DEFAULT_IDX=2
+CACHE_CHOICE=""
+ask_choice CACHE_CHOICE "How should Paca connect to Redis/Valkey?" "$CACHE_DEFAULT_IDX" \
+    "Bundled Valkey container (recommended)" \
+    "External / managed Redis or Valkey (bring your own)"
+
+REDIS_URL_OVERRIDE=""
+if [[ "$CACHE_CHOICE" == *"External"* ]]; then
+    if [[ -n "${REDIS_URL:-}" ]]; then
+        REDIS_URL_OVERRIDE="$REDIS_URL"
+    else
+        ask_secret REDIS_URL_OVERRIDE "Redis/Valkey connection URL (redis:// or rediss://)"
+    fi
+    if [[ ! "$REDIS_URL_OVERRIDE" =~ ^rediss?://[^[:space:]]+$ ]]; then
+        die "External Redis/Valkey requires a non-empty redis:// or rediss:// REDIS_URL."
+    fi
+    info "External Redis/Valkey will be used."
+else
+    info "A bundled Valkey container will be started."
+fi
+# The saved .env is authoritative, including when the user keeps an existing
+# one. An exported installer input must not override that file in Compose.
+unset REDIS_URL
+
+# Single-quoted dotenv values preserve literal '$' in credentials. Escape
+# embedded single quotes using Compose's dotenv syntax, without evaluating it.
+REDIS_URL_ENV=""
+if [[ -n "$REDIS_URL_OVERRIDE" ]]; then
+    REDIS_URL_ESCAPED_QUOTE="\\'"
+    REDIS_URL_ENV="'${REDIS_URL_OVERRIDE//\'/$REDIS_URL_ESCAPED_QUOTE}'"
+fi
+
 # ── Object storage ────────────────────────────────────────────────────────────
 
 heading "Object storage"
@@ -721,6 +766,12 @@ yes_no INCLUDE_AGENT_RUNNER "Include the Agent Runner service?" "${PACA_AGENT_RU
 
 SCALE_AGENT_RUNNER=""
 INTERNAL_API_KEY="${INTERNAL_API_KEY:-$(rand_hex 32)}"
+# Bundled Valkey's requirepass. Always set (also when external Valkey is used)
+# because the compose file requires the variable. It is embedded in the default
+# REDIS_URL, so a preset value must be URL-safe.
+VALKEY_PASSWORD="${VALKEY_PASSWORD:-$(rand_hex 32)}"
+[[ "$VALKEY_PASSWORD" =~ ^[A-Za-z0-9._~-]+$ ]] \
+    || die "VALKEY_PASSWORD must be non-empty and URL-safe (letters, digits, . _ ~ -)."
 
 if [[ "$INCLUDE_AGENT_RUNNER" == "no" ]]; then
     SCALE_AGENT_RUNNER="--scale agent-runner=0"
@@ -796,6 +847,13 @@ else
     KEEP_ENV="no"
 fi
 
+if [[ "$KEEP_ENV" == "yes" && -z "$(get_env_var .env VALKEY_PASSWORD)" ]]; then
+    # .env predates the password-protected Valkey: add one, otherwise
+    # `docker compose up` refuses to start.
+    printf '\nVALKEY_PASSWORD=%s\n' "$VALKEY_PASSWORD" >>.env
+    info "Added VALKEY_PASSWORD to the kept .env (bundled Valkey now requires a password)."
+fi
+
 if [[ "$KEEP_ENV" == "no" ]]; then
     JWT_SECRET="${JWT_SECRET:-$(rand_hex 32)}"
 
@@ -823,6 +881,10 @@ SITE_ADDRESS=${SITE_ADDRESS}
 
 # ── Public URL ────────────────────────────────────────────────────────────────
 PUBLIC_URL=${PUBLIC_URL}
+
+# Origin Git providers deliver webhooks to, when it differs from PUBLIC_URL.
+# Empty uses PUBLIC_URL.
+GIT_WEBHOOK_PUBLIC_URL=${GIT_WEBHOOK_PUBLIC_URL:-}
 
 # ── Admin credentials ────────────────────────────────────────────────────────
 ADMIN_USERNAME=${ADMIN_USERNAME}
@@ -854,8 +916,10 @@ BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS}
 # TZ=America/New_York
 
 # ── Cache (Valkey) ────────────────────────────────────────────────────────────
+# Password for the bundled Valkey container (requirepass).
+VALKEY_PASSWORD=${VALKEY_PASSWORD}
 # Leave blank to use the bundled Valkey container.
-REDIS_URL=
+REDIS_URL=${REDIS_URL_ENV}
 
 # ── Object storage ────────────────────────────────────────────────────────────
 STORAGE_PROVIDER=${STORAGE_PROVIDER}
@@ -899,6 +963,14 @@ EOF
     info ".env written."
 fi
 
+# Read the effective file after the keep-existing-.env decision, not the
+# installer's tentative choice. Empty quoted values also mean bundled Valkey.
+SCALE_VALKEY=""
+case "$(get_env_var .env REDIS_URL)" in
+    ""|"''"|'""') ;;
+    *) SCALE_VALKEY="--scale valkey=0" ;;
+esac
+
 # ── Confirm and start ─────────────────────────────────────────────────────────
 
 heading "Summary"
@@ -909,6 +981,7 @@ echo -e "  ${BOLD}Version     ${RESET}${PACA_VERSION}"
 echo -e "  ${BOLD}Public URL  ${RESET}${PUBLIC_URL}"
 echo -e "  ${BOLD}HTTPS       ${RESET}$( [[ "$USE_HTTPS" == "yes" ]] && echo "Enabled (${SITE_ADDRESS})" || echo "Disabled (plain HTTP)" )"
 echo -e "  ${BOLD}Database    ${RESET}$( [[ -n "$SCALE_POSTGRES" ]] && echo "External PostgreSQL" || echo "Bundled PostgreSQL container" )"
+echo -e "  ${BOLD}Cache       ${RESET}$( [[ -n "$SCALE_VALKEY" ]] && echo "External Redis/Valkey" || echo "Bundled Valkey container" )"
 echo -e "  ${BOLD}Backups     ${RESET}$( [[ -n "$SCALE_DB_BACKUP" ]] && echo "Disabled" || echo "'${BACKUP_CRON}' UTC → ${BACKUP_DIR} (kept ${BACKUP_RETENTION_DAYS}d)" )"
 echo -e "  ${BOLD}Storage     ${RESET}$( [[ "$STORAGE_PROVIDER" == "s3" ]] && echo "AWS S3 (${STORAGE_BUCKET})" || echo "Self-hosted RustFS" )"
 echo -e "  ${BOLD}Web app     ${RESET}$( [[ -n "$SCALE_WEB" ]] && echo "External / CDN (container skipped)" || echo "Bundled container" )"
@@ -924,7 +997,7 @@ if [[ "$START" != "yes" ]]; then
     warn "Installation files are ready. Start Paca manually with:"
     echo ""
     bold "  cd $(pwd)"
-    bold "  ${COMPOSE_CMD} --env-file .env up -d ${SCALE_POSTGRES} ${SCALE_DB_BACKUP} ${SCALE_RUSTFS} ${SCALE_WEB} ${SCALE_AGENT_RUNNER} --pull always"
+    bold "  ${COMPOSE_CMD} --env-file .env up -d ${SCALE_POSTGRES} ${SCALE_VALKEY} ${SCALE_DB_BACKUP} ${SCALE_RUSTFS} ${SCALE_WEB} ${SCALE_AGENT_RUNNER} --pull always"
     echo ""
     exit 0
 fi
@@ -964,6 +1037,8 @@ SCALE_OPTS=()
 # intentional word-splitting as the compose invocation below.
 # shellcheck disable=SC2206
 [[ -n "$SCALE_POSTGRES"  ]] && SCALE_OPTS+=($SCALE_POSTGRES)
+# shellcheck disable=SC2206
+[[ -n "$SCALE_VALKEY"    ]] && SCALE_OPTS+=($SCALE_VALKEY)
 # shellcheck disable=SC2206
 [[ -n "$SCALE_DB_BACKUP" ]] && SCALE_OPTS+=($SCALE_DB_BACKUP)
 # shellcheck disable=SC2206

@@ -45,6 +45,7 @@ them.
 | Key | Description | Default |
 |---|---|---|
 | `publicUrl` | Externally reachable base URL for this deployment (e.g. `https://paca.example.com`). Leave empty for a ClusterIP/NodePort-only deployment. | `""` |
+| `gitWebhookPublicUrl` | Optional separate origin for Git webhooks (e.g. `https://paca-hooks.example.com`). Route it to the API separately; the bundled gateway and ingress serve only their configured host. | `""` (use `publicUrl`) |
 | `imagePullSecrets` | Image pull secrets applied to every Pod this chart creates | `[]` |
 
 ### Secrets
@@ -59,6 +60,7 @@ Generate strong values yourself, e.g. `openssl rand -hex 32`.
 | `secrets.encryptionKey` | 64-char hex string encrypting plugin secrets and (when `agentRunner.enabled`) LLM API keys at rest | `""` |
 | `secrets.internalApiKey` | Pre-shared key authenticating `api` <-> `agent-runner`'s internal routes (only required when `agentRunner.enabled`) | `""` |
 | `secrets.postgresPassword` | PostgreSQL password | `""` |
+| `secrets.valkeyPassword` | Bundled Valkey password (required when `valkey.enabled`; with `existingSecret` use the `VALKEY_PASSWORD` key and a password-bearing `REDIS_URL`; URL-safe characters recommended; changing it rolls the Valkey, api, realtime and agent-runner pods, except with `existingSecret`, where you restart them yourself) | `""` |
 | `secrets.storageAccessKeyId` | External S3 access key ID — only used when `rustfs.enabled: false`; the bundled RustFS uses `rustfs.secret.rustfs.access_key` instead | `""` |
 | `secrets.storageSecretAccessKey` | External S3 secret access key — same condition as above | `""` |
 
@@ -140,6 +142,7 @@ added.
 | `api.admin.username` | | `admin` |
 | `api.jwt.accessTtl` / `.refreshTtl` / `.refreshSessionTtl` | | `15m` / `168h` / `24h` |
 | `api.cookieSecure` | Set `false` only when TLS isn't terminated anywhere in front of this deployment — otherwise browsers silently drop the auth cookie and login never sticks | `true` |
+| `api.plugins.store` | Where installed plugins live: `local` (the volume below, shared by the api and gateway Pods) or `s3` (the `storage` bucket under `plugins/`; no volume, no `ReadWriteMany` class, and the persistence rows below are ignored). Changing it does not move existing plugins — run `migrate-plugins` first (see `docs/plugins/backend-plugin-system.md`) | `local` |
 | `api.plugins.persistence.enabled` | Shared storage for installed plugins (backend WASM, frontend/MCP/skills bundles) — needs a `ReadWriteMany` StorageClass; set `false` to fall back to a per-Pod `emptyDir` (installed plugins then won't survive a restart or be visible to the gateway) | `true` |
 | `api.plugins.persistence.accessMode` / `.storageClassName` / `.size` | `.storageClassName` empty auto-falls back to `nfsProvisioner`'s StorageClass when that's enabled (see "NFS provisioner" above), else the cluster default | `ReadWriteMany` / `""` / `5Gi` |
 
@@ -156,7 +159,8 @@ added.
 
 | Key | Description | Default |
 |---|---|---|
-| `realtime.replicaCount` | | `1` |
+| `realtime.replicaCount` | More than `1` is refused unless `realtime.allowMultipleReplicas` is set | `1` |
+| `realtime.allowMultipleReplicas` | Allow `replicaCount > 1`. Live updates, the sync feed and collaborative editing work across replicas (a document has one owner replica, found through Valkey). Socket.IO's polling fallback needs sticky sessions at the gateway. See [the realtime README](../../../services/realtime/README.md#running-more-than-one-replica) | `false` |
 | `realtime.image.repository` / `.tag` / `.pullPolicy` | | `ghcr.io/paca-ai/paca-realtime` / `latest` / `IfNotPresent` |
 | `realtime.resources` | Requests/limits for the realtime Pod | see `values.yaml` |
 | `realtime.logLevel` | | `info` |
@@ -177,6 +181,7 @@ added.
 | `agentRunner.sandbox.backend` | `kubernetes` (one Job per conversation) or `docker` (needs a mounted Docker socket — most managed clusters don't have one) | `kubernetes` |
 | `agentRunner.sandbox.image.repository` / `.tag` | | `ghcr.io/paca-ai/paca-agent-server-goose` / `latest` |
 | `agentRunner.sandbox.namespace` | Namespace sandbox Jobs/Pods run in. Empty defaults to this release's own namespace — see the deployment guide's RBAC section before changing this | `""` |
+| `agentRunner.sandbox.podReadyTimeout` | Positive Go duration for Kubernetes Pod-IP startup, including node provisioning (`SANDBOX_POD_READY_TIMEOUT`); separate from HTTP readiness | `5m` |
 | `agentRunner.sandbox.cpuLimit` / `.memoryLimit` | Requests == limits on every sandbox Pod's primary container | `2` / `4Gi` |
 | `agentRunner.sandbox.imagePullSecrets` | Needed when `sandbox.image` is pulled from a private registry | `[]` |
 
@@ -189,6 +194,7 @@ added.
 | `gateway.resources` | Requests/limits for the gateway Pod | see `values.yaml` |
 | `gateway.service.type` | `ClusterIP` (pair with `ingress.enabled`) or `LoadBalancer` (standalone, no ingress controller needed) | `ClusterIP` |
 | `gateway.service.port` | | `80` |
+| `gateway.autoHttps` | Caddy automatic HTTPS for `publicUrl`'s host when `ingress.enabled` is false. Set `false` to serve plain HTTP behind external TLS termination (Istio, Gateway API, tunnel) with no Ingress; `publicUrl` and `api.cookieSecure` are unchanged, so the external proxy must terminate TLS (cookies stay `Secure`) | `true` |
 
 ### Ingress (optional)
 
@@ -203,3 +209,23 @@ added.
 ## Source Code
 
 * <https://github.com/Paca-AI/paca>
+
+### Sandbox startup on autoscaled clusters
+
+The Kubernetes backend waits up to five minutes for a sandbox Pod IP so a new
+node can be provisioned when existing nodes lack capacity. Set
+`agentRunner.sandbox.podReadyTimeout` (for example `6m`) to adjust this budget;
+`60s` restores the previous wait. Invalid or non-positive durations fail runner
+startup. Docker is unaffected. The same budget applies to conversation Jobs and
+static environment Pods.
+
+Caller cancellation and earlier deadlines still win. Static environment commands
+have a separate ten-minute API reply deadline and an eleven-minute runner
+operation deadline. Leave room within those budgets for agent-server HTTP
+readiness (up to two minutes) and optional DinD readiness (up to 90 seconds).
+With DinD, those waits leave at most six minutes and 30 seconds for the Pod-IP
+wait before allowing for other work. Keep the setting below that ceiling: `6m`
+leaves 30 seconds for other startup work and reply delivery. Increasing the
+Pod-IP setting does not increase these outer deadlines. Deploy
+the updated API and agent-runner together to use the longer static-environment
+reply budget.

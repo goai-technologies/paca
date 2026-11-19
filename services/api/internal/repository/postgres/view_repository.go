@@ -312,7 +312,7 @@ type userViewConfigRecord struct {
 
 // GetUserViewConfigs returns the given user's personal config overrides for the
 // provided view IDs, keyed by view ID. Views without an override are omitted.
-func (r *ViewRepository) GetUserViewConfigs(ctx context.Context, userID uuid.UUID, viewIDs []uuid.UUID) (map[uuid.UUID]sprintdom.ViewConfig, error) {
+func (r *ViewRepository) GetUserViewConfigs(ctx context.Context, accountID uuid.UUID, viewIDs []uuid.UUID) (map[uuid.UUID]sprintdom.ViewConfig, error) {
 	out := make(map[uuid.UUID]sprintdom.ViewConfig, len(viewIDs))
 	if len(viewIDs) == 0 {
 		return out, nil
@@ -322,8 +322,8 @@ func (r *ViewRepository) GetUserViewConfigs(ctx context.Context, userID uuid.UUI
 		ids[i] = id.String()
 	}
 	query, args, err := sqlx.In(
-		`SELECT view_id, config FROM user_view_configs WHERE user_id = ? AND view_id IN (?)`,
-		userID.String(), ids,
+		`SELECT view_id, config FROM user_view_configs WHERE account_id = ? AND view_id IN (?)`,
+		accountID.String(), ids,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("view repo: build get user view configs: %w", err)
@@ -350,17 +350,17 @@ func (r *ViewRepository) GetUserViewConfigs(ctx context.Context, userID uuid.UUI
 }
 
 // UpsertUserViewConfig stores or replaces a user's personal config for a view.
-func (r *ViewRepository) UpsertUserViewConfig(ctx context.Context, viewID, userID uuid.UUID, cfg sprintdom.ViewConfig) error {
+func (r *ViewRepository) UpsertUserViewConfig(ctx context.Context, viewID, accountID uuid.UUID, cfg sprintdom.ViewConfig) error {
 	configBytes, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("view repo: marshal user view config: %w", err)
 	}
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO user_view_configs (view_id, user_id, config, created_at, updated_at)
+		INSERT INTO user_view_configs (view_id, account_id, config, created_at, updated_at)
 		VALUES ($1, $2, $3, NOW(), NOW())
-		ON CONFLICT (view_id, user_id) DO UPDATE
+		ON CONFLICT (view_id, account_id) DO UPDATE
 		  SET config = EXCLUDED.config, updated_at = NOW()`,
-		viewID.String(), userID.String(), configBytes,
+		viewID.String(), accountID.String(), configBytes,
 	)
 	if err != nil {
 		return fmt.Errorf("view repo: upsert user view config: %w", err)
@@ -369,10 +369,10 @@ func (r *ViewRepository) UpsertUserViewConfig(ctx context.Context, viewID, userI
 }
 
 // DeleteUserViewConfig removes a user's personal config for a view, if one exists.
-func (r *ViewRepository) DeleteUserViewConfig(ctx context.Context, viewID, userID uuid.UUID) error {
+func (r *ViewRepository) DeleteUserViewConfig(ctx context.Context, viewID, accountID uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM user_view_configs WHERE view_id = $1 AND user_id = $2`,
-		viewID.String(), userID.String(),
+		`DELETE FROM user_view_configs WHERE view_id = $1 AND account_id = $2`,
+		viewID.String(), accountID.String(),
 	)
 	if err != nil {
 		return fmt.Errorf("view repo: delete user view config: %w", err)

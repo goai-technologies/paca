@@ -1,8 +1,3 @@
-import {
-	type AppendMessage,
-	AssistantRuntimeProvider,
-	useExternalStoreRuntime,
-} from "@assistant-ui/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
@@ -11,16 +6,16 @@ import {
 	ExternalLink,
 	GitBranch,
 	GitPullRequest,
-	Loader2,
 	Square,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Thread } from "@/components/assistant-ui/thread";
+import { Thread } from "@/components/chat/thread";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import {
 	type AgentConversation,
@@ -54,11 +49,11 @@ import {
 	chatSessionAccessDeniedKey,
 	chatSessionApiErrorMessage,
 	eventsToThreadMessages,
-	extractTextOnlyContent,
 	isEnvironmentReady,
 } from "./conversation-to-thread-messages";
 import { LoadOlderEvents, TailFollowIndicator } from "./event-window-controls";
 import { useConversationEventWindow } from "./use-conversation-event-window";
+import { useOptimisticUserMessage } from "./use-optimistic-user-message";
 
 // ── Controls ──────────────────────────────────────────────────────────────────
 
@@ -95,6 +90,7 @@ function ConversationControls({
 	};
 
 	const stopMut = useMutation({
+		meta: { success: "stopped", subject: "conversation" },
 		mutationFn: async () => {
 			if (projectId) {
 				await stopConversation(projectId, conversation.id);
@@ -140,7 +136,7 @@ function ConversationControls({
 				disabled={stopMut.isPending}
 			>
 				{stopMut.isPending ? (
-					<Loader2 className="size-3 animate-spin" />
+					<Spinner aria-hidden="true" className="size-3" />
 				) : (
 					<Square className="size-3" />
 				)}
@@ -210,9 +206,9 @@ export function ConversationView({
 		isLoadingOlder,
 		loadOlder,
 		newBelow,
-		following,
 		setFollowing,
 		jumpToLatest,
+		jumpCount,
 	} = useConversationEventWindow({
 		projectId,
 		conversationId,
@@ -238,8 +234,17 @@ export function ConversationView({
 	// them at all; they're ready as soon as they're dispatched.
 	const environmentReady = isEnvironmentReady(isACP, events);
 
+	// Shows the sender's message and the "thinking" state immediately, rather
+	// than once the server has persisted the turn's user_message event.
+	const optimistic = useOptimisticUserMessage(
+		events,
+		conversationId,
+		conversation?.status === "queued",
+	);
 	const isRunning =
-		conversation?.status === "queued" || conversation?.status === "running";
+		optimistic.pending ||
+		conversation?.status === "queued" ||
+		conversation?.status === "running";
 	const isTerminal =
 		conversation?.status === "finished" ||
 		conversation?.status === "failed" ||
@@ -257,8 +262,8 @@ export function ConversationView({
 		useAgentBusyPrompt();
 
 	const messages = useMemo(
-		() => eventsToThreadMessages(events, isRunning),
-		[events, isRunning],
+		() => eventsToThreadMessages(optimistic.events, isRunning),
+		[optimistic.events, isRunning],
 	);
 
 	const invalidate = (id: string = conversationId) => {
@@ -277,19 +282,25 @@ export function ConversationView({
 		}
 	};
 
-	const onNew = async (message: AppendMessage) => {
+	const onNew = async (text: string) => {
 		if (!conversation) {
 			throw new Error(t("agents.conversationView.conversationEnded"));
-		}
-		const text = extractTextOnlyContent(message);
-		if (text === null) {
-			throw new Error(t("agents.conversationView.textOnlyMessage"));
 		}
 		// Snapshot now (not read again after any await) so a badge staged
 		// mid-send can't sneak into this message or get cleared under it.
 		const contextItems = useContextInjectionStore.getState().items;
 
 		setSendError(null);
+		optimistic.begin({ text, contextItems });
+		// While the busy dialog is open the message hasn't been sent yet.
+		const busyHooks = {
+			onAsk: optimistic.discard,
+			onResume: () => optimistic.begin({ text, contextItems }),
+		};
+		// Sending is the reader asking to see the reply: without this a reader
+		// who had scrolled up keeps `following` off, and everything that
+		// arrives afterwards (their own message included) is withheld.
+		jumpToLatest();
 		try {
 			if (!conversation.chat_session_id) {
 				// A conversation of a non-chat trigger type (task_assigned,
@@ -300,21 +311,23 @@ export function ConversationView({
 				// prompt as the chat-session branch below: the server enforces
 				// the exact same parallelism/folder capacity check on this
 				// resume path (see services/api's resumeConversationMessage).
-				await sendWithBusyPrompt((onBusy) =>
-					projectId
-						? sendConversationMessage(
-								projectId,
-								conversation.id,
-								text,
-								contextItems,
-								onBusy,
-							)
-						: sendGlobalConversationMessage(
-								conversation.id,
-								text,
-								contextItems,
-								onBusy,
-							),
+				await sendWithBusyPrompt(
+					(onBusy) =>
+						projectId
+							? sendConversationMessage(
+									projectId,
+									conversation.id,
+									text,
+									contextItems,
+									onBusy,
+								)
+							: sendGlobalConversationMessage(
+									conversation.id,
+									text,
+									contextItems,
+									onBusy,
+								),
+					busyHooks,
 				);
 				useContextInjectionStore.getState().clear();
 				invalidate();
@@ -322,18 +335,20 @@ export function ConversationView({
 			}
 
 			const chatSessionId = conversation.chat_session_id;
-			const result = await sendWithBusyPrompt((onBusy) =>
-				projectId
-					? sendChatMessage(projectId, conversation.agent_id, chatSessionId, {
-							message: text,
-							contextItems,
-							on_busy: onBusy,
-						})
-					: sendGlobalChatMessage(chatSessionId, {
-							message: text,
-							contextItems,
-							on_busy: onBusy,
-						}),
+			const result = await sendWithBusyPrompt(
+				(onBusy) =>
+					projectId
+						? sendChatMessage(projectId, conversation.agent_id, chatSessionId, {
+								message: text,
+								contextItems,
+								on_busy: onBusy,
+							})
+						: sendGlobalChatMessage(chatSessionId, {
+								message: text,
+								contextItems,
+								on_busy: onBusy,
+							}),
+				busyHooks,
 			);
 			useContextInjectionStore.getState().clear();
 			// The previous conversation may have already ended (explicitly
@@ -349,10 +364,12 @@ export function ConversationView({
 					).queryKey,
 					result,
 				);
+				optimistic.follow(result.id);
 				setConversationId(result.id);
 			}
 			invalidate(result.id);
 		} catch (err) {
+			optimistic.discard();
 			const key = chatSessionAccessDeniedKey(err);
 			if (key) {
 				setSendError(t(key));
@@ -378,15 +395,6 @@ export function ConversationView({
 		}
 		invalidate();
 	};
-
-	const runtime = useExternalStoreRuntime({
-		messages,
-		isRunning,
-		convertMessage: (m) => m,
-		onNew,
-		onCancel,
-		isDisabled: !canReply,
-	});
 
 	// Pings the agent-runner service every ~30s while this chat conversation is
 	// loaded, so its sandbox's idle timer never trips as long as this view
@@ -592,36 +600,36 @@ export function ConversationView({
 
 			{/* Thread */}
 			<div className="flex-1 min-h-0">
-				<AssistantRuntimeProvider runtime={runtime}>
-					<Thread
-						turnAnchor="bottom"
-						// A run starting must not pull a reader who is paging back
-						// through history.
-						scrollToBottomOnRunStart={false}
-						environmentReady={environmentReady}
-						viewportHeader={
-							<LoadOlderEvents
-								hasOlder={hasOlder}
-								isLoadingOlder={isLoadingOlder}
-								loadOlder={loadOlder}
+				<Thread
+					messages={messages}
+					isRunning={isRunning}
+					disabled={!canReply}
+					onSend={onNew}
+					onCancel={onCancel}
+					turnAnchor="bottom"
+					environmentReady={environmentReady}
+					viewportHeader={
+						<LoadOlderEvents
+							hasOlder={hasOlder}
+							isLoadingOlder={isLoadingOlder}
+							loadOlder={loadOlder}
+						/>
+					}
+					viewportOverlay={
+						<>
+							{conversation.error_message && (
+								<ConversationErrorBox message={conversation.error_message} />
+							)}
+							{sendError && <ConversationErrorBox message={sendError} />}
+							<TailFollowIndicator
+								newBelow={newBelow}
+								setFollowing={setFollowing}
+								jumpToLatest={jumpToLatest}
+								jumpCount={jumpCount}
 							/>
-						}
-						viewportOverlay={
-							<>
-								{conversation.error_message && (
-									<ConversationErrorBox message={conversation.error_message} />
-								)}
-								{sendError && <ConversationErrorBox message={sendError} />}
-								<TailFollowIndicator
-									newBelow={newBelow}
-									following={following}
-									setFollowing={setFollowing}
-									jumpToLatest={jumpToLatest}
-								/>
-							</>
-						}
-					/>
-				</AssistantRuntimeProvider>
+						</>
+					}
+				/>
 			</div>
 			{agentBusyDialog}
 		</div>

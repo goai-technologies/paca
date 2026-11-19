@@ -1,4 +1,4 @@
-import { infiniteQueryOptions } from "@tanstack/react-query";
+import { queryOptions } from "@tanstack/react-query";
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
 
@@ -32,10 +32,17 @@ export interface APIKeyPage {
 	total_count: number;
 }
 
-export async function listAPIKeys(cursor?: string): Promise<APIKeyPage> {
+export async function listAPIKeys(
+	opts: { page?: number; pageSize?: number } = {},
+): Promise<APIKeyPage> {
 	const { data } = await apiClient.instance.get<SuccessEnvelope<APIKeyPage>>(
 		"/users/me/api-keys",
-		{ params: { page_size: API_KEYS_PAGE_SIZE, cursor } },
+		{
+			params: {
+				page_size: opts.pageSize ?? API_KEYS_PAGE_SIZE,
+				page: opts.page,
+			},
+		},
 	);
 	return data.data;
 }
@@ -53,10 +60,12 @@ export async function revokeAPIKey(id: string): Promise<void> {
 	await apiClient.instance.delete(`/users/me/api-keys/${id}`);
 }
 
-export const apiKeysInfiniteQueryOptions = infiniteQueryOptions({
-	queryKey: ["api-keys"],
-	queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
-		listAPIKeys(pageParam),
-	initialPageParam: undefined as string | undefined,
-	getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
-});
+/** Key prefix of every cached API key query — invalidate it after a change. */
+export const apiKeysKey = ["api-keys"] as const;
+
+/** One numbered page of the signed-in user's API keys — backs the keys table. */
+export const apiKeysPageQueryOptions = (page: number, pageSize: number) =>
+	queryOptions({
+		queryKey: [...apiKeysKey, "page", page, pageSize] as const,
+		queryFn: () => listAPIKeys({ page, pageSize }),
+	});

@@ -3,8 +3,15 @@ import axios, {
 	type AxiosResponse,
 	type InternalAxiosRequestConfig,
 } from "axios";
-
 import { ApiErrorCode } from "./api-error";
+import { observeChangeHead, projectIdOfUrl } from "./change-heads";
+import {
+	CLIENT_OP_HEADER,
+	COLLAB_SOCKET_HEADER,
+	collabSocketId,
+	newClientOp,
+	rememberOwnOp,
+} from "./client-ops";
 
 const API_BASE_URL = window.location.origin;
 
@@ -39,6 +46,9 @@ export class ApiClient {
 	readonly instance: AxiosInstance;
 
 	private isRefreshing = false;
+	// The in-flight POST /auth/refresh, shared by every caller: the refresh
+	// token rotates, so two concurrent refreshes would invalidate each other.
+	private refreshPromise: Promise<void> | null = null;
 	private refreshSubscribers: Array<{
 		retry: () => void;
 		reject: (err: unknown) => void;
@@ -54,12 +64,42 @@ export class ApiClient {
 		});
 
 		this.instance.interceptors.request.use(
-			(config: InternalAxiosRequestConfig) => config,
+			(config: InternalAxiosRequestConfig) => {
+				// Stamp every mutation so the change it causes can be recognised as
+				// this tab's own when it comes back through the realtime feed. A
+				// retried request keeps the id it was given.
+				const method = (config.method ?? "get").toLowerCase();
+				if (method !== "get" && method !== "head" && method !== "options") {
+					if (!config.headers.has(CLIENT_OP_HEADER)) {
+						const id = newClientOp();
+						config.headers.set(CLIENT_OP_HEADER, id);
+						rememberOwnOp(id);
+					}
+					// Name this tab's realtime socket, so a live collaborative
+					// editor's own save is not merged back into its room.
+					const socketId = collabSocketId();
+					if (socketId && !config.headers.has(COLLAB_SOCKET_HEADER)) {
+						config.headers.set(COLLAB_SOCKET_HEADER, socketId);
+					}
+				}
+				return config;
+			},
 			(error) => Promise.reject(error),
 		);
 
 		this.instance.interceptors.response.use(
-			(response: AxiosResponse) => response,
+			(response: AxiosResponse) => {
+				// The change-log head the data was read at (see change-heads.ts).
+				const seq = response.headers?.["x-change-seq"];
+				const epoch = response.headers?.["x-change-epoch"];
+				if (seq !== undefined && epoch !== undefined) {
+					const projectId = projectIdOfUrl(response.config?.url);
+					if (projectId) {
+						observeChangeHead(projectId, Number(seq), Number(epoch));
+					}
+				}
+				return response;
+			},
 			async (error) => {
 				const originalRequest = error.config as InternalAxiosRequestConfig & {
 					_retry?: boolean;
@@ -87,6 +127,9 @@ export class ApiClient {
 				const url: string = originalRequest.url ?? "";
 				const isAuthEndpoint =
 					url.includes("/auth/login") ||
+					// Second-step and pre-login MFA calls answer 401 for a wrong code or
+					// password: that is the real result, with no session to refresh.
+					url.includes("/auth/mfa/") ||
 					url.includes("/auth/register") ||
 					url.includes("/auth/refresh");
 
@@ -114,7 +157,7 @@ export class ApiClient {
 				this.isRefreshing = true;
 
 				try {
-					await this.instance.post("/auth/refresh");
+					await this.refreshSession();
 					tokenRefreshedListeners.forEach((listener) => {
 						listener();
 					});
@@ -138,6 +181,22 @@ export class ApiClient {
 				}
 			},
 		);
+	}
+
+	/**
+	 * Refreshes the session cookie now, sharing one request with any refresh
+	 * already in flight. Unlike the 401 path it does not notify
+	 * `onTokenRefreshed` listeners: the caller (the realtime socket answering
+	 * the server's "reauth") reconnects itself.
+	 */
+	refreshSession(): Promise<void> {
+		this.refreshPromise ??= this.instance
+			.post("/auth/refresh")
+			.then(() => undefined)
+			.finally(() => {
+				this.refreshPromise = null;
+			});
+		return this.refreshPromise;
 	}
 }
 

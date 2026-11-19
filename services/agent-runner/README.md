@@ -153,7 +153,7 @@ golangci-lint run --timeout=5m
 - [`docs/ai-agent/agent-runner-service.md`](../../docs/ai-agent/agent-runner-service.md) — full
   architecture: Valkey stream protocol, conversation execution flow, Docker container strategy,
   skills/MCP server injection, pause/resume/stop/heartbeat semantics, HTTP surface.
-- [`docs/ai-agent/repository-plugin-adapter.md`](../../docs/ai-agent/repository-plugin-adapter.md) —
-  the short-lived VCS token fetch protocol `apps/mcp`'s repo tools use.
+- [`docs/ai-agent/git-agent-workflow.md`](../../docs/ai-agent/git-agent-workflow.md) —
+  how agents work with Git platforms: provider SPI, credentials, triggers, tools and workspace protocol.
 - [`docs/architecture/service-boundaries.md`](../../docs/architecture/service-boundaries.md) — where
   this service's responsibilities start and end relative to `services/api`.

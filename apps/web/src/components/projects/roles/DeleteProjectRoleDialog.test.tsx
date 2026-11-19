@@ -10,9 +10,7 @@ const { mockDeleteRole } = vi.hoisted(() => ({
 
 vi.mock("@/lib/role-api", () => ({
 	deleteRole: mockDeleteRole,
-	projectRolesQueryOptions: (projectId: string) => ({
-		queryKey: ["projects", projectId, "roles"],
-	}),
+	projectRolesKey: (projectId: string) => ["projects", projectId, "roles"],
 }));
 
 import type { Role } from "@/lib/role-api";

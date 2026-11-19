@@ -92,18 +92,23 @@ func (r *ProjectExportRepository) FindByID(ctx context.Context, id uuid.UUID) (*
 	return rec.toEntity()
 }
 
-// ListByProject returns the project's newest exports first.
-func (r *ProjectExportRepository) ListByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*exportdom.ProjectExport, error) {
+// ListByProject returns one page of the project's exports, newest first.
+func (r *ProjectExportRepository) ListByProject(ctx context.Context, projectID uuid.UUID, offset, limit int) ([]*exportdom.ProjectExport, int, error) {
+	var total int
+	if err := r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM project_exports WHERE project_id = $1`, projectID.String()); err != nil {
+		return nil, 0, fmt.Errorf("project export repo: count: %w", err)
+	}
 	var recs []projectExportRecord
 	err := r.db.SelectContext(ctx, &recs,
 		`SELECT `+projectExportColumns+` FROM project_exports
-		 WHERE project_id = $1 ORDER BY created_at DESC LIMIT $2`,
-		projectID.String(), limit,
+		 WHERE project_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
+		projectID.String(), limit, offset,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("project export repo: list: %w", err)
+		return nil, 0, fmt.Errorf("project export repo: list: %w", err)
 	}
-	return toExportEntities(recs)
+	exports, err := toExportEntities(recs)
+	return exports, total, err
 }
 
 // CreateIfIdle inserts the export unless the project already has an active one,

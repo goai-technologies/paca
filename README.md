@@ -6,11 +6,20 @@
 
 <p align="center"><strong>AI-native. Free. Lightweight. Open-source.<br/>The fully customizable alternative to Jira, Trello, ClickUp, and Monday.</strong></p>
 
+<p align="center"><strong>🌱 A non-profit, community-owned project — built by contributors, for everyone. Free forever, no paid tiers.</strong></p>
+
 <p align="center">
   <a href="https://github.com/Paca-AI/paca/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License" /></a>
+  <img src="https://img.shields.io/badge/non--profit-community%20project-2ea44f" alt="Non-profit community project" />
   <a href="https://github.com/Paca-AI/paca/releases"><img src="https://img.shields.io/github/v/release/Paca-AI/paca" alt="Latest Release" /></a>
   <a href="https://github.com/Paca-AI/paca/stargazers"><img src="https://img.shields.io/github/stars/Paca-AI/paca?style=social" alt="Stars" /></a>
   <a href="https://artifacthub.io/packages/helm/paca/paca"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/paca" alt="Artifact Hub" /></a>
+</p>
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/51675?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-51675" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/51675/daily?language=Go" alt="Paca-AI%2Fpaca | Trendshift" width="250" height="55"/></a>
+  &nbsp;&nbsp;
+  <a href="https://trendshift.io/repositories/51675?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-51675" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/51675/daily" alt="Paca-AI%2Fpaca | Trendshift" width="250" height="55"/></a>
 </p>
 
 <p align="center"><sub>✨ Sponsored by</sub></p>
@@ -45,7 +54,7 @@
 
 ## What is Paca?
 
-Paca is a **self-hosted project management platform** where AI agents and humans collaborate as equal teammates inside a Scrum team — not as chatbots bolted on the side.
+Paca is a **non-profit, community-driven** project: a **self-hosted project management platform** where AI agents and humans collaborate as equal teammates inside a Scrum team — not as chatbots bolted on the side.
 
 Jira gives you a backlog. ClickUp gives you automations. Monday gives you dashboards. **Paca gives your AI agents a seat at the table.** They join sprint planning, pick up tasks from the board, write BDD specs, and adapt alongside humans in real time.
 
@@ -60,10 +69,23 @@ Everything about Paca — its workflow, its data model, its UI — is **configur
 | **AI integration** | Chatbot add-ons, peripheral automation | AI agents as first-class Scrum teammates |
 | **Collaboration model** | Human-only by default | Human + AI, side by side on the same board |
 | **Hosting** | Vendor cloud (your data, their servers) | Self-hosted, you own everything |
-| **Cost** | $8–$20+ per seat/month | **Free forever** |
+| **Cost** | $8–$20+ per seat/month | **Free forever. Every feature, no paid tiers** |
 | **Customization** | Limited; locked behind enterprise tiers | **Fully open: configuration + plugins** |
 | **Weight** | Bloated feature sprawl | Lightweight core; extend only what you need |
 | **Source** | Closed / proprietary | **100% open-source (Apache 2.0)** |
+
+---
+
+## Our Promise: Free Forever, Owned by the Community
+
+Paca is, and will always be, **free and non-profit**.
+
+- **No paid tiers.** There will never be a "Pro", "Team", or "Enterprise" edition.
+- **No paywalled features.** Every feature — today and in the future — is available to everyone, at no cost.
+- **No open-core bait-and-switch.** We will not move existing features behind a paywall or a license change.
+- **Belongs to the community.** Paca is built by its contributors and for its users. It is not a vendor's product, and its direction is shaped in the open through issues, discussions, and pull requests.
+- **Not a business.** No company sells Paca and there is no paid edition. Sponsors help cover infrastructure costs; the project's direction stays with the community.
+- **Everyone is welcome to help.** Code, docs, translations, plugins, bug reports, and ideas all count. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -131,6 +153,29 @@ Plan  →  Act  →  Check  →  Adapt
 | **Act** | Sprint is live. Humans and AI agents pull tasks from the board, execute, and post updates. |
 | **Check** | QA agents run automated verification. Humans review AI output. The board reflects reality. |
 | **Adapt** | Data from the sprint informs the next cycle. The team — human and AI — retrospects together. |
+
+---
+
+## What's New in v0.21.0
+
+- **Real-time collaborative document editing** — several people (and agents) can edit the same document at once and see each other's changes live.
+- **Gantt view** — the Roadmap view is now a full Gantt chart with task links and zoom.
+- **Edit documents as files over MCP** — let Claude Code or any editor work on your project docs as local Markdown files, then push the edits back to Paca with conflict detection. See [`pull` and `push`](apps/mcp/README.md#command-line-pull-and-push).
+- **Analyst role and `/paca-analyst`** — talk a request or bug through with an agent and get draft tasks in a new **Refinement** status for a human to approve.
+- **Drag-and-drop docs** — move documents and folders around in the sidebar.
+- **SSO-only mode** — block password sign-in and restrict SSO access by IdP group or role.
+
+---
+
+## What's New in v0.20.0
+
+- **Git integration — agents that work on your pull requests** — connect a Git host and let AI agents work where your code lives. Mention an agent on a pull/merge request or issue, or hand it work, and it replies, pushes commits, reviews, and fixes CI, with every action attributed to a bot identity and bounded by least-privilege credentials. GitHub ships first, and the provider SPI lets a plugin add GitLab, Bitbucket, Gitea or Azure DevOps without touching the core.
+  - **Connections and linked repositories** — add any number of connections per host (a GitHub App, a bot user, or an access token), owned by the workspace or by a single project, then link repositories through them. Paca receives change-request, branch, comment, review and check events for linked repositories and routes them to the project.
+  - **Task references** — change requests and branches are tied to the tasks they mention, so a task shows its code changes alongside its activity.
+  - **Agent identities** — give an agent its own bot name, avatar and handle, or let it act through the connection its repository was linked with.
+  - **Permissions** — Git actions are governed by the same [roles and policies](docs/guides/roles-and-policies.md) as everything else.
+  - **Learn more** — see [Git agent workflow](docs/ai-agent/git-agent-workflow.md) for the full design.
+- **Multi-factor authentication** — require two-step verification for the whole workspace, with account lockout and a login throttle after repeated failed attempts. Admins can also restrict sign-in to IP allow-lists and reset an account's MFA from **Settings → Security**.
 
 ---
 
@@ -415,6 +460,7 @@ Run `/paca-setup` inside a Claude Code session for a guided interactive walkthro
 | Command | What it does |
 |:--|:--|
 | `/paca <request>` | General task, doc, and sprint operations in plain English |
+| `/paca-analyst <idea or bug>` | Talk a request or bug through and draft tasks in Refinement for a human to approve |
 | `/paca-epic <requirements>` | Turn requirements into an epic with child stories and a spec doc |
 | `/paca-clarify <task-or-doc>` | Identify ambiguities, ask questions, and update the spec in Paca |
 | `/paca-breakdown <task>` | Decompose a task into independent, estimable sub-tasks |
@@ -424,6 +470,13 @@ Run `/paca-setup` inside a Claude Code session for a guided interactive walkthro
 | `/paca-do <task>` | Execute a task, update its status, and keep docs current |
 | `/paca-test <task>` | Derive test cases, run them, and record results as a comment |
 | `/paca-doc <task-or-topic>` | Write or update documentation in Paca Docs |
+| `/paca-review <task>` | Review a task's pull request on spec and standards axes, read CI, submit a verdict |
+| `/paca-triage` | Triage unsorted tasks: type, duplicates, ready / needs info / decline |
+| `/paca-retro` | Sprint retrospective from the record, with improvements turned into tasks |
+| `/paca-feedback` | Turn page comments from the browser extension into tasks |
+| `/paca-board` | Audit and set up task types, statuses, custom fields and views |
+| `/paca-team` | See who can do what; add, re-role or remove project members |
+| `/paca-automation <goal>` | Design and build event-driven automations (trigger → condition → action) |
 | `/paca-setup` | Interactive MCP connection wizard |
 
 For full setup options and command reference, see [docs/guides/install-skills.md](docs/guides/install-skills.md).
@@ -473,6 +526,18 @@ But Paca is built from conviction: human-AI collaboration in a real Scrum team s
 | [deploy/README.md](deploy/README.md) | Full deployment reference |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 | [SECURITY.md](SECURITY.md) | Security policy |
+
+---
+
+## Contributors
+
+Thanks to everyone who has helped build Paca. 💛
+
+<a href="https://github.com/Paca-AI/paca/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Paca-AI/paca" alt="Paca contributors" />
+</a>
+
+Want to see your face here? Read [CONTRIBUTING.md](CONTRIBUTING.md) and open a pull request.
 
 ---
 

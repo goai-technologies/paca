@@ -52,13 +52,26 @@ export async function requestProjectExport(
 	return data.data;
 }
 
+/** One numbered page of a project's exports, newest first. */
+export interface ProjectExportPage {
+	items: ProjectExport[];
+	page: number;
+	page_size: number;
+	/** The project's exports across all pages. */
+	total_count: number;
+}
+
 export async function listProjectExports(
 	projectId: string,
-): Promise<ProjectExport[]> {
+	page = 1,
+	pageSize = 20,
+): Promise<ProjectExportPage> {
 	const { data } = await apiClient.instance.get<
-		SuccessEnvelope<{ items: ProjectExport[] }>
-	>(`/projects/${projectId}/exports`);
-	return data.data.items;
+		SuccessEnvelope<ProjectExportPage>
+	>(`/projects/${projectId}/exports`, {
+		params: { page, page_size: pageSize },
+	});
+	return data.data;
 }
 
 export async function getExportDownloadUrl(
@@ -76,12 +89,18 @@ export const projectExportsQueryKey = (projectId: string) =>
 
 // Polls only while something is queued or running, so an idle settings tab
 // makes no background requests.
-export const projectExportsQueryOptions = (projectId: string) =>
+export const projectExportsQueryOptions = (
+	projectId: string,
+	page = 1,
+	pageSize = 20,
+) =>
 	queryOptions({
-		queryKey: projectExportsQueryKey(projectId),
-		queryFn: () => listProjectExports(projectId),
+		queryKey: [...projectExportsQueryKey(projectId), page, pageSize] as const,
+		queryFn: () => listProjectExports(projectId, page, pageSize),
 		refetchInterval: (query) =>
-			query.state.data?.some(isExportActive) ? EXPORT_POLL_INTERVAL_MS : false,
+			query.state.data?.items.some(isExportActive)
+				? EXPORT_POLL_INTERVAL_MS
+				: false,
 	});
 
 /** Starts a browser download of a presigned URL (the response is an attachment). */

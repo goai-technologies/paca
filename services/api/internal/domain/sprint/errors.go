@@ -4,10 +4,15 @@ import "errors"
 
 // Sentinel domain errors for the sprint aggregate.
 var (
-	ErrSprintNotFound        = errors.New("sprint: not found")
+	ErrSprintNotFound = errors.New("sprint: not found")
+	// ErrVersionConflict means the sprint changed since the version the caller
+	// named in If-Match.
+	ErrVersionConflict       = errors.New("sprint: version conflict")
 	ErrSprintNameInvalid     = errors.New("sprint: name is empty or invalid")
 	ErrSprintStatusInvalid   = errors.New("sprint: invalid status value")
 	ErrSprintAlreadyComplete = errors.New("sprint: already completed")
+	// ErrInvalidCursor reports a malformed pagination cursor.
+	ErrInvalidCursor = errors.New("sprint: invalid cursor")
 
 	ErrViewNotFound             = errors.New("sprint view: not found")
 	ErrViewNameInvalid          = errors.New("sprint view: name is empty or invalid")

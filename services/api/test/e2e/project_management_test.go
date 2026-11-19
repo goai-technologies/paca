@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"testing"
 	"time"
 
@@ -257,10 +258,11 @@ func TestE2EProjectRoles_FullLifecycle(t *testing.T) {
 		assertStatus(t, resp, http.StatusOK)
 		var env2 envelope
 		decodeJSON(t, resp, &env2)
-		roles, ok := env2.Data.([]any)
+		page, ok := env2.Data.(map[string]any)
 		if !ok {
-			t.Fatalf("expected roles array, got %T", env2.Data)
+			t.Fatalf("expected roles page object, got %T", env2.Data)
 		}
+		roles, _ := page["items"].([]any)
 		names := map[string]bool{}
 		for _, r := range roles {
 			if m, ok := r.(map[string]any); ok {
@@ -414,14 +416,15 @@ func TestE2EProjectRoles_SystemRoleAndRevocation(t *testing.T) {
 func projectRoleIDByName(t *testing.T, env *e2eEnv, client *http.Client, token, projectID, roleName string) string {
 	t.Helper()
 	req := mustRequest(env.ctx, t, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%s/roles", env.base, projectID), nil)
+		fmt.Sprintf("%s/api/v1/projects/%s/roles?page_size=100&search=%s", env.base, projectID, url.QueryEscape(roleName)), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp := mustDo(t, client, req)
 	defer func() { _ = resp.Body.Close() }()
 	assertStatus(t, resp, http.StatusOK)
 	var env2 envelope
 	decodeJSON(t, resp, &env2)
-	roles, _ := env2.Data.([]any)
+	page, _ := env2.Data.(map[string]any)
+	roles, _ := page["items"].([]any)
 	for _, r := range roles {
 		role, _ := r.(map[string]any)
 		if role["name"] == roleName {
@@ -1088,8 +1091,8 @@ func TestE2EProjectCreation_DefaultTaskRecords(t *testing.T) {
 		decodeJSON(t, resp, &env2)
 		data := assertDataMap(t, env2)
 		items, _ := data["items"].([]any)
-		if len(items) != 4 {
-			t.Errorf("expected 4 default task statuses, got %d", len(items))
+		if len(items) != 5 {
+			t.Errorf("expected 5 default task statuses, got %d", len(items))
 		}
 		gotNames := map[string]bool{}
 		for _, item := range items {
@@ -1097,7 +1100,7 @@ func TestE2EProjectCreation_DefaultTaskRecords(t *testing.T) {
 			name, _ := m["name"].(string)
 			gotNames[name] = true
 		}
-		for _, name := range []string{"Backlog", "Todo", "In Progress", "Done"} {
+		for _, name := range []string{"Refinement", "Backlog", "Todo", "In Progress", "Done"} {
 			if !gotNames[name] {
 				t.Errorf("missing default task status %q", name)
 			}

@@ -4,7 +4,10 @@ import "errors"
 
 // Sentinel domain errors for the task aggregate.
 var (
-	ErrTaskNotFound              = errors.New("task: not found")
+	ErrTaskNotFound = errors.New("task: not found")
+	// ErrVersionConflict means the task changed since the version the caller
+	// named in If-Match.
+	ErrVersionConflict           = errors.New("task: version conflict")
 	ErrTaskTitleInvalid          = errors.New("task: title is empty or invalid")
 	ErrEpicCannotHaveParent      = errors.New("task: epic tasks cannot have a parent task")
 	ErrTaskCannotBeOwnParent     = errors.New("task: a task cannot be its own parent")
@@ -31,7 +34,9 @@ var (
 	ErrCustomFieldNameInvalid = errors.New("custom field: display name is empty or invalid")
 
 	// Task link errors.
-	ErrTaskLinkNotFound     = errors.New("task link: not found")
+	ErrTaskLinkNotFound = errors.New("task link: not found")
+	// ErrInvalidCursor reports a malformed pagination cursor.
+	ErrInvalidCursor        = errors.New("task: invalid cursor")
 	ErrTaskLinkSelf         = errors.New("task link: a task cannot be linked to itself")
 	ErrTaskLinkDuplicate    = errors.New("task link: this relationship already exists")
 	ErrTaskLinkTypeInvalid  = errors.New("task link: invalid link type")

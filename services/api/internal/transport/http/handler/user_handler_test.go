@@ -620,10 +620,10 @@ func TestGetMyGlobalPermissions_InvalidSubjectClaim(t *testing.T) {
 	r.With(injectClaims(claims)).Get("/users/me/global-permissions", handler.NewUserHandler(&mockUserSvc{}).GetMyGlobalPermissions)
 
 	w := do(t, r, http.MethodGet, "/users/me/global-permissions", nil)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
 	}
-	if code := errorCode(t, w); code != "BAD_REQUEST" {
+	if code := errorCode(t, w); code != "AUTH_UNAUTHENTICATED" {
 		t.Errorf("expected error_code BAD_REQUEST, got %q", code)
 	}
 }
@@ -952,10 +952,10 @@ func TestChangeMyPassword_InvalidSubjectClaim(t *testing.T) {
 
 	w := do(t, r, http.MethodPatch, "/users/me/password",
 		jsonBody(t, map[string]string{"current_password": "old12345", "new_password": "new12345"}))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
 	}
-	if code := errorCode(t, w); code != "BAD_REQUEST" {
+	if code := errorCode(t, w); code != "AUTH_UNAUTHENTICATED" {
 		t.Errorf("expected error_code BAD_REQUEST, got %q", code)
 	}
 }

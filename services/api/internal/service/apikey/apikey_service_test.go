@@ -21,7 +21,7 @@ import (
 type stubRepo struct {
 	findByID        func(ctx context.Context, id uuid.UUID) (*apikeydom.APIKey, error)
 	findByHash      func(ctx context.Context, hash string) (*apikeydom.APIKey, error)
-	listByAccountID func(ctx context.Context, userID uuid.UUID, cursor *string, limit int) ([]*apikeydom.APIKey, bool, int, error)
+	listByAccountID func(ctx context.Context, userID uuid.UUID, filter apikeydom.KeyFilter, cursor *string, limit int) ([]*apikeydom.APIKey, bool, int, error)
 	create          func(ctx context.Context, key *apikeydom.APIKey, keyHash string) error
 	revoke          func(ctx context.Context, id uuid.UUID) error
 	updateLastUsed  func(ctx context.Context, id uuid.UUID, at time.Time) error
@@ -39,9 +39,9 @@ func (r *stubRepo) FindByHash(ctx context.Context, hash string) (*apikeydom.APIK
 	}
 	return nil, apikeydom.ErrNotFound
 }
-func (r *stubRepo) ListByAccountID(ctx context.Context, userID uuid.UUID, cursor *string, limit int) ([]*apikeydom.APIKey, bool, int, error) {
+func (r *stubRepo) ListByAccountID(ctx context.Context, userID uuid.UUID, filter apikeydom.KeyFilter, cursor *string, limit int) ([]*apikeydom.APIKey, bool, int, error) {
 	if r.listByAccountID != nil {
-		return r.listByAccountID(ctx, userID, cursor, limit)
+		return r.listByAccountID(ctx, userID, filter, cursor, limit)
 	}
 	return nil, false, 0, nil
 }

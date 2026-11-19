@@ -82,7 +82,7 @@ hand-rolling its own copy that could drift.
 {{- if not .Values.valkey.enabled -}}
 {{- required "externalRedisUrl is required when valkey.enabled is false" .Values.externalRedisUrl -}}
 {{- else -}}
-{{- printf "redis://%s-valkey:6379/0" (include "paca.fullname" .) -}}
+{{- printf "redis://:%s@%s-valkey:6379/0" (required "secrets.valkeyPassword is required when valkey.enabled" .Values.secrets.valkeyPassword | urlquery | replace "+" "%20") (include "paca.fullname" .) -}}
 {{- end -}}
 {{- end -}}
 
@@ -192,10 +192,14 @@ since Caddy's automatic HTTPS needs ports 80+443 reachable directly from
 the internet (not true once an Ingress/LoadBalancer sits in front), would
 simply fail at worst. Falls back to publicUrl's own host when set and no
 Ingress is used (a LoadBalancer Service exposing the gateway directly), or
-plain ":80" when neither is configured.
+plain ":80" when neither is configured. gateway.autoHttps: false forces
+plain HTTP even without an Ingress, for TLS terminated by another external
+proxy (Istio VirtualService, Gateway API route, tunnel); it is redundant
+(already plain HTTP) when ingress.enabled is true. Only a real boolean false
+counts, so a null/unset value keeps automatic HTTPS.
 */}}
 {{- define "paca.gatewaySiteAddress" -}}
-{{- if .Values.ingress.enabled -}}
+{{- if or .Values.ingress.enabled (and (kindIs "bool" .Values.gateway.autoHttps) (not .Values.gateway.autoHttps)) -}}
 :80
 {{- else if .Values.publicUrl -}}
 {{- (urlParse .Values.publicUrl).host -}}

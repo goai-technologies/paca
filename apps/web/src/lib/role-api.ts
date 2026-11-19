@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 
 import { apiClient } from "./api-client";
 import type { SuccessEnvelope } from "./api-error";
@@ -70,9 +70,44 @@ function helperBase(projectId?: string): string {
 	return projectId ? `/projects/${projectId}/roles` : "/roles";
 }
 
-export async function listRoles(projectId?: string): Promise<Role[]> {
-	const { data } = await apiClient.instance.get<SuccessEnvelope<Role[]>>(
+export const ROLES_PAGE_SIZE = 30;
+
+/** One page of roles. `total_count` covers every role matching the filters. */
+export interface RolePage {
+	items: Role[];
+	page_size: number;
+	next_cursor: string | null;
+	total_count: number;
+}
+
+export interface ListRolesOptions {
+	/** Words that must all appear in the role's name or description. */
+	search?: string;
+	/** Only these roles (at most 100) — a batch lookup. */
+	ids?: string[];
+	cursor?: string;
+	/** Numbered page (1-indexed) instead of a cursor — for tables. */
+	page?: number;
+	pageSize?: number;
+}
+
+/** One page of the platform roles, or — with a projectId — of the roles that
+ *  can be used inside that project (its own, then the platform roles attached
+ *  there). */
+export async function listRoles(
+	projectId?: string,
+	opts: ListRolesOptions = {},
+): Promise<RolePage> {
+	const params: Record<string, string | number> = {
+		page_size: opts.pageSize ?? ROLES_PAGE_SIZE,
+	};
+	if (opts.search?.trim()) params.search = opts.search.trim();
+	if (opts.ids?.length) params.ids = opts.ids.join(",");
+	if (opts.cursor) params.cursor = opts.cursor;
+	if (opts.page) params.page = opts.page;
+	const { data } = await apiClient.instance.get<SuccessEnvelope<RolePage>>(
 		base(projectId),
+		{ params },
 	);
 	return data.data;
 }
@@ -203,16 +238,75 @@ export async function replaceMemberRoles(
 
 // --- Query options ----------------------------------------------------------
 
-export const platformRolesQueryOptions = queryOptions({
-	queryKey: ["admin", "roles"],
-	queryFn: () => listRoles(),
-});
+/** Key prefix of every cached platform-role query (lists and single roles). */
+export const platformRolesKey = ["admin", "roles"] as const;
 
-export const projectRolesQueryOptions = (projectId: string) =>
-	queryOptions({
-		queryKey: ["projects", projectId, "roles"],
-		queryFn: () => listRoles(projectId),
+/** Key prefix of every cached role query of a project. */
+export const projectRolesKey = (projectId: string) =>
+	["projects", projectId, "roles"] as const;
+
+/** Cursor-paged platform roles, optionally filtered by search. */
+export const platformRolesInfiniteQueryOptions = (search = "") =>
+	infiniteQueryOptions({
+		queryKey: [...platformRolesKey, "list", search] as const,
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listRoles(undefined, { search, cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 	});
+
+/** Cursor-paged roles usable inside a project, optionally filtered by search. */
+export const projectRolesInfiniteQueryOptions = (
+	projectId: string,
+	search = "",
+) =>
+	infiniteQueryOptions({
+		queryKey: [...projectRolesKey(projectId), "list", search] as const,
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			listRoles(projectId, { search, cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+	});
+
+/** One numbered page of the platform roles — backs the roles table. */
+export const platformRolesPageQueryOptions = (page: number, pageSize: number) =>
+	queryOptions({
+		queryKey: [...platformRolesKey, "page", page, pageSize] as const,
+		queryFn: () => listRoles(undefined, { page, pageSize }),
+	});
+
+/** One numbered page of a project's roles — backs the project roles table. */
+export const projectRolesPageQueryOptions = (
+	projectId: string,
+	page: number,
+	pageSize: number,
+) =>
+	queryOptions({
+		queryKey: [...projectRolesKey(projectId), "page", page, pageSize] as const,
+		queryFn: () => listRoles(projectId, { page, pageSize }),
+	});
+
+/** A batch of roles looked up by id (at most 100), so a screen can show the
+ *  roles an account holds without loading the whole list. */
+export const rolesByIdsQueryOptions = (
+	projectId: string | undefined,
+	ids: string[],
+) => {
+	const sorted = [...new Set(ids)].sort();
+	return queryOptions({
+		queryKey: [
+			...(projectId ? projectRolesKey(projectId) : platformRolesKey),
+			"ids",
+			sorted,
+		] as const,
+		queryFn: async () =>
+			sorted.length === 0
+				? []
+				: (await listRoles(projectId, { ids: sorted, pageSize: 100 })).items,
+		// Display-only: a caller without roles:read just shows plain names.
+		retry: false,
+	});
+};
 
 /** Every action the server knows; the JSON editor autocompletes from it. */
 export const knownActionsQueryOptions = (projectId?: string) =>

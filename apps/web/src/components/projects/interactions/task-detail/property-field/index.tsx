@@ -32,8 +32,7 @@ export function PropertyField({
 	onDateChange,
 	startDate,
 	dueDate,
-	onStartDateChange,
-	onDueDateChange,
+	onDateRangeChange,
 	numberValue = 0,
 	onNumberChange,
 	textValue,
@@ -56,6 +55,7 @@ export function PropertyField({
 	customRawValue,
 	onCustomChange,
 	customOptions = [],
+	customRows,
 }: PropertyFieldProps) {
 	const { t } = useTranslation("projects");
 	if (hidden) return null;
@@ -109,8 +109,7 @@ export function PropertyField({
 						startDate={startDate}
 						dueDate={dueDate}
 						canEdit={canEdit}
-						onStartDateChange={onStartDateChange}
-						onDueDateChange={onDueDateChange}
+						onChange={onDateRangeChange}
 					/>
 				);
 
@@ -193,6 +192,7 @@ export function PropertyField({
 						rawValue={customRawValue}
 						canEdit={canEdit}
 						options={customOptions}
+						rows={customRows}
 						onChange={onCustomChange}
 					/>
 				);

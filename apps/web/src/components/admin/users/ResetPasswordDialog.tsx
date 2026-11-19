@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { resetUserPassword, type User } from "@/lib/admin-api";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
+import { copyToClipboard } from "@/lib/clipboard";
 import { generatePassword } from "@/lib/generate-password";
 
 interface ResetPasswordDialogProps {
@@ -66,6 +67,9 @@ export function ResetPasswordDialog({
 				[ApiErrorCode.Forbidden]: t(
 					"users.resetPasswordDialog.errors.forbidden",
 				),
+				[ApiErrorCode.PasswordLoginDisabled]: t(
+					"users.resetPasswordDialog.errors.passwordLoginDisabled",
+				),
 				[ApiErrorCode.InternalError]: t(
 					"users.resetPasswordDialog.errors.internalError",
 				),
@@ -80,8 +84,9 @@ export function ResetPasswordDialog({
 
 	const handleCopy = () => {
 		if (!generatedPassword) return;
-		navigator.clipboard.writeText(generatedPassword);
-		setCopied(true);
+		void copyToClipboard(generatedPassword).then((ok) => {
+			if (ok) setCopied(true);
+		});
 	};
 
 	useEffect(() => {
@@ -95,7 +100,7 @@ export function ResetPasswordDialog({
 			<DialogContent className="sm:max-w-sm">
 				<DialogHeader>
 					<div className="flex items-center gap-2.5">
-						<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">
+						<div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
 							<KeyRound className="size-4" />
 						</div>
 						<DialogTitle className="text-base">
@@ -159,7 +164,7 @@ export function ResetPasswordDialog({
 									aria-label={t("users.resetPasswordDialog.copyPassword")}
 								>
 									{copied ? (
-										<Check className="size-4 text-green-500" />
+										<Check className="size-4 text-success" />
 									) : (
 										<Copy className="size-4" />
 									)}

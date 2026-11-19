@@ -136,6 +136,7 @@ A few consequences worth knowing:
 | | `environments:connect` | Open an interactive shell or manage SSH keys on an environment. |
 | `settings` | `settings:write` | Change workspace settings. |
 | `settings.sso` | `settings.sso:write` | Configure SSO providers. **Root-equivalent.** |
+| `settings.security` | `settings.security:write` | Set the login policy (MFA requirement, IP allow-lists, SSO-only mode) and reset an account's MFA or allow-list. **Root-equivalent.** Checked on `sso`. |
 | `plugins` | `plugins:read`, `plugins:write` | View / install and manage plugins. |
 | _plugin namespace_ | `<namespace>:<verb>` | Declared by an installed plugin, for example `time_logging:manage_all`. The namespace is the last segment of the plugin id with `-` replaced by `_`. Listed while the plugin is installed. |
 
@@ -197,6 +198,7 @@ Condition keys are *declared attributes* (`GET /roles/attribute-schema`). A key 
 | `agent.environment_id` | agent | no | The agent's default environment. |
 | `environment.type` | environment | no | `docker` or `kubernetes`. |
 | `conversation.environment_id` | conversation | no | The environment a chat runs in. |
+| `conversation.agent_id` | conversation | no | The agent a *project* conversation belongs to. Limit an agent's `conversations:read` to its own project conversations with `conversation.agent_id` equal to that agent's id. A global chat is authorized as `agent/<id>` (the agent's platform resource) and carries no conversation attributes, so scope those with the role's resources instead. |
 
 ## Role scopes
 
@@ -223,9 +225,10 @@ Paca ships these roles. Startup creates any that is missing and **never overwrit
 | `USER` | Platform, system, **default** | `users:read` on the platform roots. Every new user and new global agent starts with the default role. |
 | `Admin` | Project, system | `projects:read` on the project and `*` on `project/<id>/*`. |
 | `Editor` | Project | `projects:read` on the project; read/write on agents, annotations (including resolve), conversations, docs, environments (including connect), sprints, tasks, views and workflows, plus `project.members:read`, on `project/<id>/*`; `roles:read` on `project/<id>/role/*`. |
+| `Analyst` | Project | For PM / business-analyst agents. `projects:read` on the project; read on agents, annotations, conversations, docs, environments, `git:read`, `project.members:read`, sprints, tasks, views and workflows on `project/<id>/*`; write on conversations and docs; `tasks:write` on the project (to create tasks) and on `project/<id>/task/*` only while `task.status_category` is `refinement`; Deny `tasks:write` on any task with an assignee or a sprint; `roles:read` on `project/<id>/role/*`. It drafts tasks in Refinement but cannot move them out, assign them or plan them into a sprint. |
 | `Viewer` | Project | `projects:read` on the project; read on agents, annotations, conversations, docs, environments, sprints, tasks, views, workflows and `project.members:read` on `project/<id>/*`; `roles:read` on `project/<id>/role/*`. |
 
-Every new project gets its own `Admin`, `Editor` and `Viewer` (the real project id replaces the placeholder). The creator is attached as `Admin`.
+Every new project gets its own `Admin`, `Analyst`, `Editor` and `Viewer` (the real project id replaces the placeholder). The creator is attached as `Admin`.
 
 Exactly one platform role is the **default**; it cannot be deleted and cannot be a project template. Change it with Administration, Roles, "Set as default role" (`PUT /admin/roles/{roleId}/default`).
 

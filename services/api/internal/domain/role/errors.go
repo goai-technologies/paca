@@ -3,6 +3,8 @@ package roledom
 import "errors"
 
 var (
+	// ErrInvalidCursor means a pagination cursor is malformed.
+	ErrInvalidCursor = errors.New("role: invalid cursor")
 	// ErrNotFound means no role with that id (in the requested scope).
 	ErrNotFound = errors.New("role: not found")
 	// ErrNameTaken means another role in the same scope already has the name.

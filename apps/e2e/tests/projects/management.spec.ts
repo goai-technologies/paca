@@ -812,10 +812,10 @@ test.describe('Project Management', () => {
       // granting every offered permission of an area is stored as the area wildcard.
       const projectId = page.url().match(/\/projects\/([0-9a-f-]{36})/)?.[1];
       expect(projectId).toBeTruthy();
-      const rolesResp = await page.request.get(`${BASE_URL}/api/v1/projects/${projectId}/roles`);
+      const rolesResp = await page.request.get(`${BASE_URL}/api/v1/projects/${projectId}/roles?page_size=100`);
       expect(rolesResp.ok()).toBeTruthy();
       const stored = JSON.stringify(
-        ((await rolesResp.json()).data as Array<{ name: string }>).find((r) => r.name === roleName),
+        ((await rolesResp.json()).data.items as Array<{ name: string }>).find((r) => r.name === roleName),
       );
       expect(stored).toContain('"projects:*"');
       expect(stored).not.toContain('"projects:read"');

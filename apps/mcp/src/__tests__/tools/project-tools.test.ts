@@ -21,7 +21,9 @@ const proj = {
 
 function makeClient(overrides: Record<string, any> = {}) {
 	return {
-		listProjects: vi.fn().mockResolvedValue([proj]),
+		listProjects: vi
+			.fn()
+			.mockResolvedValue({ items: [proj], nextCursor: null }),
 		getProject: vi.fn().mockResolvedValue(proj),
 		createProject: vi.fn().mockResolvedValue(proj),
 		updateProject: vi.fn().mockResolvedValue({ ...proj, name: "Beta" }),
@@ -57,8 +59,22 @@ describe("handleProjectTool – list_projects", () => {
 	it("calls client.listProjects and returns formatted text", async () => {
 		const client = makeClient();
 		const result = await handleProjectTool("list_projects", {}, client);
-		expect(client.listProjects).toHaveBeenCalled();
+		expect(client.listProjects).toHaveBeenCalledWith({
+			cursor: undefined,
+			pageSize: undefined,
+		});
 		expect(result.content[0].text).toContain("project:p1");
+	});
+
+	it("points the agent at the next page instead of reading it", async () => {
+		const client = makeClient({
+			listProjects: vi
+				.fn()
+				.mockResolvedValue({ items: [proj], nextCursor: "2", total: 120 }),
+		});
+		const result = await handleProjectTool("list_projects", {}, client);
+		expect(client.listProjects).toHaveBeenCalledTimes(1);
+		expect(result.content[0].text).toContain('cursor="2"');
 	});
 
 	it("returns a Projects: header in the response", async () => {

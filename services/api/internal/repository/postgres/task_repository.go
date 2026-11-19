@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,6 +69,7 @@ type taskRecord struct {
 	UpdatedAt        time.Time        `db:"updated_at"`
 	DeletedAt        *time.Time       `db:"deleted_at"`
 	AssignmentMode   string           `db:"assignment_mode"`
+	Version          int64            `db:"version"`
 }
 
 // taskCounterRecord mirrors the task_counters table used for atomic
@@ -100,6 +103,7 @@ type taskWithPositionRow struct {
 	UpdatedAt        time.Time        `db:"updated_at"`
 	DeletedAt        *time.Time       `db:"deleted_at"`
 	AssignmentMode   string           `db:"assignment_mode"`
+	Version          int64            `db:"version"`
 	VTPPosition      *float64         `db:"vtp_position"`
 }
 
@@ -127,6 +131,7 @@ func (r *taskWithPositionRow) asTaskRecord() taskRecord {
 		UpdatedAt:        r.UpdatedAt,
 		DeletedAt:        r.DeletedAt,
 		AssignmentMode:   r.AssignmentMode,
+		Version:          r.Version,
 	}
 }
 
@@ -475,7 +480,7 @@ func (r *TaskRepository) FindDefaultTaskStatus(ctx context.Context, projectID uu
 
 const taskCols = `id, project_id, task_number, task_type_id, status_id, sprint_id, parent_task_id,
 	title, description, importance, story_points, reporter_id,
-	custom_fields, start_date, due_date, tags, created_at, updated_at, deleted_at, assignment_mode, commitment_task_id, home_project_id`
+	custom_fields, start_date, due_date, tags, created_at, updated_at, deleted_at, assignment_mode, commitment_task_id, home_project_id, version`
 
 // applyTaskFilter adds WHERE predicates for all TaskFilter fields.
 // b is the shared queryBuilder; the base "project_id = $1 AND deleted_at IS NULL" clause is already set.
@@ -537,6 +542,16 @@ func applyTaskFilter(b *queryBuilder, filter taskdom.TaskFilter) {
 		b.addInClause("task_type_id", uuidSliceToStrSlice(filter.TaskTypeIDs))
 	}
 
+	if filter.ExcludeSubtasks {
+		b.whereClauses = append(b.whereClauses, `NOT EXISTS (
+			SELECT 1 FROM tasks sp
+			WHERE sp.id = tasks.parent_task_id AND sp.project_id = tasks.project_id AND sp.deleted_at IS NULL
+			AND sp.sprint_id IS NOT DISTINCT FROM tasks.sprint_id
+			AND (sp.task_type_id IS NULL OR NOT EXISTS (
+				SELECT 1 FROM task_types spt
+				WHERE spt.id = sp.task_type_id AND spt.is_system AND spt.name = 'Epic')))`)
+	}
+
 	if filter.Search != nil {
 		if q := strings.TrimSpace(*filter.Search); q != "" {
 			pattern := "%" + escapeLikePattern(q) + "%"
@@ -545,6 +560,17 @@ func applyTaskFilter(b *queryBuilder, filter taskdom.TaskFilter) {
 			p2 := b.placeholder()
 			b.args = append(b.args, pattern)
 			clause := fmt.Sprintf("title ILIKE %s OR ('#' || task_number::text) ILIKE %s", p1, p2)
+			// Custom fields flagged use_in_search: match their stored value
+			// (arrays, e.g. multi_select, are matched on their JSON text; for
+			// objects that text also includes key names and punctuation).
+			p4 := b.placeholder()
+			b.args = append(b.args, pattern)
+			clause += fmt.Sprintf(` OR EXISTS (
+				SELECT 1 FROM custom_field_definitions cfd
+				WHERE cfd.project_id = tasks.project_id AND cfd.use_in_search
+				AND CASE WHEN jsonb_typeof(tasks.custom_fields -> cfd.field_key) IN ('array','object')
+					THEN (tasks.custom_fields -> cfd.field_key)::text
+					ELSE tasks.custom_fields ->> cfd.field_key END ILIKE %s)`, p4)
 			if filter.SearchContent {
 				p3 := b.placeholder()
 				b.args = append(b.args, pattern)
@@ -608,6 +634,203 @@ func applyTaskFilter(b *queryBuilder, filter taskdom.TaskFilter) {
 	}
 
 	applyCustomFieldFilters(b, filter.CustomFieldFilters)
+	applyTaskGroup(b, filter.Group)
+}
+
+// decimalKeyRe is the decimal grammar customFieldNumericExpr accepts, so a
+// number group key is bound only when Postgres' numeric cast will take it.
+var decimalKeyRe = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
+
+// customFieldUnsetSQL is true when the custom field bound at keyP holds no
+// value: absent, JSON null, an empty string or an empty array.
+func customFieldUnsetSQL(keyP string) string {
+	f := "custom_fields->" + keyP
+	return "(" + f + " IS NULL OR " + f + " = 'null'::jsonb OR " + f + " = '\"\"'::jsonb OR " + f + " = '[]'::jsonb)"
+}
+
+// applyTaskGroup narrows the query to one group (column) of a group-by
+// dimension. A group whose key matches nothing the dimension can hold (a
+// malformed id, an unknown importance bucket) selects no tasks rather than
+// failing, so a stale column key in a client can't break a listing.
+func applyTaskGroup(b *queryBuilder, g *taskdom.TaskGroup) {
+	if g == nil {
+		return
+	}
+	none := taskdom.IsGroupKeyNone(g.By, g.Key)
+	never := func() { b.whereClauses = append(b.whereClauses, "FALSE") }
+	// entity narrows by a nullable uuid column.
+	entity := func(col string) {
+		if none {
+			b.whereClauses = append(b.whereClauses, col+" IS NULL")
+			return
+		}
+		id, err := uuid.Parse(g.Key)
+		if err != nil {
+			never()
+			return
+		}
+		p := b.placeholder()
+		b.whereClauses = append(b.whereClauses, col+" = "+p)
+		b.args = append(b.args, id.String())
+	}
+
+	switch g.By {
+	case taskdom.GroupByStatus:
+		entity("status_id")
+	case taskdom.GroupBySprint:
+		entity("sprint_id")
+	case taskdom.GroupByType:
+		entity("task_type_id")
+	case taskdom.GroupByReporter:
+		entity("reporter_id")
+	case taskdom.GroupByAssignee:
+		if none {
+			b.whereClauses = append(b.whereClauses, "NOT EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = tasks.id)")
+			return
+		}
+		id, err := uuid.Parse(g.Key)
+		if err != nil {
+			never()
+			return
+		}
+		p := b.placeholder()
+		b.whereClauses = append(b.whereClauses, "EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = tasks.id AND ta.member_id = "+p+")")
+		b.args = append(b.args, id.String())
+	case taskdom.GroupByImportance:
+		bucket, err := strconv.Atoi(g.Key)
+		rg, ok := taskdom.ImportanceBucketRange(bucket)
+		if err != nil || !ok {
+			never()
+			return
+		}
+		minP := b.placeholder()
+		b.args = append(b.args, rg.Min)
+		maxP := b.placeholder()
+		b.args = append(b.args, rg.Max)
+		b.whereClauses = append(b.whereClauses, "(importance BETWEEN "+minP+" AND "+maxP+")")
+	case taskdom.GroupByTags:
+		if none {
+			b.whereClauses = append(b.whereClauses, "jsonb_array_length(tags) = 0")
+			return
+		}
+		p := b.placeholder()
+		b.args = append(b.args, g.Key)
+		b.whereClauses = append(b.whereClauses, "tags @> to_jsonb("+p+"::text)")
+	default:
+		// A custom field. A number key that isn't one selects nothing; checked
+		// before binding so no parameter is left unused.
+		if g.FieldType == "number" && !none && !decimalKeyRe.MatchString(g.Key) {
+			never()
+			return
+		}
+		keyP := b.placeholder()
+		b.args = append(b.args, g.By)
+		if none {
+			b.whereClauses = append(b.whereClauses, customFieldUnsetSQL(keyP))
+			return
+		}
+		valP := b.placeholder()
+		b.args = append(b.args, g.Key)
+		switch g.FieldType {
+		case "number":
+			// Compared as numbers so 1 and 1.0 are one group.
+			b.whereClauses = append(b.whereClauses, customFieldNumericExpr(keyP)+" = "+valP+"::numeric")
+		case "multi_select":
+			b.whereClauses = append(b.whereClauses, "custom_fields->"+keyP+" @> to_jsonb("+valP+"::text)")
+		case "boolean":
+			if g.Key == "false" {
+				// An unset checkbox is unchecked: it belongs to the "No" group.
+				b.whereClauses = append(b.whereClauses, "((custom_fields->>"+keyP+") = "+valP+" OR "+customFieldUnsetSQL(keyP)+")")
+			} else {
+				b.whereClauses = append(b.whereClauses, "(custom_fields->>"+keyP+") = "+valP)
+			}
+		default:
+			b.whereClauses = append(b.whereClauses, "(custom_fields->>"+keyP+") = "+valP)
+		}
+	}
+}
+
+// ListGroupColumns returns the groups of a group-by dimension that hold at
+// least one task among those filter matches — see
+// taskdom.Repository.ListGroupColumns.
+func (r *TaskRepository) ListGroupColumns(ctx context.Context, projectID uuid.UUID, filter taskdom.TaskFilter, by, fieldType string) ([]taskdom.GroupColumn, error) {
+	// The columns are those of every group, so the listing's own group (the
+	// one column being fetched) must not narrow them.
+	filter.Group = nil
+
+	b := newQueryBuilder()
+	pidP := b.placeholder()
+	b.args = append(b.args, projectID.String())
+	baseWhere := "project_id = " + pidP + " AND deleted_at IS NULL"
+	applyTaskFilter(b, filter)
+	if none, err := applyTaskScope(ctx, b); err != nil {
+		return nil, err
+	} else if none {
+		return []taskdom.GroupColumn{}, nil
+	}
+	whereSQL := baseWhere
+	if len(b.whereClauses) > 0 {
+		whereSQL += " AND " + strings.Join(b.whereClauses, " AND ")
+	}
+	// The matching tasks are selected first, in their own scope, so the
+	// joins below can't make the filter's unqualified column names ambiguous.
+	with := `WITH t AS (SELECT id, reporter_id, custom_fields, tags FROM tasks WHERE ` + whereSQL + `) `
+
+	var query string
+	switch by {
+	case taskdom.GroupByTags:
+		query = with + `SELECT tag AS key, tag AS label, COUNT(*) AS count
+			FROM t, LATERAL jsonb_array_elements_text(t.tags) AS tag
+			WHERE tag <> ''
+			GROUP BY tag ORDER BY tag ASC`
+	case taskdom.GroupByAssignee:
+		query = with + `SELECT pm.id AS key, ac.name AS label, COUNT(*) AS count
+			FROM t
+			JOIN task_assignees ta ON ta.task_id = t.id
+			JOIN project_members pm ON pm.id = ta.member_id
+			JOIN accounts ac ON ac.id = pm.account_id
+			GROUP BY pm.id, ac.name ORDER BY lower(ac.name) ASC, pm.id ASC`
+	case taskdom.GroupByReporter:
+		query = with + `SELECT pm.id AS key, ac.name AS label, COUNT(*) AS count
+			FROM t
+			JOIN project_members pm ON pm.id = t.reporter_id
+			JOIN accounts ac ON ac.id = pm.account_id
+			GROUP BY pm.id, ac.name ORDER BY lower(ac.name) ASC, pm.id ASC`
+	case taskdom.GroupByStatus, taskdom.GroupBySprint, taskdom.GroupByType, taskdom.GroupByImportance:
+		return nil, fmt.Errorf("task repo: list group columns: %q has a fixed set of columns", by)
+	default:
+		// A free-valued custom field: one column per distinct stored value.
+		keyP := b.placeholder()
+		b.args = append(b.args, by)
+		if fieldType == "number" {
+			// Grouped as numbers so 1 and 1.0 are one column.
+			query = with + `SELECT trim_scale(n)::text AS key, trim_scale(n)::text AS label, COUNT(*) AS count
+				FROM t, LATERAL (SELECT ` + customFieldNumericExpr(keyP) + ` AS n) x
+				WHERE n IS NOT NULL
+				GROUP BY n ORDER BY n ASC`
+		} else {
+			query = with + `SELECT v AS key, v AS label, COUNT(*) AS count
+				FROM t, LATERAL (SELECT t.custom_fields->>` + keyP + ` AS v) x
+				WHERE v IS NOT NULL AND v <> ''
+				GROUP BY v ORDER BY v ASC`
+		}
+	}
+	// One more than the cap, so the caller can tell the list was cut short.
+	query += fmt.Sprintf(" LIMIT %d", taskdom.MaxGroupColumns+1)
+
+	var rows []struct {
+		Key   string `db:"key"`
+		Label string `db:"label"`
+		Count int64  `db:"count"`
+	}
+	if err := r.db.SelectContext(ctx, &rows, query, b.args...); err != nil {
+		return nil, fmt.Errorf("task repo: list group columns: %w", err)
+	}
+	out := make([]taskdom.GroupColumn, len(rows))
+	for i, row := range rows {
+		out[i] = taskdom.GroupColumn{Key: row.Key, Label: row.Label, Count: row.Count}
+	}
+	return out, nil
 }
 
 // applyCustomFieldFilters adds WHERE predicates for TaskFilter.CustomFieldFilters,
@@ -689,7 +912,7 @@ func applyCustomFieldFilters(b *queryBuilder, filters map[string]taskdom.CustomF
 				b.args = append(b.args, *q.Before)
 				b.whereClauses = append(b.whereClauses, expr+" <= "+p)
 			}
-		case "text", "url":
+		case "text", "url", "long_text":
 			if q.Contains == nil || strings.TrimSpace(*q.Contains) == "" {
 				continue
 			}
@@ -1088,6 +1311,9 @@ func (r *TaskRepository) ListTasks(ctx context.Context, projectID uuid.UUID, fil
 		if err := r.attachAssigneeIDs(ctx, tasks); err != nil {
 			return nil, false, err
 		}
+		if err := r.attachSubtaskCounts(ctx, tasks); err != nil {
+			return nil, false, err
+		}
 		return tasks, hasMore, nil
 	}
 
@@ -1110,6 +1336,9 @@ func (r *TaskRepository) ListTasks(ctx context.Context, projectID uuid.UUID, fil
 		tasks = append(tasks, t)
 	}
 	if err := r.attachAssigneeIDs(ctx, tasks); err != nil {
+		return nil, false, err
+	}
+	if err := r.attachSubtaskCounts(ctx, tasks); err != nil {
 		return nil, false, err
 	}
 	return tasks, hasMore, nil
@@ -1372,6 +1601,37 @@ func (r *TaskRepository) FindTaskByNumber(ctx context.Context, projectID uuid.UU
 	return t, nil
 }
 
+// FindTaskByKey returns the non-deleted task matching the given project task_id_prefix
+// (case-insensitive) and project-scoped task_number.
+func (r *TaskRepository) FindTaskByKey(ctx context.Context, prefix string, taskNumber int64) (*taskdom.Task, error) {
+	var rec taskRecord
+	err := r.db.GetContext(ctx, &rec, `SELECT `+taskCols+` FROM tasks WHERE id = (
+		SELECT t.id
+		FROM tasks t
+		JOIN projects p ON p.id = t.project_id
+		WHERE upper(p.task_id_prefix) = upper($1)
+		  AND t.task_number = $2
+		  AND t.deleted_at IS NULL
+		  AND p.deleted_at IS NULL
+		ORDER BY p.created_at ASC
+		LIMIT 1
+	)`, prefix, taskNumber)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, taskdom.ErrTaskNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("task repo: find by key: %w", err)
+	}
+	t, err := toTaskEntity(&rec)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.attachAssigneeIDs(ctx, []*taskdom.Task{t}); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
 // CreateTask persists a new task, assigning the next per-project task_number atomically.
 func (r *TaskRepository) CreateTask(ctx context.Context, t *taskdom.Task) error {
 	cf, err := json.Marshal(t.CustomFields)
@@ -1419,6 +1679,7 @@ func (r *TaskRepository) CreateTask(ctx context.Context, t *taskdom.Task) error 
 		if err != nil {
 			return fmt.Errorf("task repo: create: %w", err)
 		}
+		t.Version = 1
 		if err := insertTaskAssignees(ctx, tx, t.ID, t.AssigneeIDs); err != nil {
 			return err
 		}
@@ -1543,15 +1804,13 @@ func (r *TaskRepository) UpdateTaskFields(ctx context.Context, t *taskdom.Task, 
 	args = append(args, t.ID.String())
 	query := "UPDATE tasks SET " + strings.Join(sets, ", ") + fmt.Sprintf(" WHERE id=$%d AND deleted_at IS NULL", len(args))
 	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
-		res, err := tx.ExecContext(ctx, query, args...)
+		// A save racing a soft-delete matches no live row.
+		err := tx.QueryRowxContext(ctx, query+" RETURNING version", args...).Scan(&t.Version)
+		if errors.Is(err, sql.ErrNoRows) {
+			return taskdom.ErrTaskNotFound
+		}
 		if err != nil {
 			return fmt.Errorf("task repo: update fields: %w", err)
-		}
-		// A save racing a soft-delete matches no live row.
-		if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("task repo: update fields: rows affected: %w", err)
-		} else if n == 0 {
-			return taskdom.ErrTaskNotFound
 		}
 		if syncAssignees {
 			return syncTaskAssignees(ctx, tx, t.ID, t.AssigneeIDs)
@@ -1578,14 +1837,17 @@ func updateTaskTx(ctx context.Context, tx *sqlx.Tx, t *taskdom.Task) error {
 	if err != nil {
 		return fmt.Errorf("task repo: marshal tags: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `
+	// RETURNING version: the database bumps it, and the caller's task must
+	// carry the new one (it becomes the snapshot realtime clients patch with).
+	err = tx.QueryRowxContext(ctx, `
 		UPDATE tasks SET
 		  task_type_id=$1, status_id=$2, sprint_id=$3, parent_task_id=$4,
 		  title=$5, description=$6, importance=$7, story_points=$8,
 		  reporter_id=$9, custom_fields=$10,
 		  start_date=$11, due_date=$12, tags=$13, updated_at=$14, assignment_mode=$15,
 		  commitment_task_id=$16, home_project_id=$17
-		WHERE id=$18`,
+		WHERE id=$18
+		RETURNING version`,
 		uuidPtrToStrPtr(t.TaskTypeID), uuidPtrToStrPtr(t.StatusID),
 		uuidPtrToStrPtr(t.SprintID), uuidPtrToStrPtr(t.ParentTaskID),
 		t.Title, t.Description, t.Importance, t.StoryPoints,
@@ -1593,7 +1855,7 @@ func updateTaskTx(ctx context.Context, tx *sqlx.Tx, t *taskdom.Task) error {
 		cf, t.StartDate, t.DueDate, tagsJSON, t.UpdatedAt,
 		assignmentModeOrDefault(t.AssignmentMode), uuidPtrToStrPtr(t.CommitmentTaskID),
 		uuidPtrToStrPtr(t.HomeProjectID), t.ID.String(),
-	)
+	).Scan(&t.Version)
 	if err != nil {
 		return fmt.Errorf("task repo: update: %w", err)
 	}
@@ -1763,6 +2025,48 @@ func (r *TaskRepository) attachAssigneeIDs(ctx context.Context, tasks []*taskdom
 	return nil
 }
 
+// attachSubtaskCounts batch-loads the direct-child count and the done-child
+// count (children whose status category is "done") for each task. Epics are
+// included: the Timeline lists Epics and nests their children under them.
+func (r *TaskRepository) attachSubtaskCounts(ctx context.Context, tasks []*taskdom.Task) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	byID := make(map[string]*taskdom.Task, len(tasks))
+	placeholders := make([]string, len(tasks))
+	args := make([]interface{}, len(tasks))
+	for i, t := range tasks {
+		id := t.ID.String()
+		byID[id] = t
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	type countRow struct {
+		ParentID string `db:"parent_task_id"`
+		Total    int    `db:"total"`
+		Done     int    `db:"done"`
+	}
+	var rows []countRow
+	query := `SELECT c.parent_task_id AS parent_task_id, COUNT(*) AS total,
+		COUNT(*) FILTER (WHERE s.category = 'done') AS done
+		FROM tasks c
+		JOIN tasks p ON p.id = c.parent_task_id AND p.project_id = c.project_id
+		LEFT JOIN task_statuses s ON s.id = c.status_id
+		WHERE c.deleted_at IS NULL AND c.parent_task_id IN (` + strings.Join(placeholders, ",") + `)
+		GROUP BY c.parent_task_id`
+	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
+		return fmt.Errorf("task repo: attach subtask counts: %w", err)
+	}
+	for _, row := range rows {
+		if t, ok := byID[row.ParentID]; ok {
+			t.SubtaskCount = row.Total
+			t.SubtaskDoneCount = row.Done
+		}
+	}
+	return nil
+}
+
 // DeleteTask soft-deletes a task by setting deleted_at.
 func (r *TaskRepository) DeleteTask(ctx context.Context, id uuid.UUID) error {
 	result, err := r.db.ExecContext(ctx, `UPDATE tasks SET deleted_at=$1 WHERE id=$2 AND deleted_at IS NULL`, time.Now(), id.String())
@@ -1897,6 +2201,7 @@ func toTaskEntity(r *taskRecord) (*taskdom.Task, error) {
 		UpdatedAt:        r.UpdatedAt,
 		DeletedAt:        r.DeletedAt,
 		AssignmentMode:   r.AssignmentMode,
+		Version:          r.Version,
 	}, nil
 }
 
@@ -1910,11 +2215,13 @@ type customFieldDefinitionRecord struct {
 	FieldType   string    `db:"field_type"`
 	Options     []byte    `db:"options"`
 	IsRequired  bool      `db:"is_required"`
+	UseInSearch bool      `db:"use_in_search"`
+	Rows        int       `db:"rows"`
 	CreatedAt   time.Time `db:"created_at"`
 	UpdatedAt   time.Time `db:"updated_at"`
 }
 
-const customFieldCols = `id, project_id, field_key, display_name, field_type, options, is_required, created_at, updated_at`
+const customFieldCols = `id, project_id, field_key, display_name, field_type, options, is_required, use_in_search, rows, created_at, updated_at`
 
 // ListCustomFieldDefinitions returns all custom field definitions for a project ordered by display_name.
 func (r *TaskRepository) ListCustomFieldDefinitions(ctx context.Context, projectID uuid.UUID) ([]*taskdom.CustomFieldDefinition, error) {
@@ -1953,10 +2260,10 @@ func (r *TaskRepository) CreateCustomFieldDefinition(ctx context.Context, f *tas
 		return err
 	}
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO custom_field_definitions (id, project_id, field_key, display_name, field_type, options, is_required, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		INSERT INTO custom_field_definitions (id, project_id, field_key, display_name, field_type, options, is_required, use_in_search, rows, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 		f.ID.String(), f.ProjectID.String(), f.FieldKey, f.DisplayName,
-		string(f.FieldType), opts, f.IsRequired, f.CreatedAt, f.UpdatedAt,
+		string(f.FieldType), opts, f.IsRequired, f.UseInSearch, f.Rows, f.CreatedAt, f.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -1974,9 +2281,9 @@ func (r *TaskRepository) UpdateCustomFieldDefinition(ctx context.Context, f *tas
 		return err
 	}
 	_, err = r.db.ExecContext(ctx, `
-		UPDATE custom_field_definitions SET display_name=$1, field_type=$2, options=$3, is_required=$4, updated_at=$5
-		WHERE id=$6`,
-		f.DisplayName, string(f.FieldType), opts, f.IsRequired, f.UpdatedAt, f.ID.String(),
+		UPDATE custom_field_definitions SET display_name=$1, field_type=$2, options=$3, is_required=$4, use_in_search=$5, rows=$6, updated_at=$7
+		WHERE id=$8`,
+		f.DisplayName, string(f.FieldType), opts, f.IsRequired, f.UseInSearch, f.Rows, f.UpdatedAt, f.ID.String(),
 	)
 	if err != nil {
 		return fmt.Errorf("custom field repo: update: %w", err)
@@ -2091,6 +2398,8 @@ func toCustomFieldEntity(r *customFieldDefinitionRecord) (*taskdom.CustomFieldDe
 		FieldType:   taskdom.FieldType(r.FieldType),
 		Options:     opts,
 		IsRequired:  r.IsRequired,
+		UseInSearch: r.UseInSearch,
+		Rows:        r.Rows,
 		CreatedAt:   r.CreatedAt,
 		UpdatedAt:   r.UpdatedAt,
 	}, nil

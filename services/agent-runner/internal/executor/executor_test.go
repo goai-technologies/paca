@@ -35,10 +35,7 @@ func envValue(env *[]acp.EnvVariable, name string) (string, bool) {
 
 // TestBuildMCPServers_AlwaysSetsConversationID pins that PACA_CONVERSATION_ID
 // is forwarded unconditionally (trigger.ConversationID is always set,
-// unlike ProjectID/ActorUserID) — services/api's GetConversationForAgent
-// relies on it being present to authorize a read_conversation call against
-// the calling conversation's own project/actor/owning member; see that
-// method's doc comment.
+// unlike ProjectID/ActorAccountID).
 func TestBuildMCPServers_AlwaysSetsConversationID(t *testing.T) {
 	e := &Executor{opts: Options{AgentKeys: fakeAgentKeys{}, PacaAPIURL: "http://api", PacaGatewayURL: "http://gw"}}
 	conversationID := uuid.New()
@@ -54,6 +51,22 @@ func TestBuildMCPServers_AlwaysSetsConversationID(t *testing.T) {
 	}
 	if val != conversationID.String() {
 		t.Errorf("PACA_CONVERSATION_ID = %q, want %q", val, conversationID.String())
+	}
+}
+
+func TestBuildMCPServers_SetsOwnerMemberIDWhenPresent(t *testing.T) {
+	e := &Executor{opts: Options{AgentKeys: fakeAgentKeys{}, PacaAPIURL: "http://api", PacaGatewayURL: "http://gw"}}
+	owner := uuid.New()
+	cfg := agent.Config{ID: uuid.New()}
+
+	with := findPacaServer(t, e.buildMCPServers(agent.Trigger{ConversationID: uuid.New(), AgentID: uuid.New(), ActorMemberID: &owner}, cfg))
+	if val, ok := envValue(with.Env, "PACA_OWNER_MEMBER_ID"); !ok || val != owner.String() {
+		t.Errorf("PACA_OWNER_MEMBER_ID = %q (set=%v), want %q", val, ok, owner.String())
+	}
+
+	without := findPacaServer(t, e.buildMCPServers(agent.Trigger{ConversationID: uuid.New(), AgentID: uuid.New()}, cfg))
+	if _, ok := envValue(without.Env, "PACA_OWNER_MEMBER_ID"); ok {
+		t.Error("PACA_OWNER_MEMBER_ID must be absent when the run has no actor member")
 	}
 }
 
@@ -93,7 +106,7 @@ func TestBuildMCPServers_OmitsRepoPluginIDsWhenAbsent(t *testing.T) {
 
 // TestBuildMCPServers_OmitsActorUserIDForProjectScopedAgent reproduces the
 // real failure: a project-scoped conversation resumed on a persistent
-// environment/sandbox somehow carries a non-nil trigger.ActorUserID (its
+// environment/sandbox somehow carries a non-nil trigger.ActorAccountID (its
 // origin predates this fix and isn't itself reproduced here), and that
 // value gets baked into the sandbox's env at creation and persists across
 // every resume. Forwarding it to a project-scoped agent's MCP calls made
@@ -103,11 +116,11 @@ func TestBuildMCPServers_OmitsRepoPluginIDsWhenAbsent(t *testing.T) {
 // outright for a non-global agent, in required (not optional) auth
 // middleware that runs before any handler-specific logic. AgentScope is
 // the guard: it must never be forwarded for a project-scoped agent
-// regardless of what trigger.ActorUserID holds.
+// regardless of what trigger.ActorAccountID holds.
 func TestBuildMCPServers_NeverForwardsAnActorUser(t *testing.T) {
 	e := &Executor{opts: Options{AgentKeys: fakeAgentKeys{}, PacaAPIURL: "http://api", PacaGatewayURL: "http://gw"}}
-	actorUserID := uuid.New()
-	trigger := agent.Trigger{ConversationID: uuid.New(), AgentID: uuid.New(), ActorUserID: &actorUserID}
+	actorAccountID := uuid.New()
+	trigger := agent.Trigger{ConversationID: uuid.New(), AgentID: uuid.New(), ActorAccountID: &actorAccountID}
 	for _, scope := range []string{"project", agent.AgentScopeGlobal} {
 		cfg := agent.Config{ID: uuid.New(), AgentScope: scope}
 		paca := findPacaServer(t, e.buildMCPServers(trigger, cfg))

@@ -23,7 +23,12 @@ vi.mock("@/lib/export-api", async () => {
 		triggerDownload: api.triggerDownload,
 		projectExportsQueryOptions: (projectId: string) => ({
 			queryKey: actual.projectExportsQueryKey(projectId),
-			queryFn: async () => state.exports,
+			queryFn: async () => ({
+				items: state.exports,
+				page: 1,
+				page_size: 20,
+				total_count: state.exports.length,
+			}),
 		}),
 	};
 });

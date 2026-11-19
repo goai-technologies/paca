@@ -39,9 +39,9 @@ import {
 	projectActivitiesQueryOptions,
 } from "@/lib/activity-api";
 import { isForbiddenError } from "@/lib/api-error";
-import { sprintsQueryOptions } from "@/lib/interaction-api";
 import { useMemberDirectory } from "@/lib/member-directory";
 import { projectQueryOptions } from "@/lib/project-api";
+import { useSprintDirectory } from "@/lib/sprint-directory";
 import { timeAgo } from "@/lib/time-ago";
 
 export const Route = createFileRoute(
@@ -72,10 +72,7 @@ function ProjectActivityPage() {
 	const [filters, setFilters] = useState<Filters>({});
 
 	const { data: project } = useQuery(projectQueryOptions(projectId));
-	const { data: sprints = [] } = useQuery({
-		...sprintsQueryOptions(projectId),
-		enabled: canRead,
-	});
+	const getSprint = useSprintDirectory(canRead ? projectId : null);
 	const {
 		data,
 		isLoading: isDataLoading,
@@ -97,10 +94,9 @@ function ProjectActivityPage() {
 			const m = getMember(id);
 			return m ? memberDisplayName(m) : undefined;
 		};
-		const s: Record<string, string> = {};
-		for (const sprint of sprints) s[sprint.id] = sprint.name;
-		return { members, sprints: s };
-	}, [getMember, sprints]);
+		const sprints = (id: string) => getSprint(id)?.name;
+		return { members, sprints };
+	}, [getMember, getSprint]);
 
 	const items = data?.pages.flatMap((p) => p.items) ?? [];
 	const groups = useGroupedByDay(items);

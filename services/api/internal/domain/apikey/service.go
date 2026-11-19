@@ -21,7 +21,7 @@ type CreateInput struct {
 type Service interface {
 	// List returns one page of the account's active (non-revoked) API keys,
 	// newest first; see Repository.ListByAccountID for the paging contract.
-	List(ctx context.Context, accountID uuid.UUID, cursorAfter *string, limit int) ([]*APIKey, bool, int, error)
+	List(ctx context.Context, accountID uuid.UUID, filter KeyFilter, cursorAfter *string, limit int) ([]*APIKey, bool, int, error)
 	// Create generates a new API key, persists its hash, and returns the key
 	// along with the raw key value (returned ONLY on creation).
 	Create(ctx context.Context, in CreateInput) (*APIKey, string, error)

@@ -105,9 +105,9 @@ jobs:
         # near-zero headroom under the previous 60s budget — enough to tip
         # into a hard timeout on a slower/contended CI runner with no
         # underlying test hang (reproduces green locally every time).
-        # 120s matches the budget acp-bridge-pr-ci.yml already uses for the
-        # same class of race-detector run.
-        run: go test -race -timeout 120s -coverprofile=coverage.out $(go list ./... | grep -v '/test/e2e')
+        # The suite has since grown past 90s locally under -race, so the
+        # budget is 300s: a slow runner no longer trips a hard timeout.
+        run: go test -race -timeout 300s -coverprofile=coverage.out $(go list ./... | grep -v '/test/e2e')
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v6
@@ -193,3 +193,12 @@ jobs:
         env:
           PACA_E2E: "1"
         run: go test -v -timeout 450s -parallel 8 ./test/e2e/...
+
+      - name: Run plugin runtime E2E tests against the S3 plugin store
+        # The same plugin scenarios again, with plugins stored in the RustFS
+        # testcontainer (PLUGINS_STORE=s3) instead of local folders — the only
+        # place the bucket-backed store meets a real S3-compatible backend.
+        env:
+          PACA_E2E: "1"
+          PACA_E2E_PLUGIN_STORE: s3
+        run: go test -v -timeout 300s -parallel 4 -run '^TestE2EPluginRuntime' ./test/e2e/...

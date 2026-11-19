@@ -16,6 +16,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
+	accountdom "github.com/Paca-AI/api/internal/domain/account"
 	attachmentdom "github.com/Paca-AI/api/internal/domain/attachment"
 	domainauth "github.com/Paca-AI/api/internal/domain/auth"
 	projectdom "github.com/Paca-AI/api/internal/domain/project"
@@ -491,8 +492,8 @@ func TestCreateProject_SeedsDefaultViews(t *testing.T) {
 	if backlogView.ViewType != sprintdom.ViewTypeTable || backlogView.Config.ColumnBy != "sprint" {
 		t.Fatalf("unexpected backlog default view: %+v", backlogView)
 	}
-	if timelineView.ViewType != sprintdom.ViewTypeRoadmap {
-		t.Fatalf("expected roadmap timeline view, got %+v", timelineView.ViewType)
+	if timelineView.ViewType != sprintdom.ViewTypeGantt {
+		t.Fatalf("expected gantt timeline view, got %+v", timelineView.ViewType)
 	}
 	// Backlog view must use the "normal" virtual group to include all non-system
 	// types dynamically.
@@ -1194,5 +1195,56 @@ func assertSameProjectIDs(t *testing.T, got []uuid.UUID, want []uuid.UUID) {
 		if _, ok := wantSet[id]; !ok {
 			t.Fatalf("unexpected project ID %s in %v (want %v)", id, got, want)
 		}
+	}
+}
+
+// agentOnlyStore grants projects:read on the project collection to agent
+// principals only, so the answer shows which principal kind the handler judged.
+type agentOnlyStore struct{}
+
+func (agentOnlyStore) ListGrants(_ context.Context, p iam.Principal) ([]iam.Grant, error) {
+	if p.Type != iam.PrincipalAgent {
+		return nil, nil
+	}
+	return (&fakeGlobalPermStore{globalPerms: []iam.Action{iam.ActionProjectsRead}}).ListGrants(context.Background(), p)
+}
+
+func TestListProjects_JudgesRealPrincipalKind(t *testing.T) {
+	for _, tc := range []struct {
+		kind       accountdom.Kind
+		wantGlobal bool
+	}{
+		{accountdom.KindAgent, true},
+		{accountdom.KindUser, false},
+		{accountdom.KindServiceAccount, false},
+	} {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			var gotGlobal bool
+			svc := &mockProjectSvc{
+				list: func(context.Context, int, int) ([]*projectdom.Project, int64, error) {
+					gotGlobal = true
+					return nil, 0, nil
+				},
+				listAccessible: func(context.Context, uuid.UUID, int, int) ([]*projectdom.Project, int64, error) {
+					return nil, 0, nil
+				},
+			}
+			h := handler.NewProjectHandler(svc, iam.NewAuthorizer(agentOnlyStore{}, iam.NewRegistry(), iam.NewAttributeSchema()))
+			r := chi.NewRouter()
+			r.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					ctx := httpmw.WithPrincipal(r.Context(), httpmw.Principal{AccountID: uuid.New(), Kind: tc.kind})
+					next.ServeHTTP(w, r.WithContext(ctx))
+				})
+			})
+			r.Get("/projects", h.ListProjects)
+
+			if w := do(t, r, http.MethodGet, "/projects", nil); w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+			if gotGlobal != tc.wantGlobal {
+				t.Errorf("global read = %v, want %v", gotGlobal, tc.wantGlobal)
+			}
+		})
 	}
 }

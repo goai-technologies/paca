@@ -14,6 +14,8 @@ type BrandingResponse struct {
 	PrimaryColorDark  *string `json:"primary_color_dark,omitempty"`
 	// CommitmentsProjectID is the project that holds every commitment, when set.
 	CommitmentsProjectID *string `json:"commitments_project_id,omitempty"`
+	// FeedbackEnabled gates the in-app feedback entry points.
+	FeedbackEnabled bool `json:"feedback_enabled"`
 }
 
 // SetCommitmentsProjectRequest is the body for PUT /admin/settings/commitments-project.
@@ -28,6 +30,8 @@ type UpdateSettingsRequest struct {
 	BrandName         *string `json:"brand_name"`
 	PrimaryColorLight *string `json:"primary_color_light"`
 	PrimaryColorDark  *string `json:"primary_color_dark"`
+	// FeedbackEnabled is optional: omitted (null) leaves the setting unchanged.
+	FeedbackEnabled *bool `json:"feedback_enabled"`
 }
 
 // AvatarShapedImageResponse is the response body for the logo/favicon

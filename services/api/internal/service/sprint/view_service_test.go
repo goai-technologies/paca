@@ -30,7 +30,10 @@ import (
 
 type permissiveSprintRepo struct{}
 
-func (permissiveSprintRepo) ListSprints(context.Context, uuid.UUID) ([]*sprintdom.Sprint, error) {
+func (permissiveSprintRepo) ListSprints(context.Context, uuid.UUID, sprintdom.SprintFilter, *string, int) ([]*sprintdom.Sprint, bool, int, error) {
+	return nil, false, 0, nil
+}
+func (permissiveSprintRepo) ListAllSprints(context.Context, uuid.UUID) ([]*sprintdom.Sprint, error) {
 	return nil, nil
 }
 func (permissiveSprintRepo) FindSprintByID(_ context.Context, id uuid.UUID) (*sprintdom.Sprint, error) {
@@ -61,6 +64,9 @@ func (permissiveTaskRepo) FindTaskByID(_ context.Context, id uuid.UUID) (*taskdo
 	return &taskdom.Task{ID: id}, nil
 }
 func (permissiveTaskRepo) FindTaskByNumber(context.Context, uuid.UUID, int64) (*taskdom.Task, error) {
+	return nil, taskdom.ErrTaskNotFound
+}
+func (permissiveTaskRepo) FindTaskByKey(context.Context, string, int64) (*taskdom.Task, error) {
 	return nil, taskdom.ErrTaskNotFound
 }
 func (permissiveTaskRepo) CreateTask(context.Context, *taskdom.Task) error { return nil }
@@ -366,7 +372,7 @@ func TestViewService_CreateView_InvalidTypeReturnsError(t *testing.T) {
 	_, err := svc.CreateView(ctx, sprintdom.CreateViewInput{
 		SprintID:    uuidPtr(uuid.New()),
 		Name:        "Bad",
-		ViewType:    "gantt",
+		ViewType:    "calendar",
 		ViewContext: sprintdom.ViewContextSprint,
 	})
 	if err != sprintdom.ErrViewTypeInvalid {
@@ -735,7 +741,7 @@ func TestViewService_ListViews_OK(t *testing.T) {
 
 	sprintID := uuid.New()
 	_, _ = svc.CreateView(ctx, sprintdom.CreateViewInput{SprintID: &sprintID, Name: "A", ViewType: sprintdom.ViewTypeTable, ViewContext: sprintdom.ViewContextSprint})
-	_, _ = svc.CreateView(ctx, sprintdom.CreateViewInput{SprintID: &sprintID, Name: "B", ViewType: sprintdom.ViewTypeRoadmap, ViewContext: sprintdom.ViewContextSprint})
+	_, _ = svc.CreateView(ctx, sprintdom.CreateViewInput{SprintID: &sprintID, Name: "B", ViewType: sprintdom.ViewTypeGantt, ViewContext: sprintdom.ViewContextSprint})
 
 	views, err := svc.ListViews(ctx, uuid.Nil, sprintID)
 	if err != nil {
@@ -906,7 +912,7 @@ func TestViewService_ReorderViews_OK(t *testing.T) {
 	sprintID := uuid.New()
 	v1, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{SprintID: uuidPtr(sprintID), Name: "A", ViewType: sprintdom.ViewTypeTable, ViewContext: sprintdom.ViewContextSprint})
 	v2, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{SprintID: uuidPtr(sprintID), Name: "B", ViewType: sprintdom.ViewTypeBoard, ViewContext: sprintdom.ViewContextSprint})
-	v3, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{SprintID: uuidPtr(sprintID), Name: "C", ViewType: sprintdom.ViewTypeRoadmap, ViewContext: sprintdom.ViewContextSprint})
+	v3, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{SprintID: uuidPtr(sprintID), Name: "C", ViewType: sprintdom.ViewTypeGantt, ViewContext: sprintdom.ViewContextSprint})
 
 	// Reorder: C, A, B
 	if err := svc.ReorderViews(ctx, uuid.Nil, sprintID, []uuid.UUID{v3.ID, v1.ID, v2.ID}); err != nil {
@@ -1018,14 +1024,14 @@ func TestViewService_ListTimelineViews_ReturnsOnlyTimelineViews(t *testing.T) {
 	svc := sprintsvc.NewViewService(repo, sprintRepo, permissiveTaskRepo{}, nil)
 
 	// Two timeline views for our project.
-	tv1, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "Roadmap", ViewType: sprintdom.ViewTypeRoadmap, ViewContext: sprintdom.ViewContextTimeline})
+	tv1, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "Gantt", ViewType: sprintdom.ViewTypeGantt, ViewContext: sprintdom.ViewContextTimeline})
 	tv2, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "Timeline Table", ViewType: sprintdom.ViewTypeTable, ViewContext: sprintdom.ViewContextTimeline})
 	// A backlog view for the same project — must NOT appear.
 	_, _ = svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "Backlog", ViewType: sprintdom.ViewTypeTable, ViewContext: sprintdom.ViewContextBacklog})
 	// A sprint view for the same project — must NOT appear.
 	_, _ = svc.CreateView(ctx, sprintdom.CreateViewInput{SprintID: &sprintID, ProjectID: projectID, Name: "Sprint", ViewType: sprintdom.ViewTypeBoard, ViewContext: sprintdom.ViewContextSprint})
 	// A timeline view for a different project — must NOT appear.
-	_, _ = svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: otherID, Name: "Other TL", ViewType: sprintdom.ViewTypeRoadmap, ViewContext: sprintdom.ViewContextTimeline})
+	_, _ = svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: otherID, Name: "Other TL", ViewType: sprintdom.ViewTypeGantt, ViewContext: sprintdom.ViewContextTimeline})
 
 	views, err := svc.ListProjectViews(ctx, projectID, sprintdom.ViewContextTimeline)
 	if err != nil {
@@ -1052,8 +1058,8 @@ func TestViewService_CreateTimelineView_HasCorrectContext(t *testing.T) {
 	projectID := uuid.New()
 	v, err := svc.CreateView(ctx, sprintdom.CreateViewInput{
 		ProjectID:   projectID,
-		Name:        "Roadmap",
-		ViewType:    sprintdom.ViewTypeRoadmap,
+		Name:        "Gantt",
+		ViewType:    sprintdom.ViewTypeGantt,
 		ViewContext: sprintdom.ViewContextTimeline,
 	})
 	if err != nil {
@@ -1076,7 +1082,7 @@ func TestViewService_DeleteTimelineView_LastViewRejected(t *testing.T) {
 	v, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{
 		ProjectID:   projectID,
 		Name:        "Only Timeline",
-		ViewType:    sprintdom.ViewTypeRoadmap,
+		ViewType:    sprintdom.ViewTypeGantt,
 		ViewContext: sprintdom.ViewContextTimeline,
 	})
 
@@ -1091,7 +1097,7 @@ func TestViewService_DeleteTimelineView_OK(t *testing.T) {
 	svc := sprintsvc.NewViewService(repo, permissiveSprintRepo{}, permissiveTaskRepo{}, nil)
 
 	projectID := uuid.New()
-	v1, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "TL1", ViewType: sprintdom.ViewTypeRoadmap, ViewContext: sprintdom.ViewContextTimeline})
+	v1, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "TL1", ViewType: sprintdom.ViewTypeGantt, ViewContext: sprintdom.ViewContextTimeline})
 	_, _ = svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "TL2", ViewType: sprintdom.ViewTypeTable, ViewContext: sprintdom.ViewContextTimeline})
 
 	if err := svc.DeleteView(ctx, v1.ProjectID, v1.ID); err != nil {
@@ -1111,7 +1117,7 @@ func TestViewService_TimelineAndBacklogViewsDontInterfere(t *testing.T) {
 	svc := sprintsvc.NewViewService(repo, permissiveSprintRepo{}, permissiveTaskRepo{}, nil)
 
 	projectID := uuid.New()
-	tv, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "Roadmap", ViewType: sprintdom.ViewTypeRoadmap, ViewContext: sprintdom.ViewContextTimeline})
+	tv, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "Gantt", ViewType: sprintdom.ViewTypeGantt, ViewContext: sprintdom.ViewContextTimeline})
 	bv, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "Backlog", ViewType: sprintdom.ViewTypeTable, ViewContext: sprintdom.ViewContextBacklog})
 
 	// ListProjectViews(timeline) only returns timeline view.
@@ -1140,7 +1146,7 @@ func TestViewService_ReorderTimelineViews_OK(t *testing.T) {
 	svc := sprintsvc.NewViewService(repo, permissiveSprintRepo{}, permissiveTaskRepo{}, nil)
 
 	projectID := uuid.New()
-	t1, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "A", ViewType: sprintdom.ViewTypeRoadmap, ViewContext: sprintdom.ViewContextTimeline})
+	t1, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "A", ViewType: sprintdom.ViewTypeGantt, ViewContext: sprintdom.ViewContextTimeline})
 	t2, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{ProjectID: projectID, Name: "B", ViewType: sprintdom.ViewTypeTable, ViewContext: sprintdom.ViewContextTimeline})
 
 	// Swap order: B, A
@@ -1166,12 +1172,12 @@ func TestViewService_ViewContextPreservedAfterUpdate(t *testing.T) {
 	projectID := uuid.New()
 	v, _ := svc.CreateView(ctx, sprintdom.CreateViewInput{
 		ProjectID:   projectID,
-		Name:        "Roadmap",
-		ViewType:    sprintdom.ViewTypeRoadmap,
+		Name:        "Gantt",
+		ViewType:    sprintdom.ViewTypeGantt,
 		ViewContext: sprintdom.ViewContextTimeline,
 	})
 
-	newName := "Renamed Roadmap"
+	newName := "Renamed Gantt"
 	updated, err := svc.UpdateView(ctx, v.ProjectID, v.ID, sprintdom.UpdateViewInput{Name: &newName})
 	if err != nil {
 		t.Fatalf("update: %v", err)
@@ -1201,6 +1207,117 @@ func seedProjectView(t *testing.T, svc *sprintsvc.ViewService, projectID uuid.UU
 		t.Fatalf("seed view: %v", err)
 	}
 	return v
+}
+
+// ---------------------------------------------------------------------------
+// Gantt: the deprecated "roadmap" alias and the Gantt config fields.
+// ---------------------------------------------------------------------------
+
+func TestViewService_RoadmapAliasIsStoredAsGantt(t *testing.T) {
+	ctx := context.Background()
+	svc := sprintsvc.NewViewService(newFakeViewRepo(), permissiveSprintRepo{}, permissiveTaskRepo{}, nil)
+	projectID := uuid.New()
+
+	created, err := svc.CreateView(ctx, sprintdom.CreateViewInput{
+		ProjectID:   projectID,
+		Name:        "Old client",
+		ViewType:    "roadmap",
+		ViewContext: sprintdom.ViewContextTimeline,
+	})
+	if err != nil {
+		t.Fatalf("create with the roadmap alias: %v", err)
+	}
+	if created.ViewType != sprintdom.ViewTypeGantt {
+		t.Fatalf("created view_type = %q, want %q", created.ViewType, sprintdom.ViewTypeGantt)
+	}
+
+	table := seedProjectView(t, svc, projectID, sprintdom.ViewConfig{})
+	alias := sprintdom.ViewType("roadmap")
+	updated, err := svc.UpdateView(ctx, projectID, table.ID, sprintdom.UpdateViewInput{ViewType: &alias})
+	if err != nil {
+		t.Fatalf("update with the roadmap alias: %v", err)
+	}
+	if updated.ViewType != sprintdom.ViewTypeGantt {
+		t.Fatalf("updated view_type = %q, want %q", updated.ViewType, sprintdom.ViewTypeGantt)
+	}
+
+	if sprintdom.ValidViewTypes["roadmap"] {
+		t.Fatal("roadmap must only be accepted through NormalizeViewType, never stored")
+	}
+}
+
+func TestViewService_GanttConfig_DropsUnknownValues(t *testing.T) {
+	ctx := context.Background()
+	svc := sprintsvc.NewViewService(newFakeViewRepo(), permissiveSprintRepo{}, permissiveTaskRepo{}, nil)
+	projectID := uuid.New()
+
+	for _, tc := range []struct {
+		zoom, deps         string
+		wantZoom, wantDeps string
+	}{
+		{"day", "hidden", "day", "hidden"},
+		{"quarter", "shown", "quarter", "shown"},
+		{"", "", "", ""},
+		{"fortnight", "sometimes", "", ""},
+		{"Week", "HIDDEN", "", ""},
+	} {
+		v, err := svc.CreateView(ctx, sprintdom.CreateViewInput{
+			ProjectID:   projectID,
+			Name:        "Gantt",
+			ViewType:    sprintdom.ViewTypeGantt,
+			ViewContext: sprintdom.ViewContextTimeline,
+			Config:      sprintdom.ViewConfig{GanttZoom: tc.zoom, GanttDependencies: tc.deps},
+		})
+		if err != nil {
+			t.Fatalf("create (%q, %q): %v", tc.zoom, tc.deps, err)
+		}
+		if v.Config.GanttZoom != tc.wantZoom || v.Config.GanttDependencies != tc.wantDeps {
+			t.Errorf("create (%q, %q) stored (%q, %q), want (%q, %q)",
+				tc.zoom, tc.deps, v.Config.GanttZoom, v.Config.GanttDependencies, tc.wantZoom, tc.wantDeps)
+		}
+	}
+}
+
+func TestViewService_GanttConfig_IsPersonal(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeViewRepo()
+	svc := sprintsvc.NewViewService(repo, permissiveSprintRepo{}, permissiveTaskRepo{}, nil)
+	projectID := uuid.New()
+	shared := sprintdom.ViewConfig{GanttZoom: "month"}
+	view := seedProjectView(t, svc, projectID, shared)
+	userA, userB := uuid.New(), uuid.New()
+
+	// userA zooms in and hides the arrows; only what differs is stored.
+	if _, err := svc.SetUserViewConfig(ctx, projectID, view.ID, userA, sprintdom.ViewConfig{GanttZoom: "day", GanttDependencies: "hidden"}); err != nil {
+		t.Fatalf("SetUserViewConfig: %v", err)
+	}
+	overrides, err := repo.GetUserViewConfigs(ctx, userA, []uuid.UUID{view.ID})
+	if err != nil {
+		t.Fatalf("GetUserViewConfigs: %v", err)
+	}
+	if got := overrides[view.ID]; got.GanttZoom != "day" || got.GanttDependencies != "hidden" {
+		t.Fatalf("stored override = %+v, want zoom day and hidden dependencies", got)
+	}
+
+	views := []*sprintdom.SprintView{
+		{ID: view.ID, ProjectID: projectID, Config: shared},
+	}
+	if err := svc.OverlayUserConfigs(ctx, userA, views); err != nil {
+		t.Fatalf("OverlayUserConfigs(userA): %v", err)
+	}
+	if views[0].Config.GanttZoom != "day" || views[0].Config.GanttDependencies != "hidden" {
+		t.Errorf("userA sees %+v, want their own zoom and dependency choice", views[0].Config)
+	}
+
+	others := []*sprintdom.SprintView{
+		{ID: view.ID, ProjectID: projectID, Config: shared},
+	}
+	if err := svc.OverlayUserConfigs(ctx, userB, others); err != nil {
+		t.Fatalf("OverlayUserConfigs(userB): %v", err)
+	}
+	if others[0].Config.GanttZoom != "month" || others[0].Config.GanttDependencies != "" {
+		t.Errorf("userB sees %+v, want the shared zoom", others[0].Config)
+	}
 }
 
 func TestViewService_SetUserViewConfig_StoresPerUserAndReturnsIt(t *testing.T) {
@@ -1651,3 +1768,7 @@ func (permissiveTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*tas
 func (permissiveTaskRepo) ProjectIsLive(context.Context, uuid.UUID) (bool, error) { return true, nil }
 
 func (permissiveTaskRepo) CountTasksOfType(context.Context, uuid.UUID) (int, error) { return 0, nil }
+
+func (permissiveTaskRepo) ListGroupColumns(_ context.Context, _ uuid.UUID, _ taskdom.TaskFilter, _, _ string) ([]taskdom.GroupColumn, error) {
+	return nil, nil
+}

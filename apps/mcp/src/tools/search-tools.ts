@@ -29,7 +29,7 @@ export function getSearchTools(): Tool[] {
 			name: "search_docs",
 			description:
 				"Search a project's documentation by keyword across BOTH document titles and body text (case-insensitive, literal match — not fuzzy or semantic). " +
-				"Returns each match's path, where it matched (title or content) and a short excerpt. " +
+				"Returns each match's path, where it matched (title or content), a short excerpt and, when the server reports it, the block number of the first match (blocks counted in document order, nested blocks after their parent; not a Markdown line number). " +
 				"Use this to find relevant docs quickly instead of walking list_docs; then open a result with read_doc.",
 			inputSchema: {
 				type: "object",
@@ -42,7 +42,7 @@ export function getSearchTools(): Tool[] {
 					query: {
 						type: "string",
 						description:
-							"Text to look for. Matched literally within a single run of text, so prefer one or two distinctive words over a long phrase.",
+							"Text to look for, matched literally within one block. A phrase that crosses bold, italic or a link usually matches; if a phrase finds nothing, retry with one or two distinctive words.",
 					},
 					limit: {
 						type: "number",
@@ -125,20 +125,8 @@ export function buildSnippet(text: string, query: string): string {
 	return `${start > 0 ? "…" : ""}${body}${end < text.length ? "…" : ""}`;
 }
 
-function docPath(
-	title: string,
-	folderId: string | null | undefined,
-	folders: Map<string, DocumentFolder>,
-): string {
-	const names: string[] = [];
-	const seen = new Set<string>();
-	let cur = folderId ? folders.get(folderId) : undefined;
-	while (cur && !seen.has(cur.id)) {
-		seen.add(cur.id);
-		names.unshift(cur.name);
-		cur = cur.parent_id ? folders.get(cur.parent_id) : undefined;
-	}
-	return [...names, title].join("/");
+function docPath(title: string, folderPath: DocumentFolder[]): string {
+	return [...folderPath.map((f) => f.name), title].join("/");
 }
 
 const text = (t: string) => ({ content: [{ type: "text", text: t }] });
@@ -155,20 +143,41 @@ export async function handleSearchTool(
 	switch (toolName) {
 		case "search_docs": {
 			const { projectId, query, limit } = SearchDocsSchema.parse(args);
-			const [hits, folders] = await Promise.all([
-				docClient.searchDocuments(projectId, query, limit),
-				docClient.listFolders(projectId),
-			]);
+			const hits = await docClient.searchDocuments(projectId, query, limit);
 			if (hits.length === 0) {
 				return text(
 					`No documents matched "${query}" in titles or body text. Try a shorter or different keyword, or browse with list_docs.`,
 				);
 			}
-			const byId = new Map(folders.map((f) => [f.id, f]));
+			// A hit's location is its folder chain, read once per distinct folder
+			// (at most `limit` lookups) rather than by loading the whole tree.
+			const folderIds = [
+				...new Set(
+					hits.map((h) => h.folder_id).filter((id): id is string => !!id),
+				),
+			];
+			const chains = new Map<string, DocumentFolder[]>(
+				await Promise.all(
+					folderIds.map(
+						async (id) =>
+							[
+								id,
+								await docClient.getFolderPath(projectId, id).catch(() => []),
+							] as const,
+					),
+				),
+			);
 			const lines = hits.map((h) => {
-				const path = docPath(h.title, h.folder_id, byId);
+				const path = docPath(
+					h.title,
+					h.folder_id ? (chains.get(h.folder_id) ?? []) : [],
+				);
 				const where =
-					h.matched_in === "title" ? "title match" : "content match";
+					h.matched_in === "title"
+						? "title match"
+						: h.block
+							? `content match, block ${h.block}`
+							: "content match";
 				return `📄 ${path}  (${where}, id: ${h.id})${h.snippet ? `\n    ${h.snippet}` : ""}`;
 			});
 			return text(

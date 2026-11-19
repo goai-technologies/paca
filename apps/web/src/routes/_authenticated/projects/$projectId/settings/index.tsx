@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import {
 	AlertTriangle,
 	Download,
+	GitBranch,
 	LayoutList,
 	Plus,
 	Settings,
@@ -10,12 +11,13 @@ import {
 	Sparkles,
 	Tag,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CustomFieldsSettings } from "@/components/projects/settings/CustomFieldsSettings";
 import { DangerZone } from "@/components/projects/settings/DangerZone";
 import { ExportSettings } from "@/components/projects/settings/ExportSettings";
 import { GeneralSettings } from "@/components/projects/settings/GeneralSettings";
+import { GitSettings } from "@/components/projects/settings/GitSettings";
 import { JevSettings } from "@/components/projects/settings/JevSettings";
 import { RolesSettings } from "@/components/projects/settings/RolesSettings";
 import { TaskStatusesSettings } from "@/components/projects/settings/TaskStatusesSettings";
@@ -26,6 +28,10 @@ import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import { RemoteComponent } from "@/lib/plugins/loader";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import { projectQueryOptions } from "@/lib/project-api";
+import {
+	pluginSectionId,
+	resolveSectionFromHash,
+} from "@/lib/settings-sections";
 
 export const Route = createFileRoute(
 	"/_authenticated/projects/$projectId/settings/",
@@ -72,6 +78,11 @@ const NAV_ITEMS = [
 		id: "custom-fields",
 		labelKey: "project.settingsPage.nav.customFields",
 		icon: Plus,
+	},
+	{
+		id: "git",
+		labelKey: "project.settingsPage.nav.git",
+		icon: GitBranch,
 	},
 	{
 		id: "jev",
@@ -126,6 +137,14 @@ function SettingsPage() {
 	const canExport =
 		hasPermission("project:export") || hasProjectPermission("project:export");
 
+	// Linking repositories rides on git:read / git:write (see the router gates).
+	const canWriteGit =
+		hasPermission("git:write") || hasProjectPermission("git:write");
+	const canReadGit =
+		canWriteGit ||
+		hasPermission("git:read") ||
+		hasProjectPermission("git:read");
+
 	const canReadRoles =
 		canManageRoles ||
 		hasPermission("roles:read") ||
@@ -143,6 +162,7 @@ function SettingsPage() {
 		if (i.id === "danger") return canDelete;
 		if (i.id === "export") return canExport;
 		if (i.id === "roles") return canReadRoles;
+		if (i.id === "git") return canReadGit;
 		return true;
 	});
 
@@ -152,11 +172,33 @@ function SettingsPage() {
 		| "task-statuses"
 		| "task-types"
 		| "custom-fields"
+		| "git"
 		| "jev"
 		| "export"
 		| "danger"
 		| string
 	>("general");
+
+	// The open tab lives in the URL hash (see lib/settings-sections.ts), so a
+	// tab can be linked to and returned to. Followed whenever the hash changes
+	// — and again when the plugin tabs finish loading, since a plugin tab can't
+	// be resolved before then. Only tabs this member can see are candidates.
+	const navigate = Route.useNavigate();
+	const hash = useRouterState({ select: (s) => s.location.hash });
+	const hashSection = resolveSectionFromHash(
+		hash,
+		visibleNavItems.map((i) => i.id),
+		pluginTabs,
+	);
+	useEffect(() => {
+		if (hashSection) setActiveSection(hashSection);
+	}, [hashSection]);
+
+	const selectSection = (id: string) => {
+		setActiveSection(id);
+		// Mirror the choice into the URL (no new history entry per click).
+		void navigate({ hash: id, replace: true });
+	};
 
 	return (
 		<div className="flex flex-col min-h-0 flex-1">
@@ -197,7 +239,7 @@ function SettingsPage() {
 							<button
 								key={id}
 								type="button"
-								onClick={() => setActiveSection(id)}
+								onClick={() => selectSection(id)}
 								className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-left ${
 									activeSection === id
 										? "bg-accent text-foreground"
@@ -217,9 +259,7 @@ function SettingsPage() {
 							<button
 								key={`${reg.pluginId}:${reg.component}`}
 								type="button"
-								onClick={() =>
-									setActiveSection(`plugin:${reg.pluginId}:${reg.component}`)
-								}
+								onClick={() => selectSection(pluginSectionId(reg))}
 								className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-left ${
 									activeSection === `plugin:${reg.pluginId}:${reg.component}`
 										? "bg-accent text-foreground"
@@ -239,7 +279,7 @@ function SettingsPage() {
 								<button
 									key={id}
 									type="button"
-									onClick={() => setActiveSection(id)}
+									onClick={() => selectSection(id)}
 									className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
 										activeSection === id
 											? "bg-accent text-foreground"
@@ -254,9 +294,7 @@ function SettingsPage() {
 								<button
 									key={`${reg.pluginId}:${reg.component}`}
 									type="button"
-									onClick={() =>
-										setActiveSection(`plugin:${reg.pluginId}:${reg.component}`)
-									}
+									onClick={() => selectSection(pluginSectionId(reg))}
 									className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
 										activeSection === `plugin:${reg.pluginId}:${reg.component}`
 											? "bg-accent text-foreground"
@@ -294,6 +332,9 @@ function SettingsPage() {
 								projectId={projectId}
 								canWrite={canManageCustomFields}
 							/>
+						)}
+						{activeSection === "git" && canReadGit && (
+							<GitSettings projectId={projectId} canWrite={canWriteGit} />
 						)}
 						{activeSection === "jev" && (
 							<JevSettings projectId={projectId} canEdit={canEditProject} />

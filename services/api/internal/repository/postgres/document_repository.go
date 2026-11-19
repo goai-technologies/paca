@@ -36,12 +36,17 @@ type documentRecord struct {
 	FolderID  *string          `db:"folder_id"`
 	Title     string           `db:"title"`
 	Content   *json.RawMessage `db:"content"`
-	Position  int              `db:"position"`
-	CreatedBy *string          `db:"created_by"`
-	UpdatedBy *string          `db:"updated_by"`
-	CreatedAt time.Time        `db:"created_at"`
-	UpdatedAt time.Time        `db:"updated_at"`
-	DeletedAt *time.Time       `db:"deleted_at"`
+	// ContentHash is NULL on rows written before migration 000087.
+	ContentHash *string    `db:"content_hash"`
+	Position    int        `db:"position"`
+	CreatedBy   *string    `db:"created_by"`
+	UpdatedBy   *string    `db:"updated_by"`
+	CreatedAt   time.Time  `db:"created_at"`
+	UpdatedAt   time.Time  `db:"updated_at"`
+	DeletedAt   *time.Time `db:"deleted_at"`
+	// Source is NULL on documents created in Paca (migration 000089).
+	Source       *json.RawMessage `db:"source"`
+	SourceLocked bool             `db:"source_locked"`
 }
 
 type docSnapshotRecord struct {
@@ -49,6 +54,7 @@ type docSnapshotRecord struct {
 	DocumentID     string           `db:"document_id"`
 	Title          string           `db:"title"`
 	Content        *json.RawMessage `db:"content"`
+	ContentHash    *string          `db:"content_hash"`
 	SnapshotNumber int64            `db:"snapshot_number"`
 	CreatedBy      *string          `db:"created_by"`
 	CreatedAt      time.Time        `db:"created_at"`
@@ -125,6 +131,9 @@ func documentFromRecord(r documentRecord) *docdom.Document {
 		UpdatedAt: r.UpdatedAt,
 		DeletedAt: r.DeletedAt,
 	}
+	d.ContentHash = r.ContentHash
+	d.Source = sourceFromJSON(r.Source)
+	d.SourceLocked = r.SourceLocked
 	if r.Content != nil {
 		d.Content = *r.Content
 	}
@@ -153,6 +162,9 @@ func documentToRecord(d *docdom.Document) documentRecord {
 		UpdatedAt: d.UpdatedAt,
 		DeletedAt: d.DeletedAt,
 	}
+	r.ContentHash = d.ContentHash
+	r.Source = sourceToJSON(d.Source)
+	r.SourceLocked = d.SourceLocked
 	if d.Content != nil {
 		r.Content = &d.Content
 	}
@@ -171,12 +183,39 @@ func documentToRecord(d *docdom.Document) documentRecord {
 	return r
 }
 
+// sourceFromJSON decodes a documents.source value; NULL (or anything that is
+// not a source object) is nil.
+func sourceFromJSON(raw *json.RawMessage) *docdom.DocSource {
+	if raw == nil {
+		return nil
+	}
+	var src docdom.DocSource
+	if err := json.Unmarshal(*raw, &src); err != nil || src.Repository == "" {
+		return nil
+	}
+	return &src
+}
+
+// sourceToJSON encodes a source for documents.source (nil is NULL).
+func sourceToJSON(src *docdom.DocSource) *json.RawMessage {
+	if src == nil {
+		return nil
+	}
+	b, err := json.Marshal(src)
+	if err != nil {
+		return nil
+	}
+	raw := json.RawMessage(b)
+	return &raw
+}
+
 func snapshotFromRecord(r docSnapshotRecord) *docdom.DocSnapshot {
 	s := &docdom.DocSnapshot{
 		ID:             uuid.MustParse(r.ID),
 		DocumentID:     uuid.MustParse(r.DocumentID),
 		Title:          r.Title,
 		SnapshotNumber: r.SnapshotNumber,
+		ContentHash:    r.ContentHash,
 		CreatedAt:      r.CreatedAt,
 	}
 	if r.Content != nil {
@@ -213,7 +252,7 @@ func (r *DocumentRepository) ListAllFolders(_ context.Context, projectID uuid.UU
 
 // ListFolders returns one cursor-paginated level of the folder tree,
 // ordered position, name, id.
-func (r *DocumentRepository) ListFolders(ctx context.Context, projectID uuid.UUID, parentID *uuid.UUID, cursorAfter *string, limit int) ([]*docdom.DocFolder, bool, error) {
+func (r *DocumentRepository) ListFolders(ctx context.Context, projectID uuid.UUID, parentID *uuid.UUID, filter docdom.FolderFilter, cursorAfter *string, limit int) ([]*docdom.DocFolder, bool, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -224,6 +263,10 @@ func (r *DocumentRepository) ListFolders(ctx context.Context, projectID uuid.UUI
 	} else {
 		args = append(args, parentID.String())
 		where += fmt.Sprintf(` AND parent_id = $%d`, len(args))
+	}
+	if name := strings.TrimSpace(filter.Name); name != "" {
+		args = append(args, name)
+		where += fmt.Sprintf(` AND LOWER(name) = LOWER($%d)`, len(args))
 	}
 	if cursorAfter != nil {
 		cur, err := docdom.DecodeTreeCursor(*cursorAfter)
@@ -295,10 +338,33 @@ func (r *DocumentRepository) FindFolderByID(_ context.Context, id uuid.UUID) (*d
 	return folderFromRecord(rec), nil
 }
 
+// lockDocSeq takes the project's change counter row (doc_sync_state, migration
+// 000088) for the rest of the transaction, creating it if the project has
+// none yet. The triggers that number document and folder writes take the same
+// row, and a transaction that reaches it while holding a document or folder
+// row deadlocks with one that holds the counter and wants that row (a folder
+// delete updates every document in the folder). So every transaction that
+// writes documents or folders calls this first: counter, then rows.
+func lockDocSeq(ctx context.Context, tx *sqlx.Tx, projectID string) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO doc_sync_state AS s (project_id) VALUES ($1)
+		ON CONFLICT (project_id) DO UPDATE SET seq = s.seq`, projectID)
+	return err
+}
+
 // CreateFolder persists a new folder.
 func (r *DocumentRepository) CreateFolder(ctx context.Context, f *docdom.DocFolder) error {
+	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		if err := lockDocSeq(ctx, tx, f.ProjectID.String()); err != nil {
+			return err
+		}
+		return insertFolder(ctx, tx, f)
+	})
+}
+
+func insertFolder(ctx context.Context, ex sqlx.ExecerContext, f *docdom.DocFolder) error {
 	rec := folderToRecord(f)
-	_, err := r.db.ExecContext(ctx, `
+	_, err := ex.ExecContext(ctx, `
 		INSERT INTO doc_folders (id, project_id, parent_id, name, position, created_by, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		rec.ID, rec.ProjectID, rec.ParentID, rec.Name, rec.Position, rec.CreatedBy, rec.CreatedAt, rec.UpdatedAt,
@@ -318,6 +384,9 @@ func (r *DocumentRepository) UpdateFolderAtomic(ctx context.Context, id uuid.UUI
 			if errors.Is(err, sql.ErrNoRows) {
 				return docdom.ErrFolderNotFound
 			}
+			return err
+		}
+		if err := lockDocSeq(ctx, tx, projectID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('doc_folders:' || $1::text, 0))`, projectID); err != nil {
@@ -363,18 +432,30 @@ func (r *DocumentRepository) UpdateFolderAtomic(ctx context.Context, id uuid.UUI
 
 // DeleteFolder permanently deletes a folder.
 func (r *DocumentRepository) DeleteFolder(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM doc_folders WHERE id = $1`, id.String())
-	return err
+	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		var projectID string
+		if err := tx.GetContext(ctx, &projectID, `SELECT project_id FROM doc_folders WHERE id = $1`, id.String()); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil // already gone
+			}
+			return err
+		}
+		if err := lockDocSeq(ctx, tx, projectID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM doc_folders WHERE id = $1`, id.String())
+		return err
+	})
 }
 
 // =============================================================================
 // Document CRUD
 // =============================================================================
 
-const documentCols = `id, project_id, folder_id, title, content, position, created_by, updated_by, created_at, updated_at, deleted_at`
+const documentCols = `id, project_id, folder_id, title, content, content_hash, position, created_by, updated_by, created_at, updated_at, deleted_at, source, source_locked`
 
 // documentTreeCols is documentCols without the (potentially large) body.
-const documentTreeCols = `id, project_id, folder_id, title, position, created_by, updated_by, created_at, updated_at, deleted_at`
+const documentTreeCols = `id, project_id, folder_id, title, content_hash, position, created_by, updated_by, created_at, updated_at, deleted_at, source, source_locked`
 
 // ListDocuments returns one cursor-paginated page of a project's documents in
 // manual order (position, title, id), without their bodies. filter narrows by
@@ -408,6 +489,10 @@ func (r *DocumentRepository) ListDocuments(ctx context.Context, projectID uuid.U
 	if q := strings.TrimSpace(filter.Search); q != "" {
 		args = append(args, "%"+escapeLikePattern(q)+"%")
 		query += fmt.Sprintf(" AND title ILIKE $%d", len(args))
+	}
+	if t := strings.TrimSpace(filter.Title); t != "" {
+		args = append(args, t)
+		query += fmt.Sprintf(" AND LOWER(title) = LOWER($%d)", len(args))
 	}
 	if cursorAfter != nil {
 		cur, err := docdom.DecodeTreeCursor(*cursorAfter)
@@ -452,33 +537,24 @@ func (r *DocumentRepository) ListAllDocuments(ctx context.Context, projectID uui
 }
 
 // SearchDocuments matches query (literally, case-insensitively) against the
-// title or any inline "text" node inside the BlockNote JSON content. The
-// jsonpath walk restricts body matching to visible text so structural keys
-// like "type":"paragraph" never match.
+// title or the document's plain text (content_text, one line per block with
+// a block's inline runs joined, so a phrase that crosses bold or a link
+// matches). Both have trigram indexes (migration 000091).
+//
+// A row whose content_text is not filled (content_text IS NULL: written
+// before migration 000091 and not backfilled yet, or its content changed by
+// something that did not fill it) is matched the old way, against each
+// inline "text" node of the BlockNote JSON.
 func (r *DocumentRepository) SearchDocuments(ctx context.Context, projectID uuid.UUID, query string, limit int) ([]*docdom.Document, error) {
-	pattern := "%" + escapeLikePattern(strings.TrimSpace(query)) + "%"
-	sink := &argList{args: []any{projectID.String(), pattern}}
-	clause, none, err := scopeSQL(ctx, "doc", docScopeColumns, sink)
+	q, args, none, err := r.searchDocumentsQuery(ctx, projectID, query, limit)
 	if err != nil {
 		return nil, err
 	}
 	if none {
 		return []*docdom.Document{}, nil
 	}
-	scopeAnd := ""
-	if clause != "" {
-		scopeAnd = " AND " + clause
-	}
-	limitP := sink.addArg(limit)
 	var records []documentRecord
-	err = r.db.SelectContext(ctx, &records, `SELECT `+documentCols+` FROM documents
-		WHERE project_id = $1 AND deleted_at IS NULL
-		  AND (title ILIKE $2 OR EXISTS (
-		        SELECT 1 FROM jsonb_path_query(COALESCE(content, 'null'::jsonb), 'lax $.**.text') AS t
-		        WHERE jsonb_typeof(t) = 'string' AND (t #>> '{}') ILIKE $2))`+scopeAnd+`
-		ORDER BY updated_at DESC, id ASC
-		LIMIT `+limitP, sink.args...)
-	if err != nil {
+	if err := r.db.SelectContext(ctx, &records, q, args...); err != nil {
 		return nil, err
 	}
 	out := make([]*docdom.Document, 0, len(records))
@@ -486,6 +562,47 @@ func (r *DocumentRepository) SearchDocuments(ctx context.Context, projectID uuid
 		out = append(out, documentFromRecord(rec))
 	}
 	return out, nil
+}
+
+// SearchDocumentsQuery returns the statement and arguments SearchDocuments
+// runs for this caller, so tests and diagnostics can EXPLAIN the exact query.
+// It errors when the caller's scope can see no document (SearchDocuments then
+// runs no query at all).
+func (r *DocumentRepository) SearchDocumentsQuery(ctx context.Context, projectID uuid.UUID, query string, limit int) (string, []any, error) {
+	q, args, none, err := r.searchDocumentsQuery(ctx, projectID, query, limit)
+	if err == nil && none {
+		err = errors.New("search scope allows no documents: no query to run")
+	}
+	return q, args, err
+}
+
+// searchDocumentsQuery builds SearchDocuments' statement and arguments. none
+// is true when the caller's scope can see no document at all.
+func (r *DocumentRepository) searchDocumentsQuery(ctx context.Context, projectID uuid.UUID, query string, limit int) (string, []any, bool, error) {
+	// content_text holds one block per line, so the pattern must be one line
+	// too: normalized here, next to the SQL that depends on it, and not only
+	// by the service.
+	pattern := "%" + escapeLikePattern(docdom.SearchQuery(query)) + "%"
+	sink := &argList{args: []any{projectID.String(), pattern}}
+	clause, none, err := scopeSQL(ctx, "doc", docScopeColumns, sink)
+	if err != nil || none {
+		return "", nil, none, err
+	}
+	scopeAnd := ""
+	if clause != "" {
+		scopeAnd = " AND " + clause
+	}
+	limitP := sink.addArg(limit)
+	q := `SELECT ` + documentCols + ` FROM documents
+		WHERE project_id = $1 AND deleted_at IS NULL
+		  AND (title ILIKE $2
+		       OR content_text ILIKE $2
+		       OR (content_text IS NULL AND EXISTS (
+		            SELECT 1 FROM jsonb_path_query(COALESCE(content, 'null'::jsonb), 'lax $.**.text') AS t
+		            WHERE jsonb_typeof(t) = 'string' AND (t #>> '{}') ILIKE $2)))` + scopeAnd + `
+		ORDER BY updated_at DESC, id ASC
+		LIMIT ` + limitP
+	return q, sink.args, false, nil
 }
 
 // FindDocumentByID returns a single non-deleted document.
@@ -518,14 +635,38 @@ func (r *DocumentRepository) FindDocumentTitleByID(_ context.Context, id uuid.UU
 
 // CreateDocument persists a new document.
 func (r *DocumentRepository) CreateDocument(ctx context.Context, d *docdom.Document) error {
+	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		if err := lockDocSeq(ctx, tx, d.ProjectID.String()); err != nil {
+			return err
+		}
+		return insertDocument(ctx, tx, d)
+	})
+}
+
+func insertDocument(ctx context.Context, ex sqlx.ExecerContext, d *docdom.Document) error {
 	rec := documentToRecord(d)
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO documents (id, project_id, folder_id, title, content, position, created_by, updated_by, created_at, updated_at, deleted_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		rec.ID, rec.ProjectID, rec.FolderID, rec.Title, rec.Content,
+	_, err := ex.ExecContext(ctx, `
+		INSERT INTO documents (id, project_id, folder_id, title, content, content_hash, position, created_by, updated_by, created_at, updated_at, deleted_at, source, source_locked, content_text)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		rec.ID, rec.ProjectID, rec.FolderID, rec.Title, rec.Content, rec.ContentHash,
 		rec.Position, rec.CreatedBy, rec.UpdatedBy, rec.CreatedAt, rec.UpdatedAt, rec.DeletedAt,
+		rec.Source, rec.SourceLocked, docdom.ContentText(d.Content),
 	)
 	return err
+}
+
+// lockDocSeqOf is lockDocSeq for the project of document id. The project is
+// read without a lock (a document never changes project). ErrDocNotFound when
+// the document does not exist.
+func lockDocSeqOf(ctx context.Context, tx *sqlx.Tx, id uuid.UUID) error {
+	var projectID string
+	if err := tx.GetContext(ctx, &projectID, `SELECT project_id FROM documents WHERE id = $1`, id.String()); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return docdom.ErrDocNotFound
+		}
+		return err
+	}
+	return lockDocSeq(ctx, tx, projectID)
 }
 
 // UpdateDocumentAtomic implements docdom.DocumentRepository — see its doc
@@ -533,27 +674,12 @@ func (r *DocumentRepository) CreateDocument(ctx context.Context, d *docdom.Docum
 func (r *DocumentRepository) UpdateDocumentAtomic(ctx context.Context, id uuid.UUID, decide func(current *docdom.Document) error) (*docdom.Document, error) {
 	var result *docdom.Document
 	err := WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
-		var rec documentRecord
-		if err := tx.GetContext(ctx, &rec, `SELECT `+documentCols+` FROM documents WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, id.String()); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return docdom.ErrDocNotFound
-			}
+		if err := lockDocSeqOf(ctx, tx, id); err != nil {
 			return err
 		}
-		current := documentFromRecord(rec)
-		if err := decide(current); err != nil {
-			return err
-		}
-		out := documentToRecord(current)
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE documents SET folder_id=$1, title=$2, content=$3, position=$4, updated_by=$5, updated_at=$6
-			WHERE id=$7 AND deleted_at IS NULL`,
-			out.FolderID, out.Title, out.Content, out.Position, out.UpdatedBy, out.UpdatedAt, out.ID,
-		); err != nil {
-			return err
-		}
-		result = current
-		return nil
+		var err error
+		result, err = updateDocumentLocked(ctx, tx, id, decide)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -561,10 +687,147 @@ func (r *DocumentRepository) UpdateDocumentAtomic(ctx context.Context, id uuid.U
 	return result, nil
 }
 
+// updateDocumentLocked is UpdateDocumentAtomic's read-modify-write inside the
+// caller's transaction tx.
+func updateDocumentLocked(ctx context.Context, tx *sqlx.Tx, id uuid.UUID, decide func(current *docdom.Document) error) (*docdom.Document, error) {
+	var rec documentRecord
+	if err := tx.GetContext(ctx, &rec, `SELECT `+documentCols+` FROM documents WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, id.String()); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, docdom.ErrDocNotFound
+		}
+		return nil, err
+	}
+	current := documentFromRecord(rec)
+	if err := decide(current); err != nil {
+		if errors.Is(err, docdom.ErrNoChange) {
+			// Nothing to write: return the row as stored, not as decide left it.
+			return documentFromRecord(rec), nil
+		}
+		return nil, err
+	}
+	out := documentToRecord(current)
+	// This UPDATE fills content_text itself: tell the documents_clear_content_text
+	// trigger (migration 000092) not to clear it. Transaction-local; every
+	// statement in tx that sets content comes through here.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('paca.content_text_written', 'on', true)`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE documents SET folder_id=$1, title=$2, content=$3, content_hash=$4, position=$5, updated_by=$6, updated_at=$7,
+			source=$9, source_locked=$10, content_text=$11
+		WHERE id=$8 AND deleted_at IS NULL`,
+		out.FolderID, out.Title, out.Content, out.ContentHash, out.Position, out.UpdatedBy, out.UpdatedAt, out.ID,
+		out.Source, out.SourceLocked, docdom.ContentText(current.Content),
+	); err != nil {
+		return nil, err
+	}
+	return current, nil
+}
+
 // DeleteDocument soft-deletes a document.
 func (r *DocumentRepository) DeleteDocument(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE documents SET deleted_at = $1 WHERE id = $2`, time.Now(), id.String())
-	return err
+	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		if err := lockDocSeqOf(ctx, tx, id); err != nil {
+			if errors.Is(err, docdom.ErrDocNotFound) {
+				return nil // nothing to delete, as before
+			}
+			return err
+		}
+		// An already deleted document keeps the time of its deletion.
+		_, err := tx.ExecContext(ctx, `UPDATE documents SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL`, time.Now(), id.String())
+		return err
+	})
+}
+
+// BackfillContentHashes implements worker.DocHashStore: it stores
+// hash(content) on up to limit documents whose content_hash is NULL (deleted
+// ones included) and returns how many it filled.
+//
+// The batch runs in one transaction with paca.skip_doc_seq = 'on', which the
+// documents_bump_seq trigger reads (migration 000088): storing a hash changes
+// nothing a client can see, so the rows keep their seq and stay out of the
+// change feed. The setting is transaction-local, so it never reaches another
+// statement on the pooled connection. updated_at is not written either.
+//
+// The rows are locked while they are hashed, so a concurrent save cannot slip
+// between the read and the write; a save that got there first has stored its
+// own hash and the row no longer matches. Rows another transaction holds are
+// skipped, not waited for: the backfill takes document rows without the
+// change counter (see lockDocSeq), so waiting could deadlock with a folder
+// delete. A skipped row is picked up by a later batch or the next start.
+func (r *DocumentRepository) BackfillContentHashes(ctx context.Context, limit int, hash func(content json.RawMessage) string) (int, error) {
+	filled := 0
+	err := WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('paca.skip_doc_seq', 'on', true)`); err != nil {
+			return err
+		}
+		var rows []struct {
+			ID      string           `db:"id"`
+			Content *json.RawMessage `db:"content"`
+		}
+		if err := tx.SelectContext(ctx, &rows,
+			`SELECT id, content FROM documents WHERE content_hash IS NULL ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED`, limit); err != nil {
+			return err
+		}
+		for _, row := range rows {
+			var content json.RawMessage
+			if row.Content != nil {
+				content = *row.Content
+			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE documents SET content_hash = $1 WHERE id = $2 AND content_hash IS NULL`, hash(content), row.ID); err != nil {
+				return err
+			}
+		}
+		filled = len(rows)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return filled, nil
+}
+
+// BackfillContentText implements worker.DocHashStore: it stores
+// text(content) as content_text on up to limit documents whose content_text
+// is NULL (deleted ones included) and returns how many it filled. It is
+// BackfillContentHashes for the plain-text column of migration 000091, with
+// the same rules: one transaction with paca.skip_doc_seq = 'on' so the rows
+// keep their seq and updated_at and stay out of the change feed (the text is
+// derived from content a client already has), and FOR UPDATE SKIP LOCKED
+// because it takes document rows without the change counter. Empty content
+// stores an empty string, so a filled row never matches again.
+func (r *DocumentRepository) BackfillContentText(ctx context.Context, limit int, text func(content json.RawMessage) string) (int, error) {
+	filled := 0
+	err := WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('paca.skip_doc_seq', 'on', true)`); err != nil {
+			return err
+		}
+		var rows []struct {
+			ID      string           `db:"id"`
+			Content *json.RawMessage `db:"content"`
+		}
+		if err := tx.SelectContext(ctx, &rows,
+			`SELECT id, content FROM documents WHERE content_text IS NULL ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED`, limit); err != nil {
+			return err
+		}
+		for _, row := range rows {
+			var content json.RawMessage
+			if row.Content != nil {
+				content = *row.Content
+			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE documents SET content_text = $1 WHERE id = $2 AND content_text IS NULL`, text(content), row.ID); err != nil {
+				return err
+			}
+		}
+		filled = len(rows)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return filled, nil
 }
 
 // =============================================================================
@@ -572,7 +835,7 @@ func (r *DocumentRepository) DeleteDocument(ctx context.Context, id uuid.UUID) e
 // =============================================================================
 
 const snapshotJoinSQL = `
-	SELECT ds.id, ds.document_id, ds.title, ds.content, ds.snapshot_number, ds.created_by, ds.created_at,
+	SELECT ds.id, ds.document_id, ds.title, ds.content, ds.content_hash, ds.snapshot_number, ds.created_by, ds.created_at,
 	       acc.name AS created_by_name
 	FROM doc_snapshots ds
 	LEFT JOIN project_members pm ON pm.id = ds.created_by
@@ -580,7 +843,7 @@ const snapshotJoinSQL = `
 
 // snapshotListJoinSQL is snapshotJoinSQL without the body column, for lists.
 const snapshotListJoinSQL = `
-	SELECT ds.id, ds.document_id, ds.title, ds.snapshot_number, ds.created_by, ds.created_at,
+	SELECT ds.id, ds.document_id, ds.title, ds.content_hash, ds.snapshot_number, ds.created_by, ds.created_at,
 	       acc.name AS created_by_name
 	FROM doc_snapshots ds
 	LEFT JOIN project_members pm ON pm.id = ds.created_by
@@ -588,12 +851,16 @@ const snapshotListJoinSQL = `
 
 // ListSnapshots returns one page of a document's snapshots, newest first and
 // without their bodies, keyset-paginated on snapshot_number.
-func (r *DocumentRepository) ListSnapshots(ctx context.Context, documentID uuid.UUID, cursorAfter *string, limit int) ([]*docdom.DocSnapshot, bool, error) {
+func (r *DocumentRepository) ListSnapshots(ctx context.Context, documentID uuid.UUID, contentHash *string, cursorAfter *string, limit int) ([]*docdom.DocSnapshot, bool, error) {
 	if limit <= 0 {
 		limit = 30
 	}
 	where := `ds.document_id = $1`
 	args := []any{documentID.String()}
+	if contentHash != nil {
+		args = append(args, *contentHash)
+		where += fmt.Sprintf(` AND ds.content_hash = $%d`, len(args))
+	}
 	if cursorAfter != nil {
 		n, err := docdom.DecodeSnapshotCursor(*cursorAfter)
 		if err != nil {
@@ -651,9 +918,9 @@ func (r *DocumentRepository) CreateSnapshot(ctx context.Context, s *docdom.DocSn
 		createdBy = &str
 	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO doc_snapshots (id, document_id, title, content, snapshot_number, created_by, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		s.ID.String(), s.DocumentID.String(), s.Title, s.Content, s.SnapshotNumber, createdBy, s.CreatedAt,
+		INSERT INTO doc_snapshots (id, document_id, title, content, content_hash, snapshot_number, created_by, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		s.ID.String(), s.DocumentID.String(), s.Title, s.Content, s.ContentHash, s.SnapshotNumber, createdBy, s.CreatedAt,
 	)
 	return err
 }

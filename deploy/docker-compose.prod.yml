@@ -79,6 +79,11 @@
 # Set STORAGE_PROVIDER=s3 with real AWS credentials and add --scale rustfs=0:
 #   docker compose --env-file .env up -d --scale rustfs=0
 #
+# ── External Redis / Valkey ───────────────────────────────────────────────────
+# Set REDIS_URL to your external connection string and suppress bundled Valkey
+# (VALKEY_PASSWORD is not needed then):
+#   docker compose --env-file .env up -d --scale valkey=0
+#
 # ── Skip AI agent ─────────────────────────────────────────────────────────────
 #   docker compose --env-file .env up -d --scale agent-runner=0
 #
@@ -182,11 +187,27 @@ services:
   valkey:
     image: valkey/valkey:8-alpine
     restart: unless-stopped
-    command: valkey-server --appendonly yes
+    # Password-protected: every other container on this Compose network —
+    # including each agent sandbox, which runs untrusted LLM-driven code —
+    # can otherwise reach valkey:6379 and read/forge agent triggers,
+    # environment commands and conversation events. The password goes in via
+    # the environment so it stays out of the command line (`ps`, and the
+    # command shown by `docker inspect`); the environment itself is still
+    # visible to anyone with Docker access. Must be URL-safe: it is embedded
+    # in REDIS_URL. Empty is accepted by Compose (so an external REDIS_URL
+    # needs no value) but the container then refuses to start.
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - |
+        [ -n "$$VALKEY_PASSWORD" ] || { echo "VALKEY_PASSWORD is required (set it in .env)" >&2; exit 1; }
+        exec valkey-server --appendonly yes --requirepass "$$VALKEY_PASSWORD"
     volumes:
       - valkey_data:/data
     healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
+      test: ["CMD-SHELL", 'REDISCLI_AUTH="$$VALKEY_PASSWORD" valkey-cli ping | grep -q PONG']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -237,7 +258,7 @@ services:
       # Defaults to the bundled postgres. Set DATABASE_URL explicitly when using
       # an external database (and scale postgres to 0).
       DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-paca}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-paca}?sslmode=disable}
-      REDIS_URL: ${REDIS_URL:-redis://valkey:6379/0}
+      REDIS_URL: ${REDIS_URL:-redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD is required — set it in your .env file (openssl rand -hex 32)}@valkey:6379/0}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required — set it in your .env file}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-168h}
@@ -247,6 +268,7 @@ services:
       # Requests per minute per client IP on each login/password/SSO endpoint
       # (refresh gets 3x). 0 disables.
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-20}
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required — set it in your .env file}
       # Object storage. Defaults to RustFS. Set STORAGE_PROVIDER=s3 for AWS S3.
@@ -262,10 +284,17 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       # Public base URL used by plugins for callback / webhook URLs.
       PUBLIC_URL: ${PUBLIC_URL:-}
+      # Origin Git providers deliver to, when it must differ from PUBLIC_URL.
+      GIT_WEBHOOK_PUBLIC_URL: ${GIT_WEBHOOK_PUBLIC_URL:-}
+      # "local" keeps plugins in the folders below; "s3" stores them in the
+      # STORAGE_* bucket instead (the gateway reads PLUGINS_STORE too, to route
+      # /plugins/* through the API). The *_DIR settings are ignored in s3 mode.
+      PLUGINS_STORE: ${PLUGINS_STORE:-local}
       PLUGINS_WASM_DIR: /plugins
       PLUGINS_FRONTEND_DIR: /plugins-frontend
       PLUGINS_MCP_DIR: /plugins-mcp
       PLUGINS_SKILLS_DIR: /plugins-skills
+      PLUGIN_FETCH_PRIVATE_HOSTS: ${PLUGIN_FETCH_PRIVATE_HOSTS:-}
       # Where the API calls into agent-runner's internal-only routes
       # (/agent-bridge/status, /agent-bridge/disconnect, /llm/models). The
       # env var keeps its historical AI_AGENT_* name (the Go
@@ -292,6 +321,7 @@ services:
         required: false
       valkey:
         condition: service_healthy
+        required: false  # skipped when REDIS_URL is set and --scale valkey=0
       rustfs:
         condition: service_healthy
         required: false
@@ -322,12 +352,13 @@ services:
       PORT: 3001
       NODE_ENV: ${ENVIRONMENT:-production}
       API_URL: http://api:8080
-      REDIS_URL: ${REDIS_URL:-redis://valkey:6379/0}
+      REDIS_URL: ${REDIS_URL:-redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD is required — set it in your .env file (openssl rand -hex 32)}@valkey:6379/0}
       CORS_ORIGINS: ${CORS_ORIGINS:-${PUBLIC_URL:-http://localhost}}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       valkey:
         condition: service_healthy
+        required: false
       api:
         condition: service_healthy
 
@@ -343,6 +374,10 @@ services:
       # a Let's Encrypt certificate automatically. Leave unset (or ":80") for
       # IP-only / localhost deployments served over plain HTTP.
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      # Must match the API's PLUGINS_STORE: "s3" makes the gateway forward
+      # /plugins/*, /plugins-mcp/* and /plugins-skills/* to the API instead of
+      # serving the plugin folders below.
+      PLUGINS_STORE: ${PLUGINS_STORE:-local}
     volumes:
       # Caddyfile must exist alongside this docker-compose.yml.
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -389,7 +424,7 @@ services:
     # "Port forwarding" comment blocks near the top of this file for the
     # ranges those bindings are picked from.
     environment:
-      VALKEY_URL: ${REDIS_URL:-redis://valkey:6379/0}
+      VALKEY_URL: ${REDIS_URL:-redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD is required — set it in your .env file (openssl rand -hex 32)}@valkey:6379/0}
       DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-paca}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-paca}?sslmode=disable}
       # Pre-shared key authenticating services/api's calls into this
       # service's internal-only routes (/agent-bridge/status,
@@ -453,6 +488,7 @@ services:
         required: false
       valkey:
         condition: service_healthy
+        required: false
       api:
         condition: service_healthy
 
@@ -460,6 +496,9 @@ volumes:
   postgres_data:
   valkey_data:
   rustfs_data:
+  # The four plugin volumes below are only used when PLUGINS_STORE=local (the
+  # default). With PLUGINS_STORE=s3 they stay empty; Compose still creates them,
+  # so remove them (and their mounts) if you never intend to use local mode.
   backend_plugins:
   frontend_plugins:
   mcp_plugins:

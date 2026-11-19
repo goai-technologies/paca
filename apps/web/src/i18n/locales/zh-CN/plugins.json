@@ -7,6 +7,7 @@
 			"installed": "已安装",
 			"updateAvailable": "有可用更新",
 			"source": "来源",
+			"official": "Paca 官方插件",
 			"upgrading": "正在升级...",
 			"upgradeTo": "升级到 {{version}}",
 			"uninstalling": "正在卸载...",

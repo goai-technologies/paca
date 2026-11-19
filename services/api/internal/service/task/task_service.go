@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Paca-AI/api/internal/apierr"
 	taskdom "github.com/Paca-AI/api/internal/domain/task"
 	"github.com/Paca-AI/api/internal/events"
 	activitysvc "github.com/Paca-AI/api/internal/service/activity"
@@ -656,6 +657,37 @@ func (s *Service) ListDistinctTags(ctx context.Context, projectID uuid.UUID) ([]
 	return s.repo.ListDistinctTags(ctx, projectID)
 }
 
+// ListGroupColumns returns the columns of a group-by dimension — see
+// taskdom.Repository.ListGroupColumns. by is one of the taskdom.GroupBy*
+// dimensions with data-derived columns (tags, assignee, reporter) or the key of
+// a custom field; a custom field's type is resolved here, not taken from the
+// caller.
+func (s *Service) ListGroupColumns(ctx context.Context, projectID uuid.UUID, filter taskdom.TaskFilter, by string) ([]taskdom.GroupColumn, error) {
+	fieldType := ""
+	switch by {
+	case taskdom.GroupByTags, taskdom.GroupByAssignee, taskdom.GroupByReporter:
+	case taskdom.GroupByStatus, taskdom.GroupBySprint, taskdom.GroupByType, taskdom.GroupByImportance:
+		return nil, apierr.New(apierr.CodeBadRequest, "column_by has a fixed set of columns")
+	default:
+		cfs, err := s.repo.ListCustomFieldDefinitions(ctx, projectID)
+		if err != nil {
+			return nil, err
+		}
+		found := false
+		for _, cf := range cfs {
+			if cf.FieldKey == by {
+				fieldType = string(cf.FieldType)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, taskdom.ErrCustomFieldNotFound
+		}
+	}
+	return s.repo.ListGroupColumns(ctx, projectID, filter, by, fieldType)
+}
+
 // ListAssignedTasks returns open tasks assigned to any of memberIDs, across
 // their respective projects — see taskdom.Repository.ListAssignedTasks.
 func (s *Service) ListAssignedTasks(ctx context.Context, memberIDs []uuid.UUID, limit int, cursorAfter *string) ([]*taskdom.Task, bool, error) {
@@ -680,6 +712,11 @@ func (s *Service) GetTask(ctx context.Context, projectID, id uuid.UUID) (*taskdo
 // GetTaskByNumber returns the task with the given project-scoped sequential number.
 func (s *Service) GetTaskByNumber(ctx context.Context, projectID uuid.UUID, taskNumber int64) (*taskdom.Task, error) {
 	return s.repo.FindTaskByNumber(ctx, projectID, taskNumber)
+}
+
+// GetTaskByKey returns the non-deleted task matching the given project prefix and task number.
+func (s *Service) GetTaskByKey(ctx context.Context, prefix string, taskNumber int64) (*taskdom.Task, error) {
+	return s.repo.FindTaskByKey(ctx, prefix, taskNumber)
 }
 
 // CreateTask creates a new task. When TaskTypeID or StatusID are not provided,
@@ -784,7 +821,7 @@ func (s *Service) UpdateTask(ctx context.Context, projectID, id uuid.UUID, in ta
 	// on both fields together, so a save touching either must read and check
 	// them under the row lock — otherwise two concurrent saves each validate
 	// against the old value of the other's field and both write.
-	if in.ParentTaskID != nil || in.TaskTypeID != nil || in.CommitmentTaskID != nil || in.HomeProjectID != nil {
+	if in.ParentTaskID != nil || in.TaskTypeID != nil || in.CommitmentTaskID != nil || in.HomeProjectID != nil || in.IfVersion != nil {
 		return s.UpdateTaskAtomic(ctx, projectID, id, func(*taskdom.Task) (taskdom.UpdateTaskInput, bool) {
 			return in, true
 		})
@@ -827,6 +864,9 @@ func (s *Service) UpdateTaskAtomic(ctx context.Context, projectID, id uuid.UUID,
 		in, ok := decide(current)
 		if !ok {
 			return nil, nil
+		}
+		if in.IfVersion != nil && current.Version != *in.IfVersion {
+			return nil, taskdom.ErrVersionConflict
 		}
 		if _, err := s.applyTaskUpdate(ctx, current, in); err != nil {
 			return nil, err
@@ -1039,6 +1079,12 @@ func (s *Service) CreateCustomFieldDefinition(ctx context.Context, in taskdom.Cr
 		opts = []taskdom.CustomFieldOption{}
 	}
 
+	// rows only applies to long_text; every other type keeps the default.
+	rows := taskdom.DefaultLongTextRows
+	if in.FieldType == taskdom.FieldTypeLongText {
+		rows = taskdom.ClampLongTextRows(in.Rows)
+	}
+
 	now := time.Now()
 	f := &taskdom.CustomFieldDefinition{
 		ID:          uuid.New(),
@@ -1048,6 +1094,8 @@ func (s *Service) CreateCustomFieldDefinition(ctx context.Context, in taskdom.Cr
 		FieldType:   in.FieldType,
 		Options:     opts,
 		IsRequired:  in.IsRequired,
+		UseInSearch: in.UseInSearch,
+		Rows:        rows,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -1084,6 +1132,14 @@ func (s *Service) UpdateCustomFieldDefinition(ctx context.Context, projectID, id
 	}
 	if in.IsRequired != nil {
 		f.IsRequired = *in.IsRequired
+	}
+	if in.UseInSearch != nil {
+		f.UseInSearch = *in.UseInSearch
+	}
+	if f.FieldType != taskdom.FieldTypeLongText {
+		f.Rows = taskdom.DefaultLongTextRows
+	} else if in.Rows != nil {
+		f.Rows = taskdom.ClampLongTextRows(*in.Rows)
 	}
 	f.UpdatedAt = time.Now()
 

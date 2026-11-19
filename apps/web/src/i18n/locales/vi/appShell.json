@@ -62,8 +62,11 @@
 		"errors": {
 			"titleInvalid": "Tiêu đề đó không hợp lệ.",
 			"folderNameInvalid": "Tên thư mục đó không hợp lệ.",
-			"renameFailed": "Đổi tên không thành công. Vui lòng thử lại."
-		}
+			"renameFailed": "Đổi tên không thành công. Vui lòng thử lại.",
+			"moveIntoSelf": "Không thể di chuyển thư mục vào chính nó hoặc một thư mục con của nó.",
+			"moveFailed": "Không thể di chuyển mục này. Vui lòng thử lại."
+		},
+		"moveToTop": "Chuyển lên cấp cao nhất"
 	},
 	"notifications": {
 		"title": "Thông báo",
@@ -74,14 +77,21 @@
 		"unmuteSound": "Bật âm thanh thông báo",
 		"text": {
 			"assigned": "{{actor}} đã giao cho bạn nhiệm vụ #{{taskNumber}} — {{taskTitle}}",
-			"mentioned": "{{actor}} đã nhắc đến bạn trong #{{taskNumber}} — {{taskTitle}}"
-		}
+			"mentioned": "{{actor}} đã nhắc đến bạn trong #{{taskNumber}} — {{taskTitle}}",
+			"question": "{{actor}} đã đặt câu hỏi cho bạn trong {{title}}",
+			"mentionedInDoc": "{{actor}} đã nhắc đến bạn trong tài liệu {{title}}",
+			"automation": "Tự động hóa: {{message}} (#{{taskNumber}} — {{taskTitle}})"
+		},
+		"untitledConversation": "Cuộc trò chuyện chưa đặt tên",
+		"globalChat": "Trò chuyện chung",
+		"untitledDocument": "Tài liệu chưa đặt tên"
 	},
 	"userMenu": {
 		"signIn": "Đăng nhập",
-		"myProfile": "Hồ sơ của tôi",
+		"myProfile": "Tài khoản",
 		"apiKeys": "Khóa API",
 		"logOut": "Đăng xuất",
-		"loggingOut": "Đang đăng xuất…"
+		"loggingOut": "Đang đăng xuất…",
+		"sendFeedback": "Gửi phản hồi"
 	}
 }

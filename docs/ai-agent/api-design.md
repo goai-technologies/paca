@@ -81,7 +81,7 @@ Create a new agent. This also creates the corresponding `project_members` row wi
 }
 ```
 
-`acp_provider` (one of `claude-code`, `codex`, `gemini-cli`, `goose`, `custom`) is required when `agent_type` is `acp`. `acp_command` is required only when `acp_provider` is `custom` — built-in providers resolve a default launch command themselves, via a small registry in the bridge daemon itself (`apps/acp-bridge/internal/provider`, e.g. `"goose"` → `["goose", "acp"]`), not anything Paca's own backend knows about. None of the `llm_*` fields apply to `acp` agents, nor do `system_prompt`, `git_committer_name`, or `git_committer_email` — the local ACP client owns its own system prompt and git identity, so Paca rejects a non-empty value for any of those fields on a non-`llm` agent (create and update, project-scoped and global) with `400` and code `AGENT_FIELD_NOT_SUPPORTED_FOR_TYPE`. The message and `error_details.fields` (comma-separated) name the offending fields, e.g. `field not supported for this agent type: system_prompt, git_committer_email`. Empty values are accepted, so clients that echo defaults keep working. The same applies to `provider_cli` agents (project-scoped only).
+`acp_provider` (one of `claude-code`, `codex`, `gemini-cli`, `goose`, `opencode`, `custom`) is required when `agent_type` is `acp`. `acp_command` is required only when `acp_provider` is `custom` — built-in providers resolve a default launch command themselves, via a small registry in the bridge daemon itself (`apps/acp-bridge/internal/provider`, e.g. `"goose"` → `["goose", "acp"]`), not anything Paca's own backend knows about. `acp_model` and `acp_effort` are optional strings (`acp` agents only; accepted on create and update, project-scoped and global, and returned on the agent when non-empty). The bridge passes each to the agent exactly as stored when it starts a session, so they take effect on the next session rather than one already running; Paca trims both and rejects a value longer than 200 bytes or containing control characters with `400` and code `AGENT_ACP_MODEL_INVALID`, but does not check that the provider supports it: a value the agent rejects is logged by the bridge and the provider default is used. An empty string clears a value on update. None of the `llm_*` fields apply to `acp` agents, nor do `system_prompt`, `git_committer_name`, or `git_committer_email` — the local ACP client owns its own system prompt and git identity, so Paca rejects a non-empty value for any of those fields on a non-`llm` agent (create and update, project-scoped and global) with `400` and code `AGENT_FIELD_NOT_SUPPORTED_FOR_TYPE`. The message and `error_details.fields` (comma-separated) name the offending fields, e.g. `field not supported for this agent type: system_prompt, git_committer_email`. Empty values are accepted, so clients that echo defaults keep working. The same applies to `provider_cli` agents (project-scoped only).
 
 **Response:** `201 Created` with the created agent object.
 
@@ -289,6 +289,8 @@ Two read-only, project-agnostic reference endpoints under `/api/v1/agents`, used
 ### `GET /api/v1/agents/llm-models`
 
 Proxies to `services/agent-runner`'s `/llm/models`, returning the verified LLM models available, grouped by provider.
+
+If agent-runner is unreachable (for example, scaled to 0 with `PACA_AGENT_RUNNER=no`), the endpoint returns `200` with `{}` and logs a warning. A runner that answers with an error still returns `500`.
 
 ---
 

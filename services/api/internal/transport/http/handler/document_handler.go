@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,10 +22,12 @@ import (
 // DocumentHandler handles documentation endpoints.
 type DocumentHandler struct {
 	svc             docdom.Service
+	changesSvc      docdom.ChangesService
 	activitySvc     docdom.ActivityService
 	avatarSvc       attachmentdom.AvatarService
 	notificationSvc notificationdom.Service
 	listScoper      ListScoper
+	authz           docAuthorizer
 }
 
 // NewDocumentHandler returns a DocumentHandler wired to the doc service and
@@ -89,6 +90,7 @@ func parseTreeParent(raw string) (*uuid.UUID, error) {
 // ListFolders handles GET /projects/:projectId/docs/folders — one
 // cursor-paginated level of the folder tree, in manual order:
 //   - parent_id=<uuid>|null  the folder whose children to list (default null = top level)
+//   - name=<text>            only folders with exactly this name (case-insensitive)
 //   - page_size=<1-200>      (default 50)
 //   - cursor=<opaque>        from the previous page's next_cursor
 //
@@ -111,7 +113,7 @@ func (h *DocumentHandler) ListFolders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cursor := parseCursorParam(r)
-	folders, hasMore, err := h.svc.ListFolders(r.Context(), projectID, parent, cursor, pageSize)
+	folders, hasMore, err := h.svc.ListFolders(r.Context(), projectID, parent, docdom.FolderFilter{Name: strings.TrimSpace(q.Get("name"))}, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -247,7 +249,8 @@ func (h *DocumentHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 // page of documents in manual order (position, title), without their bodies:
 //   - folder_id=<uuid>|null  only documents directly in that folder / outside any
 //     folder; omit for documents anywhere in the project
-//   - search=<text>          case-insensitive title match
+//   - search=<text>          case-insensitive title match (substring)
+//   - title=<text>           case-insensitive exact title match
 //   - page_size=<1-200>      (default 50)
 //   - cursor=<opaque>        from the previous page's next_cursor
 //
@@ -270,6 +273,7 @@ func (h *DocumentHandler) ListDocuments(w http.ResponseWriter, r *http.Request) 
 		filter.RootOnly = folderID == nil
 	}
 	filter.Search = strings.TrimSpace(q.Get("search"))
+	filter.Title = strings.TrimSpace(q.Get("title"))
 	pageSize, err := parsePageSize(r, 50, 200)
 	if err != nil {
 		presenter.Error(w, r, err)
@@ -338,7 +342,11 @@ func (h *DocumentHandler) SearchDocuments(w http.ResponseWriter, r *http.Request
 	presenter.OK(w, r, map[string]any{"items": resp})
 }
 
-// GetDocument handles GET /projects/:projectId/docs/:docId.
+// GetDocument handles GET /projects/:projectId/docs/:docId. The ETag covers
+// the whole response (content hash plus a tag over title, folder, position and
+// the other fields, see docETag), so If-None-Match gets 304 with no body only
+// when nothing the client would receive has changed. content_hash in the body
+// is the content alone, and is what If-Match on a write compares.
 func (h *DocumentHandler) GetDocument(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
@@ -359,6 +367,14 @@ func (h *DocumentHandler) GetDocument(w http.ResponseWriter, r *http.Request) {
 		presenter.Error(w, r, docdom.ErrDocNotFound)
 		return
 	}
+	etag := docETag(d)
+	w.Header().Set("ETag", etag)
+	// An authenticated response: never served from a cache without revalidating.
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if inm := r.Header.Get("If-None-Match"); inm != "" && etagMatches(inm, etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	presenter.OK(w, r, dto.DocumentFromEntity(d))
 }
 
@@ -374,18 +390,18 @@ func (h *DocumentHandler) CreateDocument(w http.ResponseWriter, r *http.Request)
 	if !middleware.BindJSON(w, r, &req) {
 		return
 	}
+	if err := req.Validate(); err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
 	if err := dto.ValidateBlockNoteContent(req.Content); err != nil {
 		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "content: "+err.Error()))
 		return
 	}
 
 	var createdBy *uuid.UUID
-	var createdByAgent *uuid.UUID
 	if actorID, ok := middleware.ActorIDFromContext(r.Context()); ok {
 		createdBy = &actorID
-	}
-	if agentID, _ := middleware.AgentIDFromContext(r.Context()); agentID != uuid.Nil {
-		createdByAgent = &agentID
 	}
 
 	d, err := h.svc.CreateDocument(r.Context(), docdom.CreateDocumentInput{
@@ -402,21 +418,22 @@ func (h *DocumentHandler) CreateDocument(w http.ResponseWriter, r *http.Request)
 
 	// Record creation activity (best-effort).
 	if createdBy != nil {
-		content, _ := json.Marshal(map[string]string{"title": d.Title})
-		_ = h.activitySvc.RecordActivity(r.Context(), docdom.RecordActivityInput{
-			DocumentID:   d.ID,
-			ProjectID:    projectID,
-			ActorID:      createdBy,
-			ActorAgentID: createdByAgent,
-			ActivityType: docdom.ActivityTypeDocCreated,
-			Content:      content,
-		})
+		h.recordDocCreated(r.Context(), projectID, d, *createdBy, req.WriteNote)
 	}
 
+	w.Header().Set("ETag", docETag(d))
 	presenter.Created(w, r, dto.DocumentFromEntity(d))
 }
 
-// UpdateDocument handles PATCH /projects/:projectId/docs/:docId.
+// UpdateDocument handles PATCH /projects/:projectId/docs/:docId. An If-Match
+// content hash (or document ETag) whose content is no longer current gets 412
+// with the stored version in error_details. A write that changes nothing is a
+// 200 that stores nothing.
+//
+// If-Match is a precondition on content only: a rename or a move since the
+// caller read the document does not fail it. A caller that also sends title or
+// folder_id overwrites whatever is stored for those, so send only the fields
+// you mean to change.
 func (h *DocumentHandler) UpdateDocument(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
@@ -429,8 +446,18 @@ func (h *DocumentHandler) UpdateDocument(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	ifMatch, err := ifMatchHash(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+
 	var req dto.UpdateDocumentRequest
 	if !middleware.BindJSON(w, r, &req) {
+		return
+	}
+	if err := req.Validate(); err != nil {
+		presenter.Error(w, r, err)
 		return
 	}
 	if req.Content.Set && req.Content.Value != nil {
@@ -441,52 +468,33 @@ func (h *DocumentHandler) UpdateDocument(w http.ResponseWriter, r *http.Request)
 	}
 
 	var updatedBy *uuid.UUID
-	var updatedByAgent *uuid.UUID
 	if actorID, ok := middleware.ActorIDFromContext(r.Context()); ok {
 		updatedBy = &actorID
-	}
-	if agentID, _ := middleware.AgentIDFromContext(r.Context()); agentID != uuid.Nil {
-		updatedByAgent = &agentID
 	}
 
 	// Capture old state for activity recording.
 	oldDoc, _ := h.svc.GetDocument(r.Context(), docID)
 
-	d, err := h.svc.UpdateDocument(r.Context(), projectID, docID, docdom.UpdateDocumentInput{
+	d, change, err := h.svc.UpdateDocument(r.Context(), projectID, docID, docdom.UpdateDocumentInput{
 		Title:     req.Title,
 		Content:   req.Content.Ptr(),
 		FolderID:  req.FolderID.Ptr(),
 		Position:  req.Position,
 		UpdatedBy: updatedBy,
+		IfMatch:   ifMatch,
+		Lock:      req.SourceLocked,
 	})
 	if err != nil {
-		presenter.Error(w, r, err)
+		presenter.Error(w, r, h.withLastNote(r.Context(), projectID, docID, err))
 		return
 	}
+	w.Header().Set("ETag", docETag(d))
 
-	// Record update activity (best-effort).
-	if updatedBy != nil && oldDoc != nil {
-		changes := docChangedFields(oldDoc, req)
-		if len(changes) > 0 {
-			content, _ := json.Marshal(map[string]any{"changes": changes})
-			_ = h.activitySvc.RecordActivity(r.Context(), docdom.RecordActivityInput{
-				DocumentID:   docID,
-				ProjectID:    oldDoc.ProjectID,
-				ActorID:      updatedBy,
-				ActorAgentID: updatedByAgent,
-				ActivityType: docdom.ActivityTypeDocUpdated,
-				Content:      content,
-			})
-		}
-
-		// Publish a plugin event for each user newly @mentioned in the
-		// content (no in-app row — see notificationSvc.NotifyDocMentioned's
-		// doc comment).
-		if h.notificationSvc != nil && req.Content.Set && req.Content.Value != nil {
-			for _, mentionedID := range newlyMentionedUserIDs(oldDoc.Content, req.Content.Value) {
-				h.notificationSvc.NotifyDocMentioned(r.Context(), mentionedID, *updatedBy, oldDoc.ProjectID, docID)
-			}
-		}
+	// Record update activity (best-effort). A write that changed nothing was
+	// not stored, so it records no activity (and so publishes no doc.updated
+	// event) and notifies no one.
+	if updatedBy != nil && oldDoc != nil && change.Any() {
+		h.recordDocUpdate(r.Context(), oldDoc.ProjectID, oldDoc, d, req.Content.Value, change, *updatedBy, req.WriteNote)
 	}
 
 	presenter.OK(w, r, dto.DocumentFromEntity(d))
@@ -512,16 +520,10 @@ func (h *DocumentHandler) DeleteDocument(w http.ResponseWriter, r *http.Request)
 
 	// Record deletion activity (best-effort).
 	if actorID, ok := middleware.ActorIDFromContext(r.Context()); ok {
-		agentID, _ := middleware.AgentIDFromContext(r.Context())
-		var agentIDPtr *uuid.UUID
-		if agentID != uuid.Nil {
-			agentIDPtr = &agentID
-		}
 		_ = h.activitySvc.RecordActivity(r.Context(), docdom.RecordActivityInput{
 			DocumentID:   docID,
 			ProjectID:    projectID,
 			ActorID:      &actorID,
-			ActorAgentID: agentIDPtr,
 			ActivityType: docdom.ActivityTypeDocDeleted,
 		})
 	}
@@ -536,6 +538,7 @@ func (h *DocumentHandler) DeleteDocument(w http.ResponseWriter, r *http.Request)
 // ListSnapshots handles GET /projects/:projectId/docs/:docId/snapshots — one
 // cursor-paginated page of the document's version history, newest first,
 // without the snapshot bodies (GET a single snapshot for its content):
+//   - content_hash=<hex> only the snapshots holding that content version
 //   - page_size=<1-100>  (default 30)
 //   - cursor=<opaque>    from the previous page's next_cursor
 func (h *DocumentHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
@@ -555,7 +558,16 @@ func (h *DocumentHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	cursor := parseCursorParam(r)
-	snaps, hasMore, err := h.svc.ListSnapshots(r.Context(), projectID, docID, cursor, pageSize)
+	var contentHash *string
+	if raw := strings.TrimSpace(r.URL.Query().Get("content_hash")); raw != "" {
+		hash, ok := normalizeContentHash(raw)
+		if !ok {
+			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "content_hash must be 64 hex characters"))
+			return
+		}
+		contentHash = &hash
+	}
+	snaps, hasMore, err := h.svc.ListSnapshots(r.Context(), projectID, docID, contentHash, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -656,17 +668,10 @@ func (h *DocumentHandler) AddComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentID, _ := middleware.AgentIDFromContext(r.Context())
-	var agentIDPtr *uuid.UUID
-	if agentID != uuid.Nil {
-		agentIDPtr = &agentID
-	}
-
 	a, err := h.activitySvc.AddComment(r.Context(), docdom.AddCommentInput{
 		DocumentID: docID,
 		ProjectID:  projectID,
 		ActorID:    actorID,
-		AgentID:    agentIDPtr,
 		Content:    req.Content,
 	})
 	if err != nil {
@@ -704,13 +709,7 @@ func (h *DocumentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	agentID, _ := middleware.AgentIDFromContext(r.Context())
-	var agentIDPtr *uuid.UUID
-	if agentID != uuid.Nil {
-		agentIDPtr = &agentID
-	}
-
-	a, err := h.activitySvc.UpdateComment(r.Context(), commentID, projectID, actorID, agentIDPtr, req.Content)
+	a, err := h.activitySvc.UpdateComment(r.Context(), commentID, projectID, actorID, req.Content)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -737,13 +736,7 @@ func (h *DocumentHandler) DeleteComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	agentID, _ := middleware.AgentIDFromContext(r.Context())
-	var agentIDPtr *uuid.UUID
-	if agentID != uuid.Nil {
-		agentIDPtr = &agentID
-	}
-
-	if err := h.activitySvc.DeleteComment(r.Context(), commentID, projectID, actorID, agentIDPtr); err != nil {
+	if err := h.activitySvc.DeleteComment(r.Context(), commentID, projectID, actorID); err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
@@ -790,30 +783,30 @@ func parseDocCommentID(r *http.Request) (uuid.UUID, error) {
 // Activity helpers
 // =============================================================================
 
-// docChangedFields compares the old document against the patch request and
-// returns a FieldChange for each field that actually changed.
-func docChangedFields(old *docdom.Document, req dto.UpdateDocumentRequest) []docdom.FieldChange {
+// docChangedFields returns a FieldChange for each field the service reports
+// changed, with the old value from old and the new one from the stored
+// document cur. Content counts as changed only when its content hash did
+// (change.Content), never because the JSON bytes differ. A source change alone
+// is not listed (it records no activity); a lock change is.
+func docChangedFields(old, cur *docdom.Document, change docdom.DocChange) []docdom.FieldChange {
 	var changes []docdom.FieldChange
 
-	if req.Title != nil && *req.Title != old.Title {
-		changes = append(changes, docdom.FieldChange{Field: "title", Old: old.Title, New: *req.Title})
+	if change.Title {
+		changes = append(changes, docdom.FieldChange{Field: "title", Old: old.Title, New: cur.Title})
 	}
 
-	if req.Content.Set {
-		if string(req.Content.Value) != string(old.Content) {
-			changes = append(changes, docdom.FieldChange{Field: "content", Old: old.Content, New: req.Content.Value})
-		}
+	if change.Content {
+		changes = append(changes, docdom.FieldChange{Field: "content", Old: old.Content, New: cur.Content})
 	}
 
-	if req.FolderID.Set {
-		oldVal := uuidPtrToStr(old.FolderID)
-		newVal := ""
-		if req.FolderID.Value != nil {
-			newVal = req.FolderID.Value.String()
-		}
-		if oldVal != newVal {
+	if change.Folder {
+		if oldVal, newVal := uuidPtrToStr(old.FolderID), uuidPtrToStr(cur.FolderID); oldVal != newVal {
 			changes = append(changes, docdom.FieldChange{Field: "folder_id", Old: oldVal, New: newVal})
 		}
+	}
+
+	if change.Lock {
+		changes = append(changes, docdom.FieldChange{Field: "source_locked", Old: old.SourceLocked, New: cur.SourceLocked})
 	}
 
 	return changes

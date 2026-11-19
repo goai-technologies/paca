@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
-import { Check, Edit2, Loader2, Plus, Trash2, X } from "lucide-react";
+import { Check, Edit2, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
@@ -17,7 +17,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import {
 	Table,
 	TableBody,
@@ -27,6 +30,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
+import { usePagedSlice } from "@/hooks/use-table-paging";
 import {
 	ApiErrorCode,
 	getApiErrorCode,
@@ -47,6 +51,7 @@ import { cn } from "@/lib/utils";
 
 const UI_FIELD_TYPES = [
 	"Text",
+	"LongText",
 	"Number",
 	"Date",
 	"Checkbox",
@@ -64,6 +69,7 @@ const UI_TO_API_FIELD_TYPE: Record<UIFieldType, FieldType> = {
 	Select: "select",
 	MultiSelect: "multi_select",
 	Url: "url",
+	LongText: "long_text",
 };
 
 const UI_FIELD_TYPE_LABEL_KEYS = {
@@ -74,6 +80,7 @@ const UI_FIELD_TYPE_LABEL_KEYS = {
 	Select: "settings.customFields.fieldTypes.select",
 	MultiSelect: "settings.customFields.fieldTypes.multiSelect",
 	Url: "settings.customFields.fieldTypes.url",
+	LongText: "settings.customFields.fieldTypes.longText",
 } as const satisfies Record<UIFieldType, string>;
 
 const API_TO_UI_FIELD_TYPE_LABEL_KEY = {
@@ -84,6 +91,7 @@ const API_TO_UI_FIELD_TYPE_LABEL_KEY = {
 	select: "settings.customFields.fieldTypes.select",
 	multi_select: "settings.customFields.fieldTypes.multiSelect",
 	url: "settings.customFields.fieldTypes.url",
+	long_text: "settings.customFields.fieldTypes.longText",
 } as const satisfies Record<string, string>;
 
 function toUIFieldType(apiType: string, t: TFunction<"projects">): string {
@@ -92,6 +100,15 @@ function toUIFieldType(apiType: string, t: TFunction<"projects">): string {
 			apiType as keyof typeof API_TO_UI_FIELD_TYPE_LABEL_KEY
 		];
 	return key ? t(key) : apiType;
+}
+
+const DEFAULT_ROWS = 3;
+const MIN_ROWS = 2;
+const MAX_ROWS = 20;
+
+function clampRows(n: number): number {
+	if (!Number.isFinite(n)) return DEFAULT_ROWS;
+	return Math.min(MAX_ROWS, Math.max(MIN_ROWS, Math.round(n)));
 }
 
 function slugify(s: string): string {
@@ -121,6 +138,8 @@ function CreateCustomFieldDialog({
 	const [keyManuallyEdited, setKeyManuallyEdited] = useState(false);
 	const [fieldType, setFieldType] = useState<UIFieldType>("Text");
 	const [required, setRequired] = useState(false);
+	const [useInSearch, setUseInSearch] = useState(false);
+	const [rows, setRows] = useState(DEFAULT_ROWS);
 	const [options, setOptions] = useState<CustomFieldOption[]>([]);
 	const [newOption, setNewOption] = useState("");
 	const [error, setError] = useState<string | null>(null);
@@ -130,7 +149,9 @@ function CreateCustomFieldDialog({
 		setFieldKey("");
 		setKeyManuallyEdited(false);
 		setFieldType("Text");
+		setRows(DEFAULT_ROWS);
 		setRequired(false);
+		setUseInSearch(false);
 		setOptions([]);
 		setNewOption("");
 		setError(null);
@@ -142,6 +163,7 @@ function CreateCustomFieldDialog({
 	};
 
 	const mutation = useMutation({
+		meta: { success: "created", subject: "customField" },
 		mutationFn: () =>
 			createCustomFieldDefinition(projectId, {
 				display_name: displayName.trim(),
@@ -150,6 +172,8 @@ function CreateCustomFieldDialog({
 				options:
 					fieldType === "Select" || fieldType === "MultiSelect" ? options : [],
 				is_required: required,
+				use_in_search: useInSearch,
+				rows: fieldType === "LongText" ? clampRows(rows) : undefined,
 			}),
 		onSuccess: () => {
 			void queryClient.invalidateQueries({
@@ -327,6 +351,27 @@ function CreateCustomFieldDialog({
 						</div>
 					)}
 
+					{fieldType === "LongText" && (
+						<div className="space-y-1.5">
+							<Label>{t("settings.customFields.rowsLabel")}</Label>
+							<Input
+								type="number"
+								min={MIN_ROWS}
+								max={MAX_ROWS}
+								value={rows}
+								onChange={(e) => setRows(Number(e.target.value))}
+								onBlur={() => setRows(clampRows(rows))}
+								className="h-8 w-24 text-xs"
+							/>
+							<p className="text-xs text-muted-foreground/70">
+								{t("settings.customFields.rowsHint", {
+									min: MIN_ROWS,
+									max: MAX_ROWS,
+								})}
+							</p>
+						</div>
+					)}
+
 					{/* Required toggle */}
 					<div className="flex items-center justify-between rounded-xl border border-border/50 bg-muted/20 px-4 py-3">
 						<div>
@@ -337,25 +382,28 @@ function CreateCustomFieldDialog({
 								{t("settings.customFields.requiredHint")}
 							</p>
 						</div>
-						<button
-							type="button"
-							role="switch"
-							aria-checked={required}
-							onClick={() => setRequired(!required)}
-							className={cn(
-								"relative inline-flex h-5 w-9 items-center rounded-full border-2 transition-colors",
-								required
-									? "border-primary bg-primary"
-									: "border-border bg-muted",
-							)}
-						>
-							<span
-								className={cn(
-									"inline-block size-3.5 rounded-full bg-white shadow transition-transform",
-									required ? "translate-x-4" : "translate-x-0.5",
-								)}
-							/>
-						</button>
+						<Switch
+							aria-label={t("settings.customFields.requiredLabel")}
+							checked={required}
+							onCheckedChange={setRequired}
+						/>
+					</div>
+
+					{/* Use-in-search toggle */}
+					<div className="flex items-center justify-between rounded-xl border border-border/50 bg-muted/20 px-4 py-3">
+						<div>
+							<p className="text-sm font-medium">
+								{t("settings.customFields.useInSearchLabel")}
+							</p>
+							<p className="text-xs text-muted-foreground/70">
+								{t("settings.customFields.useInSearchHint")}
+							</p>
+						</div>
+						<Switch
+							aria-label={t("settings.customFields.useInSearchLabel")}
+							checked={useInSearch}
+							onCheckedChange={setUseInSearch}
+						/>
 					</div>
 
 					{error ? (
@@ -383,7 +431,7 @@ function CreateCustomFieldDialog({
 						onClick={() => mutation.mutate()}
 					>
 						{mutation.isPending ? (
-							<Loader2 className="size-3.5 animate-spin" />
+							<Spinner aria-hidden="true" className="size-3.5" />
 						) : null}
 						{t("settings.customFields.createDialog.createField")}
 					</Button>
@@ -413,6 +461,8 @@ function EditCustomFieldDialog({
 		field?.options ?? [],
 	);
 	const [required, setRequired] = useState(field?.is_required ?? false);
+	const [useInSearch, setUseInSearch] = useState(field?.use_in_search ?? false);
+	const [rows, setRows] = useState(field?.rows ?? DEFAULT_ROWS);
 	const [newOption, setNewOption] = useState("");
 	const [error, setError] = useState<string | null>(null);
 
@@ -420,6 +470,8 @@ function EditCustomFieldDialog({
 		setDisplayName(field?.display_name ?? "");
 		setOptions(field?.options ?? []);
 		setRequired(field?.is_required ?? false);
+		setUseInSearch(field?.use_in_search ?? false);
+		setRows(field?.rows ?? DEFAULT_ROWS);
 		setError(null);
 		setNewOption("");
 	}, [field]);
@@ -427,6 +479,7 @@ function EditCustomFieldDialog({
 	const uiFieldType = field ? toUIFieldType(field.field_type, t) : "";
 
 	const mutation = useMutation({
+		meta: { success: "saved", subject: "customField" },
 		mutationFn: () => {
 			if (!field)
 				return Promise.resolve(field as unknown as CustomFieldDefinition);
@@ -437,6 +490,8 @@ function EditCustomFieldDialog({
 						? options
 						: undefined,
 				is_required: required,
+				use_in_search: useInSearch,
+				rows: field.field_type === "long_text" ? clampRows(rows) : undefined,
 			});
 		},
 		onSuccess: () => {
@@ -591,6 +646,27 @@ function EditCustomFieldDialog({
 						</div>
 					)}
 
+					{field.field_type === "long_text" && (
+						<div className="space-y-1.5">
+							<Label>{t("settings.customFields.rowsLabel")}</Label>
+							<Input
+								type="number"
+								min={MIN_ROWS}
+								max={MAX_ROWS}
+								value={rows}
+								onChange={(e) => setRows(Number(e.target.value))}
+								onBlur={() => setRows(clampRows(rows))}
+								className="h-8 w-24 text-xs"
+							/>
+							<p className="text-xs text-muted-foreground/70">
+								{t("settings.customFields.rowsHint", {
+									min: MIN_ROWS,
+									max: MAX_ROWS,
+								})}
+							</p>
+						</div>
+					)}
+
 					{/* Required toggle */}
 					<div className="flex items-center justify-between rounded-xl border border-border/50 bg-muted/20 px-4 py-3">
 						<div>
@@ -601,25 +677,28 @@ function EditCustomFieldDialog({
 								{t("settings.customFields.requiredHint")}
 							</p>
 						</div>
-						<button
-							type="button"
-							role="switch"
-							aria-checked={required}
-							onClick={() => setRequired(!required)}
-							className={cn(
-								"relative inline-flex h-5 w-9 items-center rounded-full border-2 transition-colors",
-								required
-									? "border-primary bg-primary"
-									: "border-border bg-muted",
-							)}
-						>
-							<span
-								className={cn(
-									"inline-block size-3.5 rounded-full bg-white shadow transition-transform",
-									required ? "translate-x-4" : "translate-x-0.5",
-								)}
-							/>
-						</button>
+						<Switch
+							aria-label={t("settings.customFields.requiredLabel")}
+							checked={required}
+							onCheckedChange={setRequired}
+						/>
+					</div>
+
+					{/* Use-in-search toggle */}
+					<div className="flex items-center justify-between rounded-xl border border-border/50 bg-muted/20 px-4 py-3">
+						<div>
+							<p className="text-sm font-medium">
+								{t("settings.customFields.useInSearchLabel")}
+							</p>
+							<p className="text-xs text-muted-foreground/70">
+								{t("settings.customFields.useInSearchHint")}
+							</p>
+						</div>
+						<Switch
+							aria-label={t("settings.customFields.useInSearchLabel")}
+							checked={useInSearch}
+							onCheckedChange={setUseInSearch}
+						/>
 					</div>
 
 					{error ? (
@@ -647,7 +726,7 @@ function EditCustomFieldDialog({
 						onClick={() => mutation.mutate()}
 					>
 						{mutation.isPending ? (
-							<Loader2 className="size-3.5 animate-spin" />
+							<Spinner aria-hidden="true" className="size-3.5" />
 						) : null}
 						{t("settings.customFields.saveChanges")}
 					</Button>
@@ -675,6 +754,7 @@ function DeleteCustomFieldDialog({
 	const [error, setError] = useState<string | null>(null);
 
 	const mutation = useMutation({
+		meta: { success: "deleted", subject: "customField" },
 		mutationFn: () => {
 			if (!field) return Promise.resolve();
 			return deleteCustomFieldDefinition(projectId, field.id);
@@ -750,7 +830,7 @@ function DeleteCustomFieldDialog({
 						onClick={() => mutation.mutate()}
 					>
 						{mutation.isPending ? (
-							<Loader2 className="size-3.5 animate-spin" />
+							<Spinner aria-hidden="true" className="size-3.5" />
 						) : null}
 						{t("settings.customFields.deleteDialog.deleteField")}
 					</Button>
@@ -783,6 +863,10 @@ export function CustomFieldsSettings({
 		isError,
 		error,
 	} = useQuery({ ...customFieldsQueryOptions(projectId), enabled: canRead });
+	const { pageItems: pagedFields, paginationProps } = usePagedSlice(
+		"project-custom-fields",
+		fields,
+	);
 	// While permissions are still loading, canRead defaults to false same as
 	// a confirmed denial — guard on isPermissionsLoading (and fold it into
 	// isLoading) so the section shows the skeleton instead of flashing
@@ -882,11 +966,14 @@ export function CustomFieldsSettings({
 								<TableHead className="px-5 text-xs font-semibold uppercase tracking-wide">
 									{t("settings.customFields.table.required")}
 								</TableHead>
+								<TableHead className="px-5 text-xs font-semibold uppercase tracking-wide">
+									{t("settings.customFields.table.useInSearch")}
+								</TableHead>
 								{canWrite && <TableHead className="w-20 px-5" />}
 							</TableRow>
 						</TableHeader>
 						<TableBody>
-							{fields.map((field) => (
+							{pagedFields.map((field) => (
 								<TableRow key={field.id} className="group">
 									<TableCell className="px-5 font-medium">
 										{field.display_name}
@@ -901,7 +988,19 @@ export function CustomFieldsSettings({
 									</TableCell>
 									<TableCell className="px-5">
 										{field.is_required ? (
-											<span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-medium">
+											<span className="inline-flex items-center gap-1 text-success text-xs font-medium">
+												<Check className="size-3" />
+												{t("settings.customFields.yes")}
+											</span>
+										) : (
+											<span className="text-xs text-muted-foreground/50">
+												{t("settings.customFields.no")}
+											</span>
+										)}
+									</TableCell>
+									<TableCell className="px-5">
+										{field.use_in_search ? (
+											<span className="inline-flex items-center gap-1 text-success text-xs font-medium">
 												<Check className="size-3" />
 												{t("settings.customFields.yes")}
 											</span>
@@ -940,6 +1039,7 @@ export function CustomFieldsSettings({
 							))}
 						</TableBody>
 					</Table>
+					<Pagination className="border-t px-4 py-3" {...paginationProps} />
 				</div>
 			)}
 

@@ -60,6 +60,7 @@ Built-in actions:
 | `environments` | `read`, `write`, `connect` |
 | `settings` | `write` |
 | `settings.sso` | `write` |
+| `settings.security` | `write` |
 | `plugins` | `read`, `write` |
 
 ### Resources
@@ -99,6 +100,7 @@ Keys are *declared attributes*, validated on save against the attribute schema (
 | `agent.environment_id` | agent | no |
 | `environment.type` (the runtime backend: `docker` or `kubernetes`) | environment | no |
 | `conversation.environment_id` | conversation | no |
+| `conversation.agent_id` (the agent a project conversation belongs to; global chats are authorized as `agent/<id>` and have no conversation attributes) | conversation | no |
 
 A key bound to a resource kind must fit at least one of the statement's resources, otherwise the policy is rejected. A positive operator matches if any value matches; a negated one (`StringNotEquals`, `NotIn`) only if no value matches; an absent attribute makes positive operators false and negated ones true. Attributes are loaded lazily, only when a statement references them (`iam.AttributeLoader`, registered per kind in `repository/postgres/iam_attribute_loaders.go`).
 
@@ -121,7 +123,7 @@ Attachments are managed as *replace-sets* (`PUT .../roles` with `role_ids`), see
 
 ### System roles
 
-`internal/bootstrap/defaultroles` embeds the shipped policies. Platform roles `SUPER_ADMIN` (`*` on `*`), `ADMIN` and `USER` are `is_system`. Startup seeding creates any of them that is missing but **never overwrites** an existing role's policy or description, so edits made by an administrator persist across restarts and upgrades. System roles **can be edited** by anyone allowed to write roles but **cannot be deleted** (`409 ROLE_IS_SYSTEM`). Reconciliation is by name, so the roles migration 000064 converted keep their ids and holders. Project templates (`Admin`, `Editor`, `Viewer`) are instantiated into every new project as project-owned roles (`PROJECT_ID` replaced by the real id); the project `Admin` is `is_system`.
+`internal/bootstrap/defaultroles` embeds the shipped policies. Platform roles `SUPER_ADMIN` (`*` on `*`), `ADMIN` and `USER` are `is_system`. Startup seeding creates any of them that is missing but **never overwrites** an existing role's policy or description, so edits made by an administrator persist across restarts and upgrades. System roles **can be edited** by anyone allowed to write roles but **cannot be deleted** (`409 ROLE_IS_SYSTEM`). Reconciliation is by name, so the roles migration 000064 converted keep their ids and holders. Project templates (`Admin`, `Analyst`, `Editor`, `Viewer`) are instantiated into every new project as project-owned roles (`PROJECT_ID` replaced by the real id); the project `Admin` is `is_system`.
 
 `ADMIN` runs the workspace (`users:*`, `projects:*`, `agents:*`, `plugins:*`, `settings:write`) and can read roles (`roles:read`); it does not hold `roles:write` or `roles:assign`.
 
@@ -133,6 +135,7 @@ Some actions let their holder give themselves everything, so holding one is hold
 
 - `roles:write`: define or edit any role, and choose the default (new accounts start with it);
 - `roles:assign`: attach or detach roles, their own account included. It works like AWS IAM `iam:PassRole`: the *resource* of the statement says which roles the holder may hand out, so on `*` (or `role/*`) it is root-equivalent, while scoped to one role id it is not (see [Assigning roles](#assigning-roles-rolesassign));
+- `settings.security:write`: set the login policy or reset an account's MFA / IP allow-list, which removes the protection on that account (checked on `sso`);
 - `settings.sso:write`: configure an SSO provider that links accounts by email and sign in as anyone (see [SSO](../guides/sso-oidc.md));
 - `users:write`: can reset any user's password (`PATCH /admin/users/{userId}/password`), a `SUPER_ADMIN`'s included, and sign in as them.
 
@@ -233,7 +236,13 @@ Annotation by-id routes (`/annotations/{id}` and every route nested under a port
 
 ### Effective actions for the UI
 
-`Authorizer.EffectiveActions(principal, projectID)` returns the registered actions the principal may perform on `project/<id>` (or, with no project, the platform actions on their platform roots). In a project an action is included when it is allowed on the project itself *or possibly allowed on some child* (an `Allow` that ignores conditions, honoring only unconditional `Deny`), so a role limited to one sprint's tasks still shows the Tasks UI. It is used to show or hide UI only, never to authorize. `Authorizer.ProjectWideActions` is the same list without the child-only actions; `GET /projects/{projectId}/members/me/permissions?scope=project` returns it, and the realtime service uses it to decide which project rooms a socket joins. Endpoints: `GET /users/me/global-permissions`, `GET /projects/{projectId}/members/me/permissions` and, for an agent key, `GET /agents/me/global-permissions`; all return `{"actions": [...]}`.
+`Authorizer.EffectiveActions(principal, projectID)` returns the registered actions the principal may perform on `project/<id>` (or, with no project, the platform actions on their platform roots). In a project an action is included when it is allowed on the project itself *or possibly allowed on some child* (an `Allow` that ignores conditions, honoring only unconditional `Deny`), so a role limited to one sprint's tasks still shows the Tasks UI. It is used to show or hide UI only, never to authorize. The realtime service uses the same list to decide which project rooms a socket may join, so a role limited to one sprint's tasks still gets live updates: a room is a prefilter, and every event is then checked on its own resource (below). Endpoints: `GET /users/me/global-permissions`, `GET /projects/{projectId}/members/me/permissions` and, for an agent key, `GET /agents/me/global-permissions`; all return `{"actions": [...]}`.
+
+### Realtime events
+
+Every event on the realtime channel names what IAM must allow before a client sees it. `events.AuthzFor` derives an `authz: {action, resource}` pair from the topic and the entity the event is about (an update to one task is `tasks:read` on `project/<p>/task/<id>`; an event with no single subject, or about something IAM has no resource kind for, is checked on `project/<p>`), and `Fanout` / `events.PublishRealtime` put it in the envelope. `TestEveryTopicIsClassified` fails when a topic has neither a rule there nor an entry in `notRealtimeTopics`, so a new topic cannot skip IAM. The same descriptor is stored in the project's change log, so the resumable feed is authorized exactly like a live event, and a replay is judged by what the account may read *now*: a change the account may not read arrives as a bare `{seq, skip}` (keeping its sequence gapless), and an account that holds nothing in the project, a non-member or a member who lost every role, gets no feed at all, because even the skips would reveal how active the project is. An entity attached to a change (a task, a sprint) is the same for every viewer and is covered by the event's own check; nothing personal to the actor is attached. Which of a project's rooms a socket joins comes from the effective-actions list above: `projects:read` gives the `project` room (name and settings), `project.members:read` the `members` room and `agents:read` the `agents` room, next to the `<domain>:read` rooms.
+
+`POST /projects/{projectId}/members/me/permissions/check` answers, as the caller, whether each `{action, resource}` pair is allowed (`ProbeAccess` middleware evaluates through `Authorizer.AuthorizeMany`, the handler only writes the answers). It reports and gates nothing, like the other "my permissions" endpoints. A change to a role or its attachments is announced on the realtime channel as `iam.changed` (`events.NotifyIAMChanges` wraps the authorizer's invalidator, so the policy cache is dropped first); `services/realtime` then drops its cached answers and re-syncs its open sockets, so a revoked grant stops delivering at the next event. The notifier also bumps the `paca:iam:epoch` counter before it announces, and the announcement carries the value: Pub/Sub keeps nothing, so each realtime replica polls the counter and treats a value it has not seen as a missed announcement. [Realtime service](../../services/realtime/README.md#authorization) describes the consuming side.
 
 ## How the web app mirrors it
 
@@ -290,7 +299,7 @@ Why the model looks the way it does. These are the decisions that are easy to un
 
 **Restricted access became ordinary roles.** The old `access_mode` flag and grant tables are not modelled anywhere in the new API: there are no restriction endpoints or special code paths. Restricting an agent or environment is a `Deny` role, optionally with a `NotIn principal.id` condition for "everyone except these". During design a migration that generated "Access to X" and "Restrict X" roles was planned; it was dropped during execution, so **restricted resources are not migrated** and an administrator recreates them. The release notes call this out.
 
-**Guard rails against escalation.** Because roles are data, the dangerous things are editing a role and attaching one. A caller can only save a role, or make it the default, granting what they hold themselves (an unconditional `Allow` with no overlapping `Deny`). Attaching is PassRole-style: `roles:assign`, scoped by resource to the roles the holder may hand out. Some actions are root-equivalent (`roles:write`, `roles:assign`, `settings.sso:write`, `users:write`), so only `SUPER_ADMIN` is seeded with them. The last unconditional full-access attachment cannot be removed. Privileged operations (changing a user's roles, making a role the default) get their own routes rather than an optional field on a weaker route.
+**Guard rails against escalation.** Because roles are data, the dangerous things are editing a role and attaching one. A caller can only save a role, or make it the default, granting what they hold themselves (an unconditional `Allow` with no overlapping `Deny`). Attaching is PassRole-style: `roles:assign`, scoped by resource to the roles the holder may hand out. Some actions are root-equivalent (`roles:write`, `roles:assign`, `settings.sso:write`, `settings.security:write`, `users:write`), so only `SUPER_ADMIN` is seeded with them. The last unconditional full-access attachment cannot be removed. Privileged operations (changing a user's roles, making a role the default) get their own routes rather than an optional field on a weaker route.
 
 **Migration safety.** Migration 000064 runs in one transaction and, before committing, recomputes every user's and agent's access with the legacy rules and with the new policies, at platform scope and in each project they belong to; any difference aborts and rolls everything back. Legacy tables and columns are left in place (not read, not written) so the data can be inspected. Soft-deleted members get no attachment. A project role keeps `projects:read` because membership used to imply it; global-role actions are placed on platform roots only, never `project/*`, matching how they always behaved inside projects.
 

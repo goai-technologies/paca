@@ -44,18 +44,27 @@ export interface ServiceAccountPage {
 	items: ServiceAccount[];
 	page_size: number;
 	next_cursor: string | null;
+	/** Accounts matching the search, across all pages. */
+	total_count?: number;
 }
 
 /** One page of service accounts ordered by name; `search` matches every word
  *  against the name or description. Follow next_cursor for further pages. */
 export async function listServiceAccounts(
-	opts: { search?: string; cursor?: string; pageSize?: number } = {},
+	opts: {
+		search?: string;
+		cursor?: string;
+		/** Numbered page (1-indexed) instead of a cursor — for tables. */
+		page?: number;
+		pageSize?: number;
+	} = {},
 ): Promise<ServiceAccountPage> {
 	const params: Record<string, string | number> = {
 		page_size: opts.pageSize ?? SERVICE_ACCOUNTS_PAGE_SIZE,
 	};
 	if (opts.search?.trim()) params.search = opts.search.trim();
 	if (opts.cursor) params.cursor = opts.cursor;
+	if (opts.page) params.page = opts.page;
 	const { data } = await apiClient.instance.get<
 		SuccessEnvelope<ServiceAccountPage>
 	>(BASE, { params });
@@ -149,6 +158,17 @@ export const serviceAccountsInfiniteQueryOptions = (search = "") =>
 			listServiceAccounts({ search, cursor: pageParam }),
 		initialPageParam: undefined as string | undefined,
 		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+	});
+
+/** One numbered page of service accounts — backs the accounts table. */
+export const serviceAccountsPageQueryOptions = (
+	page: number,
+	pageSize: number,
+	search = "",
+) =>
+	queryOptions({
+		queryKey: [...serviceAccountsKey, "page", page, pageSize, search] as const,
+		queryFn: () => listServiceAccounts({ search, page, pageSize }),
 	});
 
 export const serviceAccountQueryOptions = (id: string) =>

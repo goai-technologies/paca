@@ -272,12 +272,27 @@ func (s *Service) GetAttachmentContent(ctx context.Context, projectID, taskID, a
 	return data, f.ContentType, nil
 }
 
-// ListTaskAttachments returns all confirmed attachments for the given task.
-func (s *Service) ListTaskAttachments(ctx context.Context, projectID, taskID uuid.UUID) ([]*attachmentdom.TaskAttachment, error) {
+// GetTaskAttachment returns one attachment of the task, with its file metadata.
+func (s *Service) GetTaskAttachment(ctx context.Context, projectID, taskID, attachmentID uuid.UUID) (*attachmentdom.TaskAttachment, error) {
 	if err := s.taskChecker.TaskBelongsToProject(ctx, projectID, taskID); err != nil {
 		return nil, err
 	}
-	return s.repo.ListTaskAttachments(ctx, taskID)
+	a, err := s.repo.FindTaskAttachmentByID(ctx, attachmentID)
+	if err != nil {
+		return nil, err
+	}
+	if a.TaskID != taskID {
+		return nil, attachmentdom.ErrAttachmentNotFound
+	}
+	return a, nil
+}
+
+// ListTaskAttachments returns one page of the attachments of the given task.
+func (s *Service) ListTaskAttachments(ctx context.Context, projectID, taskID uuid.UUID, cursorAfter *string, limit int) ([]*attachmentdom.TaskAttachment, bool, int, error) {
+	if err := s.taskChecker.TaskBelongsToProject(ctx, projectID, taskID); err != nil {
+		return nil, false, 0, err
+	}
+	return s.repo.ListTaskAttachments(ctx, taskID, cursorAfter, limit)
 }
 
 // DeleteTaskAttachment removes the task→file association only.

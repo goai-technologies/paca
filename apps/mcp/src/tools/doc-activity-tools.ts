@@ -1,11 +1,13 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PacaAPIDocClient } from "../api/index.js";
+import { moreNotice, pagingFields, pagingProperties } from "../api/paginate.js";
 import { blocknoteToMarkdown, formatToolError } from "../utils/index.js";
 
 const ListDocActivitiesSchema = z.object({
 	projectId: z.string(),
 	docId: z.string(),
+	...pagingFields,
 });
 
 const AddDocCommentSchema = z.object({
@@ -37,7 +39,7 @@ const COMMENT_ID_DESC =
 	"The technical UUID of the comment (e.g., '550e8400-e29b-41d4-a716-446655440000'). Use list_doc_activities to find comment IDs.";
 
 const MENTION_NOTE =
-	"NOTE: writing '@username' in the content does not send a notification for document comments (unlike add_task_comment) — the recipient will only see it if they happen to open this document. If this document is linked to a task, prefer add_task_comment there when you need to reliably reach someone.";
+	"NOTE: '@username' in a document comment becomes a real mention for project members: a mentioned agent (e.g. '@helper') is started, and a mentioned person gets an in-app notification (as with add_task_comment). Names that match no project member stay plain text and reach nobody.";
 
 /**
  * Returns all document comment and activity related MCP tools.
@@ -47,12 +49,13 @@ export function getDocActivityTools(): Tool[] {
 		{
 			name: "list_doc_activities",
 			description:
-				"List all activity for a document (comments and system events), oldest first. Each entry includes actor_name and actor_username.",
+				"List activity for a document (comments and system events), newest first, one page per call; pass the returned cursor for older entries. Each entry includes actor_name and actor_username.",
 			inputSchema: {
 				type: "object",
 				properties: {
 					projectId: { type: "string", description: PROJECT_ID_DESC },
 					docId: { type: "string", description: DOC_ID_DESC },
+					...pagingProperties,
 				},
 				required: ["projectId", "docId"],
 			},
@@ -106,10 +109,19 @@ function formatDocActivity(activity: any): string {
 			? blocknoteToMarkdown(activity.content)
 			: JSON.stringify(activity.content, null, 2);
 
+	// A write's note, client label and task, when it recorded them.
+	const extra = ["note", "client", "task"]
+		.map((key) => {
+			const value = activity.content?.[key];
+			if (typeof value !== "string" || !value) return "";
+			return `\n${key[0].toUpperCase()}${key.slice(1)}: ${value}`;
+		})
+		.join("");
+
 	return `Activity: ${activity.activity_type}
 ID: ${activity.id}
 User: ${activity.actor_name} (@${activity.actor_username}, ${activity.actor_id})
-Description: ${content}
+Description: ${content}${extra}
 Created: ${activity.created_at}`;
 }
 
@@ -141,15 +153,19 @@ export async function handleDocActivityTool(
 	try {
 		switch (toolName) {
 			case "list_doc_activities": {
-				const { projectId, docId } = ListDocActivitiesSchema.parse(args);
-				const activities = await client.listDocumentActivities(
-					projectId,
-					docId,
-				);
-				const formatted = activities.map(formatDocActivity).join("\n\n---\n\n");
+				const { projectId, docId, cursor, pageSize } =
+					ListDocActivitiesSchema.parse(args);
+				const page = await client.listDocumentActivities(projectId, docId, {
+					cursor,
+					pageSize,
+				});
+				const formatted = page.items.map(formatDocActivity).join("\n\n---\n\n");
 				return {
 					content: [
-						{ type: "text", text: `Document Activities:\n\n${formatted}` },
+						{
+							type: "text",
+							text: `Document Activities (newest first):\n\n${formatted}${moreNotice(page, "list_doc_activities")}`,
+						},
 					],
 				};
 			}

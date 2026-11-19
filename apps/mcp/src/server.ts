@@ -14,13 +14,17 @@ import {
 	PacaAPIViewsClient,
 } from "./api/index.js";
 import { loadPlugins, type PluginContextSection } from "./plugin-loader.js";
+import { GIT_TOOL_NAMES } from "./tools/git-tools.js";
 import { getAllTools, handleToolCall } from "./tools/index.js";
+import { WORKSPACE_TOOL_NAMES } from "./tools/workspace-tools.js";
 import type { PacaConfig } from "./types/index.js";
 
 const REPO_TOOL_NAMES = new Set([
 	"list_repositories",
 	"clone_repository",
 	"push_branch",
+	...WORKSPACE_TOOL_NAMES,
+	...GIT_TOOL_NAMES,
 ]);
 
 /**
@@ -84,8 +88,8 @@ export async function createServer(config: PacaConfig): Promise<Server> {
 		// saw almost no tools at all, even though many of those calls would
 		// have succeeded.
 		//
-		// Repo tools are still hidden entirely when no repository plugin is
-		// configured for this conversation — mirrors executor.py's has_repos
+		// Repo tools are still hidden entirely when no Git provider is
+		// installed for this conversation — mirrors executor.py's has_repos
 		// gate, which never attaches these tools to the agent at all rather
 		// than attaching them to fail against an empty plugin list. This isn't
 		// a permission check: without a repo plugin these tools have no
@@ -137,11 +141,7 @@ export async function createServer(config: PacaConfig): Promise<Server> {
 		}
 
 		// Fall through to core tool handlers
-		const result = await handleToolCall(
-			request,
-			clients,
-			config.repoPluginIds ?? [],
-		);
+		const result = await handleToolCall(request, clients);
 
 		// Let every loaded plugin optionally attach context to this core
 		// tool's response (e.g. linked GitHub branches on get_task). Skipped
@@ -169,8 +169,8 @@ export async function createServer(config: PacaConfig): Promise<Server> {
  * Merges into the *last* text content block rather than appending a new
  * content entry: agents reliably read the one continuous text block a core
  * tool returns, but have been observed treating a separate trailing block
- * as unrelated/easy to miss — e.g. calling github_list_task_branches right
- * after get_task despite the branch already being in a second block. Falls
+ * as unrelated/easy to miss — e.g. calling a follow-up lookup right
+ * after get_task despite the answer already being in a second block. Falls
  * back to appending a new text block when the result has no existing text
  * block to merge into (e.g. empty content array).
  *

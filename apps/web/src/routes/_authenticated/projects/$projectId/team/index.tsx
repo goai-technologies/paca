@@ -10,7 +10,6 @@ import {
 	Bot,
 	Check,
 	KeyRound,
-	Loader2,
 	MoreHorizontal,
 	PenLine,
 	Plus,
@@ -22,6 +21,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RoleOptionList } from "@/components/admin/global-roles/role-option-list";
+import { useRoleChoices } from "@/components/admin/global-roles/use-role-choices";
 import { projectPermissionBadgeClass } from "@/components/projects/roles/utils";
 import { MembersFilters } from "@/components/projects/team/MembersFilters";
 import { EntityAvatar } from "@/components/shared/entity-avatar";
@@ -53,12 +53,15 @@ import {
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useCanAssignProjectRole } from "@/hooks/use-can-assign-project-role";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import { useExistingMemberIds } from "@/hooks/use-existing-member-ids";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
+import { useRolesByIds } from "@/hooks/use-role-search";
 import { type User, usersInfiniteQueryOptions } from "@/lib/admin-api";
 import {
 	type Agent,
@@ -87,7 +90,7 @@ import {
 	userAvatar,
 } from "@/lib/provider-logos";
 import {
-	projectRolesQueryOptions,
+	projectRolesInfiniteQueryOptions,
 	type Role,
 	replaceMemberRoles,
 } from "@/lib/role-api";
@@ -182,16 +185,21 @@ function AddMemberDialog({
 	open,
 	onOpenChange,
 	projectId,
-	roles,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	projectId: string;
-	roles: Role[];
 }) {
 	const { t } = useTranslation("projects");
 	const queryClient = useQueryClient();
 	const { hasPermission: can } = usePermissions();
+	// Every role assignable in the project, searched and paged on the server.
+	const {
+		roles,
+		knownRoles: knownRoleChoices,
+		remote: roleRemote,
+		status: roleStatus,
+	} = useRoleChoices(open, [], projectId);
 	const [mode, setMode] = useState<"user" | "agent" | "service_account">(
 		"user",
 	);
@@ -343,6 +351,7 @@ function AddMemberDialog({
 	]);
 
 	const addMutation = useMutation({
+		meta: { success: "added", subject: "teamMember" },
 		mutationFn: () => {
 			if (selectedRoleIds.length === 0) {
 				return Promise.reject(new Error("Role is required"));
@@ -443,52 +452,35 @@ function AddMemberDialog({
 
 				<div className="space-y-4 py-1">
 					{/* Mode toggle: invite a human user, a global agent or a service account */}
-					<div
-						className={`grid gap-2 ${canInviteServiceAccounts ? "grid-cols-3" : "grid-cols-2"}`}
+					<Tabs
+						value={mode}
+						onValueChange={(m) => {
+							setMode(m as "user" | "agent" | "service_account");
+							setSelectedUser(null);
+							setSelectedAgent(null);
+							setSelectedServiceAccount(null);
+							setError(null);
+						}}
 					>
-						{(
-							[
-								"user",
-								"agent",
-								...(canInviteServiceAccounts
-									? (["service_account"] as const)
-									: []),
-							] as const
-						).map((m) => {
-							const isSelected = mode === m;
-							return (
-								<button
-									key={m}
-									type="button"
-									onClick={() => {
-										setMode(m);
-										setSelectedUser(null);
-										setSelectedAgent(null);
-										setSelectedServiceAccount(null);
-										setError(null);
-									}}
-									className={`flex items-center justify-center gap-1.5 rounded-lg border p-2.5 text-xs font-medium transition-all ${
-										isSelected
-											? "border-primary/40 bg-primary/5 ring-1 ring-primary/20"
-											: "border-border/60 hover:border-border hover:bg-muted/30"
-									}`}
-								>
-									{m === "user" ? (
-										<UserRound className="size-3.5" />
-									) : m === "agent" ? (
-										<Bot className="size-3.5" />
-									) : (
-										<KeyRound className="size-3.5" />
-									)}
-									{m === "user"
-										? t("team.addMemberDialog.modeUser")
-										: m === "agent"
-											? t("team.addMemberDialog.modeAgent")
-											: t("team.addMemberDialog.modeServiceAccount")}
-								</button>
-							);
-						})}
-					</div>
+						<TabsList
+							className={`grid h-auto w-full ${canInviteServiceAccounts ? "grid-cols-3" : "grid-cols-2"}`}
+						>
+							<TabsTrigger value="user" className="py-1.5 text-xs">
+								<UserRound />
+								{t("team.addMemberDialog.modeUser")}
+							</TabsTrigger>
+							<TabsTrigger value="agent" className="py-1.5 text-xs">
+								<Bot />
+								{t("team.addMemberDialog.modeAgent")}
+							</TabsTrigger>
+							{canInviteServiceAccounts ? (
+								<TabsTrigger value="service_account" className="py-1.5 text-xs">
+									<KeyRound />
+									{t("team.addMemberDialog.modeServiceAccount")}
+								</TabsTrigger>
+							) : null}
+						</TabsList>
+					</Tabs>
 
 					{mode === "service_account" ? (
 						<div className="space-y-1.5">
@@ -529,7 +521,10 @@ function AddMemberDialog({
 									<div className="max-h-52 overflow-y-auto p-1">
 										{isLoadingServiceAccounts ? (
 											<div className="flex items-center justify-center py-4">
-												<Loader2 className="size-4 animate-spin text-muted-foreground" />
+												<Spinner
+													aria-hidden="true"
+													className="text-muted-foreground"
+												/>
 											</div>
 										) : availableServiceAccounts.length === 0 ? (
 											<p className="py-4 text-center text-xs text-muted-foreground">
@@ -614,7 +609,10 @@ function AddMemberDialog({
 									<div className="max-h-52 overflow-y-auto p-1">
 										{isLoadingAgents ? (
 											<div className="flex items-center justify-center py-4">
-												<Loader2 className="size-4 animate-spin text-muted-foreground" />
+												<Spinner
+													aria-hidden="true"
+													className="text-muted-foreground"
+												/>
 											</div>
 										) : availableAgents.length === 0 ? (
 											<p className="py-4 text-center text-xs text-muted-foreground">
@@ -706,7 +704,10 @@ function AddMemberDialog({
 									>
 										{isLoadingUsers ? (
 											<div className="flex items-center justify-center py-4">
-												<Loader2 className="size-4 animate-spin text-muted-foreground" />
+												<Spinner
+													aria-hidden="true"
+													className="text-muted-foreground"
+												/>
 											</div>
 										) : filteredUsers.length === 0 ? (
 											<p className="py-4 text-center text-xs text-muted-foreground">
@@ -726,7 +727,7 @@ function AddMemberDialog({
 										)}
 										{isFetchingNextPage && (
 											<div className="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground">
-												<Loader2 className="size-3 animate-spin" />
+												<Spinner aria-hidden="true" className="size-3" />
 												{t("team.addMemberDialog.loadingMore")}
 											</div>
 										)}
@@ -741,13 +742,17 @@ function AddMemberDialog({
 						<p className="text-sm font-medium">
 							{t("team.addMemberDialog.roleLabel")}
 						</p>
-						<RoleOptionList
-							roles={roles}
-							values={selectedRoleIds}
-							onChange={(ids) => setSelectedRoleIds(ids)}
-							label={t("team.addMemberDialog.roleLabel")}
-							badgeClass={projectPermissionBadgeClass}
-						/>
+						{roleStatus ?? (
+							<RoleOptionList
+								roles={roles}
+								knownRoles={knownRoleChoices}
+								remote={roleRemote}
+								values={selectedRoleIds}
+								onChange={(ids) => setSelectedRoleIds(ids)}
+								label={t("team.addMemberDialog.roleLabel")}
+								badgeClass={projectPermissionBadgeClass}
+							/>
+						)}
 					</div>
 
 					{/* Only for humans — an invited agent's description lives on the
@@ -795,7 +800,7 @@ function AddMemberDialog({
 						onClick={() => addMutation.mutate()}
 					>
 						{addMutation.isPending ? (
-							<Loader2 className="size-3.5 animate-spin" />
+							<Spinner aria-hidden="true" className="size-3.5" />
 						) : (
 							<Plus className="size-3.5" />
 						)}
@@ -834,7 +839,6 @@ function RoleChip({
 			<MemberRoleDialog
 				member={member}
 				projectId={projectId}
-				roles={roles}
 				open={open}
 				onOpenChange={setOpen}
 			/>
@@ -845,13 +849,11 @@ function RoleChip({
 function MemberRoleDialog({
 	member,
 	projectId,
-	roles,
 	open,
 	onOpenChange,
 }: {
 	member: ProjectMember;
 	projectId: string;
-	roles: Role[];
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 }) {
@@ -859,6 +861,12 @@ function MemberRoleDialog({
 	const queryClient = useQueryClient();
 	const [error, setError] = useState<string | null>(null);
 	const currentIds = member.roles.map((r) => r.id);
+	// Every role assignable in the project, not just those held by loaded members.
+	const { roles, knownRoles, remote, status } = useRoleChoices(
+		open,
+		currentIds,
+		projectId,
+	);
 
 	const handleOpenChange = (next: boolean) => {
 		if (!next) setError(null);
@@ -866,6 +874,7 @@ function MemberRoleDialog({
 	};
 
 	const mutation = useMutation({
+		meta: { success: "updated", subject: "memberRoles" },
 		mutationFn: (roleIds: string[]) =>
 			replaceMemberRoles(projectId, member.id, roleIds),
 		onError: (err: unknown) => {
@@ -906,6 +915,9 @@ function MemberRoleDialog({
 			})}
 			person={{ avatar: memberAvatar(member), handle: member.username }}
 			roles={roles}
+			knownRoles={knownRoles}
+			remote={remote}
+			status={status}
 			currentIds={currentIds}
 			// A member keeps at least one role: with none they could do nothing,
 			// and removing them is its own action.
@@ -941,6 +953,7 @@ function DescriptionChip({
 	const [error, setError] = useState<string | null>(null);
 
 	const mutation = useMutation({
+		meta: { success: "updated", subject: "memberDescription" },
 		mutationFn: () =>
 			updateProjectMemberRole(projectId, member.id, {
 				description: value.trim(),
@@ -1004,7 +1017,7 @@ function DescriptionChip({
 						disabled={mutation.isPending || value === member.description}
 					>
 						{mutation.isPending ? (
-							<Loader2 className="size-3.5 animate-spin" />
+							<Spinner aria-hidden="true" className="size-3.5" />
 						) : (
 							t("team.descriptionChip.save")
 						)}
@@ -1136,8 +1149,15 @@ function TeamPage() {
 	// cursor, so a large team is never loaded whole.
 	const [debouncedSearch, setDebouncedSearch] = useState("");
 	const applySearch = useDebouncedCallback(setDebouncedSearch, 300);
-	const { data: roles = [] } = useQuery(projectRolesQueryOptions(projectId));
-	const roleFilterId = roles.find((r) => r.name === roleFilter)?.id;
+	// The role filter chips page in as the viewer asks for more.
+	const rolesQuery = useInfiniteQuery(
+		projectRolesInfiniteQueryOptions(projectId),
+	);
+	const filterRoles = useMemo(
+		() => rolesQuery.data?.pages.flatMap((p) => p.items) ?? [],
+		[rolesQuery.data],
+	);
+	const roleFilterId = filterRoles.find((r) => r.name === roleFilter)?.id;
 	const {
 		data: membersPages,
 		isLoading: isDataLoading,
@@ -1187,8 +1207,17 @@ function TeamPage() {
 	const canAddMembers = canManageMembers && canAssignRoles;
 
 	const roleChips = useMemo(
-		() => roles.map((r) => ({ name: r.name })),
-		[roles],
+		() => filterRoles.map((r) => ({ name: r.name })),
+		[filterRoles],
+	);
+	// What the visible members' roles grant (badge descriptions), looked up by
+	// id rather than loading every role. Only for display: the Add Member and
+	// Change Role pickers search the project's roles on the server instead.
+	const roles = useRolesByIds(
+		projectId,
+		[
+			...new Set((members ?? []).flatMap((m) => m.roles.map((r) => r.id))),
+		].slice(0, 100),
 	);
 	const clearFilters = () => {
 		setSearch("");
@@ -1197,6 +1226,7 @@ function TeamPage() {
 	};
 
 	const removeMutation = useMutation({
+		meta: { success: "removed", subject: "teamMember", silent: true },
 		mutationFn: () => {
 			if (!removingMember) return Promise.resolve();
 			return removeProjectMember(projectId, removingMember.id);
@@ -1303,6 +1333,12 @@ function TeamPage() {
 						<MembersFilters
 							search={search}
 							roles={roleChips}
+							rolesPagination={{
+								hasMore: !!rolesQuery.hasNextPage,
+								isLoadingMore: rolesQuery.isFetchingNextPage,
+								isError: rolesQuery.isFetchNextPageError,
+								onLoadMore: () => void rolesQuery.fetchNextPage(),
+							}}
 							totalCount={teamTotal}
 							selectedRole={roleFilter}
 							shownCount={matchingCount}
@@ -1366,7 +1402,6 @@ function TeamPage() {
 				open={addMemberOpen}
 				onOpenChange={setAddMemberOpen}
 				projectId={projectId}
-				roles={roles}
 			/>
 
 			{/* Remove confirmation dialog */}
@@ -1418,7 +1453,7 @@ function TeamPage() {
 							onClick={() => removeMutation.mutate()}
 						>
 							{removeMutation.isPending ? (
-								<Loader2 className="size-3.5 animate-spin" />
+								<Spinner aria-hidden="true" className="size-3.5" />
 							) : (
 								<Trash2 className="size-3.5" />
 							)}

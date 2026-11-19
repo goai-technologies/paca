@@ -1,7 +1,7 @@
 {
 	"page": {
-		"title": "Mi perfil",
-		"subtitle": "Consulta y actualiza la información de tu cuenta."
+		"title": "Cuenta",
+		"subtitle": "Gestiona tu perfil, la seguridad de inicio de sesión y el acceso."
 	},
 	"fields": {
 		"fullName": "Nombre completo",
@@ -62,6 +62,7 @@
 		"errors": {
 			"currentPasswordRequired": "La contraseña actual es obligatoria.",
 			"currentPasswordIncorrect": "La contraseña actual es incorrecta.",
+			"passwordLoginDisabled": "El inicio de sesión con contraseña está desactivado en este espacio de trabajo, así que no puedes cambiar tu contraseña. Inicia sesión con el inicio de sesión único.",
 			"sessionExpired": "Tu sesión ha expirado. Vuelve a iniciar sesión.",
 			"serverError": "Algo salió mal en el servidor. Inténtalo de nuevo.",
 			"changeFailed": "No se pudo cambiar la contraseña."
@@ -116,6 +117,96 @@
 			"nameTooLong": "El nombre debe tener 100 caracteres o menos.",
 			"createFailed": "No se pudo crear la clave. Inténtalo de nuevo.",
 			"copyFailed": "Error al copiar. Copia la clave manualmente."
+		}
+	},
+	"nav": {
+		"profile": "Perfil",
+		"security": "Seguridad",
+		"apiKeys": "Claves de API",
+		"preferences": "Notificaciones"
+	},
+	"preferences": {
+		"title": "Notificaciones",
+		"subtitle": "Elige cómo quieres recibir avisos."
+	},
+	"security": {
+		"title": "Seguridad",
+		"subtitle": "Protege tu cuenta y controla cómo inicias sesión.",
+		"mfa": {
+			"title": "Verificación en dos pasos",
+			"description": "Pide un código de una aplicación de autenticación, además de tu contraseña, al iniciar sesión.",
+			"on": "Activada",
+			"off": "Desactivada",
+			"enable": "Configurar la verificación en dos pasos",
+			"recoveryLeft": "Códigos de recuperación restantes: {{count}}",
+			"recoveryLow": "Te quedan pocos códigos de recuperación. Genera otros nuevos antes de perder el acceso.",
+			"codeOrRecovery": "Código de autenticación o código de recuperación",
+			"codes": {
+				"copy": "Copiar",
+				"copied": "Copiado",
+				"download": "Descargar"
+			},
+			"errors": {
+				"generic": "Algo salió mal. Inténtalo de nuevo.",
+				"invalidCode": "Ese código no es válido o ya se usó.",
+				"unavailable": "La verificación en dos pasos no está disponible: el servidor no tiene una clave de cifrado configurada. Consulta a tu administrador.",
+				"load": "No se pudo cargar el estado de la verificación en dos pasos."
+			},
+			"setup": {
+				"title": "Configurar la verificación en dos pasos",
+				"description": "Usa una aplicación de autenticación como 1Password, Google Authenticator o Authy.",
+				"scan": "Escanea este código QR con tu aplicación de autenticación.",
+				"orEnterKey": "¿No puedes escanearlo? Introduce esta clave.",
+				"copyKey": "Copiar clave de configuración",
+				"qrLabel": "Código QR para configurar la verificación en dos pasos",
+				"codeLabel": "Introduce el código de 6 dígitos de la aplicación",
+				"verify": "Verificar y activar",
+				"codesTitle": "Guarda tus códigos de recuperación",
+				"codesDescription": "Cada código sirve una sola vez si pierdes el acceso a tu aplicación de autenticación.",
+				"codesWarning": "Estos códigos solo se muestran ahora. Guárdalos en un lugar seguro antes de cerrar.",
+				"saved": "Ya los guardé"
+			},
+			"disable": {
+				"button": "Desactivar",
+				"title": "Desactivar la verificación en dos pasos",
+				"description": "Tu cuenta quedará protegida solo por tu contraseña. Introduce un código actual para confirmar.",
+				"confirm": "Desactivar"
+			},
+			"regenerate": {
+				"button": "Nuevos códigos de recuperación",
+				"title": "Generar nuevos códigos de recuperación",
+				"description": "Esto reemplaza todos tus códigos de recuperación actuales. Introduce un código actual para confirmar.",
+				"confirm": "Generar",
+				"doneTitle": "Tus nuevos códigos de recuperación"
+			}
+		},
+		"passkeys": {
+			"title": "Llaves de acceso",
+			"description": "Inicia sesión con tu huella, tu rostro, el bloqueo de pantalla o una llave de seguridad como segundo paso, en lugar de un código.",
+			"add": "Añadir una llave de acceso",
+			"unsupported": "Este navegador no admite llaves de acceso.",
+			"empty": "Todavía no has añadido ninguna llave de acceso.",
+			"added": "Añadida el {{date}}",
+			"lastUsed": "Último uso: {{date}}",
+			"neverUsed": "Nunca usada",
+			"removeLabel": "Eliminar {{name}}",
+			"defaultName": "Llave de acceso",
+			"addTitle": "Añadir una llave de acceso",
+			"addDescription": "Ponle un nombre que reconozcas y sigue las indicaciones del navegador.",
+			"nameLabel": "Nombre",
+			"namePlaceholder": "p. ej., Portátil del trabajo",
+			"continue": "Continuar",
+			"removeTitle": "Eliminar llave de acceso",
+			"removeDescription": "«{{name}}» dejará de servir para iniciar sesión. Se te pedirá confirmar con una de tus llaves de acceso.",
+			"remove": "Eliminar",
+			"errors": {
+				"load": "No se pudieron cargar tus llaves de acceso.",
+				"cancelled": "La solicitud de la llave de acceso se canceló o caducó.",
+				"alreadyRegistered": "Este dispositivo o llave ya está registrado como llave de acceso.",
+				"limit": "Has alcanzado el número máximo de llaves de acceso. Elimina una primero.",
+				"invalid": "No se pudo verificar la llave de acceso. Inténtalo de nuevo.",
+				"generic": "Algo salió mal. Inténtalo de nuevo."
+			}
 		}
 	}
 }

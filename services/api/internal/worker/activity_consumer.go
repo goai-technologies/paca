@@ -39,7 +39,7 @@ var activityIDNamespace = uuid.MustParse("5b0f5a9e-4c1e-4a57-9d2f-7f1c6b3e8a41")
 //
 // It is one peer listener among several on that stream (see events.Fanout):
 // it reads only the envelope fields Fanout writes as siblings of "payload"
-// (project_id, entity_type, entity_id, actor_id, actor_agent_id, origin), so
+// (project_id, entity_type, entity_id, actor_id, origin), so
 // it never has to know any one domain's payload shape.
 //
 // The actor in the envelope is a user or agent UUID; the consumer resolves it
@@ -189,7 +189,7 @@ func (c *ActivityConsumer) processPending(ctx context.Context) {
 func (c *ActivityConsumer) handle(msg redis.XMessage) {
 	ctx := context.Background()
 
-	a, actorUserID, actorAgentID, ok := activityFromMessage(msg)
+	a, actorID, ok := activityFromMessage(msg)
 	if !ok {
 		c.log.Warn("activity consumer: skipping malformed entry", "id", msg.ID)
 		c.ack(ctx, msg.ID)
@@ -198,18 +198,14 @@ func (c *ActivityConsumer) handle(msg redis.XMessage) {
 
 	// Resolve the actor to project_members.id. An unresolvable actor (e.g. a
 	// removed member) is stored as nil rather than dropping the entry.
-	if actorUserID != nil || actorAgentID != nil {
-		var userID uuid.UUID
-		if actorUserID != nil {
-			userID = *actorUserID
-		}
-		member, err := c.memberRepo.FindMemberByActor(ctx, a.ProjectID, userID, actorAgentID)
+	if actorID != nil {
+		member, err := c.memberRepo.FindMember(ctx, a.ProjectID, *actorID)
 		if err == nil {
 			a.ActorID = &member.ID
-		} else if !userdom.IsUnidentifiedSystemActor(userID, actorAgentID) || !errors.Is(err, projectdom.ErrMemberNotFound) {
-			// The shared-agent-API-key identity is never a member by design,
-			// so ErrMemberNotFound is expected for it and not worth a warning.
-			c.log.Warn("activity consumer: could not resolve member for actor", "actor_id", actorUserID, "agent_id", actorAgentID, "project_id", a.ProjectID, "err", err)
+		} else if !userdom.IsUnidentifiedSystemActor(*actorID) || !errors.Is(err, projectdom.ErrMemberNotFound) {
+			// The built-in system actor is never a member by design, so
+			// ErrMemberNotFound is expected for it and not worth a warning.
+			c.log.Warn("activity consumer: could not resolve member for actor", "actor_id", actorID, "project_id", a.ProjectID, "err", err)
 		}
 	}
 
@@ -237,8 +233,8 @@ type activityPayloadFields struct {
 }
 
 // activityFromMessage decodes one Fanout envelope. It returns the actor
-// user/agent UUIDs separately because the row stores the resolved member ID.
-func activityFromMessage(msg redis.XMessage) (a *activitydom.Activity, actorUserID, actorAgentID *uuid.UUID, ok bool) {
+// account id separately because the row stores the resolved member ID.
+func activityFromMessage(msg redis.XMessage) (a *activitydom.Activity, actorID *uuid.UUID, ok bool) {
 	str := func(k string) string { s, _ := msg.Values[k].(string); return s }
 	optUUID := func(k string) *uuid.UUID {
 		id, err := uuid.Parse(str(k))
@@ -250,11 +246,11 @@ func activityFromMessage(msg redis.XMessage) (a *activitydom.Activity, actorUser
 
 	projectID, err := uuid.Parse(str("project_id"))
 	if err != nil || projectID == uuid.Nil {
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	topic := str("type")
 	if topic == "" {
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	origin := str("origin")
 	if origin == "" {
@@ -286,7 +282,7 @@ func activityFromMessage(msg redis.XMessage) (a *activitydom.Activity, actorUser
 		Content:      activityContent(raw, p.Content),
 		CreatedAt:    createdAt,
 	}
-	return a, optUUID("actor_id"), optUUID("actor_agent_id"), true
+	return a, optUUID("actor_id"), true
 }
 
 // activityContent picks what the row stores as content. Task and doc

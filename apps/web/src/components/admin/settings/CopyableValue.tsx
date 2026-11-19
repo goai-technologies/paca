@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { copyToClipboard } from "@/lib/clipboard";
 
 /** A read-only value with a copy-to-clipboard button. */
 export function CopyableValue({ id, value }: { id?: string; value: string }) {
@@ -25,7 +26,8 @@ export function CopyableValue({ id, value }: { id?: string; value: string }) {
 				size="icon"
 				aria-label={t("settings.sso.copy")}
 				onClick={() => {
-					void navigator.clipboard?.writeText(value).then(() => {
+					void copyToClipboard(value).then((ok) => {
+						if (!ok) return;
 						setCopied(true);
 						setTimeout(() => setCopied(false), 1500);
 					});

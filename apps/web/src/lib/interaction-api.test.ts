@@ -25,8 +25,10 @@ import {
 	getTask,
 	layoutToViewType,
 	listAllTasks,
+	listSprints,
 	listSprintTasks,
 	listSubtasks,
+	listTaskColumns,
 	SUBTASKS_PAGE_SIZE,
 	subtasksInfiniteQueryOptions,
 	type Task,
@@ -355,6 +357,35 @@ describe("interaction-api", () => {
 		});
 	});
 
+	describe("column grouping", () => {
+		it("sends the group as group_by / group_key", async () => {
+			mockGet.mockResolvedValueOnce(ok({ items: [] }));
+			await listAllTasks(PROJECT_ID, { groupBy: "tags", groupKey: "__none" });
+			const [, config] = mockGet.mock.calls[0];
+			expect(config.params?.group_by).toBe("tags");
+			expect(config.params?.group_key).toBe("__none");
+		});
+
+		it("lists a dimension's columns with the view's filters but no paging or group", async () => {
+			mockGet.mockResolvedValueOnce(
+				ok({ columns: [{ key: "a", label: "a", count: 2 }], truncated: true }),
+			);
+			const cols = await listTaskColumns(PROJECT_ID, "tags", {
+				pageSize: 5,
+				search: "x",
+				groupBy: "tags",
+				groupKey: "a",
+			});
+			expect(cols).toEqual({
+				columns: [{ key: "a", label: "a", count: 2 }],
+				truncated: true,
+			});
+			const [url, config] = mockGet.mock.calls[0];
+			expect(url).toBe(`/projects/${PROJECT_ID}/tasks/columns`);
+			expect(config.params).toEqual({ search: "x", column_by: "tags" });
+		});
+	});
+
 	describe("listAllTasks", () => {
 		it("passes only explicit filtering params through the single tasks endpoint", async () => {
 			mockGet.mockResolvedValue(
@@ -523,8 +554,50 @@ describe("interaction-api", () => {
 		it("maps Table → table", () => {
 			expect(layoutToViewType("Table")).toBe("table");
 		});
-		it("maps Roadmap → roadmap", () => {
-			expect(layoutToViewType("Roadmap")).toBe("roadmap");
+		it("maps Gantt → gantt", () => {
+			expect(layoutToViewType("Gantt")).toBe("gantt");
+		});
+	});
+});
+
+describe("listSprints", () => {
+	beforeEach(() => mockGet.mockReset());
+
+	it("sends the filters as query params and returns the page", async () => {
+		const page = {
+			items: [{ id: "s1", name: "Sprint 1" }],
+			page_size: 30,
+			next_cursor: "c2",
+			total_count: 41,
+		};
+		mockGet.mockResolvedValue({ data: { data: page } });
+
+		await expect(
+			listSprints(PROJECT_ID, {
+				status: ["active", "planned"],
+				search: "  beta ",
+				ids: ["a", "b"],
+				sort: "recent",
+				cursor: "c1",
+			}),
+		).resolves.toEqual(page);
+		expect(mockGet).toHaveBeenCalledWith(`/projects/${PROJECT_ID}/sprints`, {
+			params: {
+				page_size: 30,
+				status: "active,planned",
+				search: "beta",
+				ids: "a,b",
+				sort: "recent",
+				cursor: "c1",
+			},
+		});
+	});
+
+	it("omits empty filters", async () => {
+		mockGet.mockResolvedValue({ data: { data: { items: [] } } });
+		await listSprints(PROJECT_ID, { pageSize: 1 });
+		expect(mockGet).toHaveBeenCalledWith(`/projects/${PROJECT_ID}/sprints`, {
+			params: { page_size: 1 },
 		});
 	});
 });

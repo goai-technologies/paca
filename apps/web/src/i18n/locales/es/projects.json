@@ -10,6 +10,7 @@
 				"taskStatuses": "Estados de tarea",
 				"taskTypes": "Tipos de tarea",
 				"customFields": "Campos personalizados",
+				"git": "Git",
 				"jev": "Jev IA",
 				"dangerZone": "Zona de peligro",
 				"plugins": "Plugins",
@@ -20,6 +21,195 @@
 					"title": "No tienes permiso para ver esta pestaña",
 					"description": "Pide a un propietario o administrador del proyecto que te conceda acceso a {{pluginName}}."
 				}
+			}
+		},
+		"git": {
+			"title": "Repositorios Git",
+			"description": "Repositorios en los que pueden trabajar los agentes de este proyecto, a través de las conexiones de abajo.",
+			"empty": {
+				"title": "Ningún repositorio vinculado",
+				"description": "Vincula un repositorio para que los agentes de este proyecto lean su código, abran pull requests y respondan a menciones.",
+				"readOnly": "Necesitas acceso de escritura de Git en este proyecto para vincular repositorios.",
+				"noConnection": "Añada primero una conexión y luego vincule repositorios mediante ella."
+			},
+			"noProviders": "No hay ningún proveedor de Git instalado. Pide a un administrador que instale uno.",
+			"link": {
+				"platform": "Plataforma",
+				"repository": "Repositorio",
+				"placeholder": "propietario/nombre o URL del repositorio",
+				"button": "Vincular",
+				"open": "Vincular un repositorio",
+				"cancel": "Cancelar",
+				"help": "Pega la URL del repositorio o escribe propietario/nombre.",
+				"noConnection": "Añada primero una conexión de {{provider}} arriba antes de vincular un repositorio.",
+				"connection": "Conexión",
+				"anyConnection": "Cualquier conexión que pueda verlo",
+				"connectionHelp": "Elija una cuando varias conexiones puedan ver el repositorio, por ejemplo dos organizaciones.",
+				"description": "Descripción (opcional)",
+				"descriptionPlaceholder": "p. ej. Cliente web del producto",
+				"descriptionHelp": "Indica a los agentes para qué sirve este repositorio, para que elijan el correcto. Hasta 1000 caracteres.",
+				"title": "Vincular un repositorio",
+				"dialogDescription": "Elige la plataforma y el repositorio con el que trabajarán los agentes de este proyecto."
+			},
+			"picker": {
+				"browse": "Explorar repositorios",
+				"unsupported": "Esta conexión no puede listar repositorios. Cierra esta ventana y escribe la ruta o la URL.",
+				"error": "No se pudo cargar la lista. Cierra esta ventana y escribe la ruta o la URL.",
+				"empty": "No se encontraron repositorios.",
+				"linked": "Vinculado",
+				"private": "Privado",
+				"title": "Explorar repositorios",
+				"description": "Desplázate por todo lo que ve esta conexión y elige uno para completar el repositorio."
+			},
+			"unlink": {
+				"button": "Desvincular",
+				"confirm": "Confirmar",
+				"cancel": "Cancelar"
+			},
+			"resumed": "Bienvenido de nuevo. Vincula {{repository}} ahora.",
+			"access": {
+				"title": "Esta conexión no puede ver este repositorio",
+				"description": "La aplicación de {{provider}} solo ve los repositorios de las cuentas donde está instalada. Instálela en {{owner}} (irá a la plataforma y volverá aquí) y vincule de nuevo.",
+				"descriptionNoOwner": "La aplicación de {{provider}} solo ve los repositorios de las cuentas donde está instalada. Elija dónde instalarla (irá a la plataforma y volverá aquí) y vincule de nuevo.",
+				"button": "Instalar en {{owner}}",
+				"buttonNoOwner": "Elegir dónde instalar",
+				"connection": "Conexión a instalar",
+				"choose": "Elija una conexión"
+			},
+			"errors": {
+				"generic": "Algo salió mal. Inténtalo de nuevo.",
+				"setupInvalid": "Este enlace no es válido, ha caducado o ya se usó. Empieza de nuevo.",
+				"identityExists": "Ya existe una identidad aquí.",
+				"publicUrlRequired": "La URL pública de la instancia (PUBLIC_URL) no está configurada.",
+				"providerUnavailable": "El plugin del proveedor de Git no está disponible.",
+				"providerRejected": "La plataforma rechazó la solicitud.",
+				"providerDetail": "Detalles de la plataforma: {{message}}",
+				"notFound": "No encontrado.",
+				"accessNotGranted": "La conexión no puede ver este repositorio.",
+				"noIdentity": "Todavía no hay ninguna conexión disponible para esta plataforma. Añada una en Conexiones.",
+				"alreadyLinked": "Este repositorio ya está vinculado al proyecto.",
+				"identityRequired": "Varias conexiones pueden ver este repositorio. Elija cuál usar.",
+				"notVisible": "Ninguna de las conexiones del proyecto puede ver este repositorio. Añada una conexión con acceso a él (en GitLab, un token de ese proyecto o de su grupo) y vuelva a intentarlo.",
+				"descriptionTooLong": "La descripción es demasiado larga (máximo 1000 caracteres)."
+			},
+			"triggerKinds": {
+				"mention": {
+					"label": "Mención",
+					"description": "Alguien menciona al bot en un comentario, una revisión o una descripción."
+				},
+				"own_cr_feedback": {
+					"label": "Comentarios en su pull request",
+					"description": "Llega una revisión o un comentario a un pull request que este agente abrió."
+				},
+				"ci_failure": {
+					"label": "Fallo de CI en su pull request",
+					"description": "Falla una comprobación en el último commit de un pull request que este agente abrió (como máximo unos pocos intentos)."
+				},
+				"review_request": {
+					"label": "Revisión solicitada",
+					"description": "Se solicita al bot como revisor, si la plataforma lo permite."
+				},
+				"assignment": {
+					"label": "Asignación",
+					"description": "Se asigna al bot a una incidencia o pull request, si la plataforma lo permite."
+				},
+				"label": {
+					"label": "Etiqueta",
+					"description": "Se añade la etiqueta \"paca\" (o \"paca:<identificador del agente>\") a una incidencia o pull request."
+				},
+				"auto_review": {
+					"label": "Revisar todos los pull requests",
+					"description": "Revisa automáticamente cada pull request nuevo. Desactivado hasta que lo actives; se omiten los borradores y los pull requests del propio agente."
+				}
+			},
+			"repositories": {
+				"title": "Repositorios",
+				"description": "Los agentes de este proyecto pueden trabajar en estos repositorios.",
+				"mention": "Mencionar en comentarios:",
+				"noDescription": "Sin descripción",
+				"addDescription": "Añadir una descripción",
+				"editDescription": "Editar descripción",
+				"saveDescription": "Guardar",
+				"cancelDescription": "Cancelar",
+				"descriptionLabel": "Descripción del repositorio"
+			},
+			"automation": {
+				"title": "Automatización",
+				"description": "Decide cómo la actividad de Git inicia a tus agentes.",
+				"locked": "Primero vincula un repositorio. Estos ajustes se aplican a los repositorios vinculados a este proyecto.",
+				"responder": {
+					"label": "Respondedor predeterminado",
+					"none": "Sin respondedor predeterminado",
+					"help": "Responde a las menciones, etiquetas y solicitudes de revisión que no nombran a ningún agente. Añade «agent:<handle>» a una mención para elegir otro agente.",
+					"warning": "Sin respondedor predeterminado, las menciones que no nombran a ningún agente se ignoran."
+				},
+				"minPermission": {
+					"label": "Acceso mínimo para iniciar un agente",
+					"help": "Quien tenga menos acceso al repositorio puede comentar, pero el agente no se ejecutará."
+				},
+				"permission": {
+					"read": "Lectura",
+					"triage": "Triaje",
+					"write": "Escritura",
+					"maintain": "Mantenimiento",
+					"admin": "Administrador"
+				},
+				"paused": {
+					"label": "Pausar la automatización",
+					"help": "Mientras esté en pausa, ninguna actividad de Git inicia un agente. Las ejecuciones en curso terminan."
+				},
+				"save": "Guardar",
+				"saved": "Guardado.",
+				"advanced": "Avanzado"
+			},
+			"usage": {
+				"title": "Cómo usarlo",
+				"description": "Tres formas de iniciar un agente desde tu plataforma Git.",
+				"mention": {
+					"title": "Menciona al bot",
+					"description": "Comenta en un issue o pull request. Responde el respondedor predeterminado."
+				},
+				"pick": {
+					"title": "Elige un agente",
+					"description": "Añade agent:<handle> a la mención para elegir qué agente responde."
+				},
+				"label": {
+					"title": "Añade una etiqueta",
+					"description": "Añade la etiqueta «paca» a un issue o pull request."
+				},
+				"automatic": "Los agentes también pueden iniciarse por sí solos, por ejemplo para dar seguimiento a sus pull requests o revisar cada uno nuevo. Actívalo en la pestaña Git de cada agente."
+			},
+			"connections": {
+				"title": "Conexiones",
+				"description": "Las aplicaciones de GitHub y los tokens de acceso que Paca usa para llegar a sus repositorios. Un proyecto puede tener varios, de distintas organizaciones; cada uno es compartido por todos los proyectos o limitado a este.",
+				"add": "Añadir {{provider}}",
+				"empty": {
+					"title": "Aún no hay conexiones",
+					"description": "Añada una conexión para que Paca pueda llegar a sus repositorios. Use una aplicación, o pegue un token de acceso si su plataforma no tiene aplicaciones.",
+					"noPermission": "Pida a alguien que pueda gestionar conexiones Git que añada una."
+				},
+				"scope": {
+					"shared": "Todos los proyectos",
+					"project": "Este proyecto"
+				},
+				"expires": "Caduca el {{date}}",
+				"expired": "Caducado",
+				"remove": "Quitar"
+			},
+			"webhook": {
+				"title": "Los eventos de este repositorio no llegan a Paca",
+				"description": "Paca no pudo registrar un webhook en este repositorio mediante esta conexión.",
+				"permissionHint": "La causa más habitual es un token sin permiso para gestionar webhooks (el rol Maintainer en GitLab, el permiso Webhooks en GitHub). Dé ese permiso al token (en GitLab, cree un token nuevo con el rol Maintainer y añádalo como conexión) y vuelva a intentarlo.",
+				"retry": "Reintentar",
+				"descriptionNotTried": "Paca todavía no ha registrado un webhook en este repositorio (por ejemplo, se trasladó desde una versión anterior del plugin). Regístralo para empezar a recibir eventos.",
+				"register": "Registrar webhook",
+				"failed": "Todavía no se pudo registrar el webhook."
+			},
+			"reconnect": {
+				"title": "Este repositorio no tiene conexión",
+				"description": "Su conexión se eliminó, así que nada puede usarlo. Reconéctelo mediante una conexión que pueda verlo.",
+				"noConnection": "Su conexión se eliminó. Añada primero una conexión que pueda verlo y luego reconéctelo.",
+				"button": "Reconectar"
 			}
 		}
 	},
@@ -61,6 +251,7 @@
 			"acpProviderCodex": "Codex",
 			"acpProviderGeminiCli": "Gemini CLI",
 			"acpProviderGoose": "Goose",
+			"acpProviderOpenCode": "OpenCode",
 			"acpProviderCustom": "Personalizado…",
 			"acpCommandLabel": "Comando",
 			"acpCommandPlaceholder": "npx -y my-acp-server",
@@ -154,6 +345,7 @@
 			"stepSkillMcpDescription": "Genera la clave MCP propia de este agente una sola vez y luego ejecuta ambos comandos a continuación — para que las llamadas a herramientas se registren como actividad del agente, no la tuya.",
 			"stepSkillMcpSkillLabel": "Instala la skill:",
 			"stepSkillMcpConnectLabel": "Conecta el servidor MCP:",
+			"stepSkillMcpConnectLabelConfig": "Añade esto a {{file}} (combínalo con cualquier sección \"{{section}}\" existente):",
 			"step3NotAvailable": "La instalación automática está disponible para Claude Code, Gemini CLI y Codex. {{provider}} aún no tiene un instalador de prompts personalizados conocido — las herramientas MCP de Paca de abajo funcionan igualmente sin ella.",
 			"step3ViewContent": "Ver instrucciones de la skill",
 			"step4NoKeyYet": "Genera una clave para revelar los comandos de configuración.",
@@ -173,7 +365,8 @@
 				"skills": "Skills",
 				"envVars": "Entorno",
 				"globalRole": "Rol global",
-				"activity": "Actividad"
+				"activity": "Actividad",
+				"git": "Git"
 			},
 			"globalRole": {
 				"title": "Rol global",
@@ -244,6 +437,7 @@
 				"acpProviderCodex": "Codex",
 				"acpProviderGeminiCli": "Gemini CLI",
 				"acpProviderGoose": "Goose",
+				"acpProviderOpenCode": "OpenCode",
 				"acpProviderCustom": "Personalizado…",
 				"acpCommandLabel": "Comando",
 				"acpCommandHint": "Comando separado por espacios usado para iniciar tu servidor ACP.",
@@ -373,6 +567,69 @@
 			},
 			"system": {
 				"badge": "Sistema"
+			},
+			"git": {
+				"title": "Identidad Git",
+				"description": "De forma predeterminada este agente actúa con la identidad Git compartida del espacio de trabajo. Dale una identidad propia para que sus commits, pull requests y comentarios aparezcan bajo un bot distinto, e instálala en las cuentas y organizaciones cuyos repositorios usa.",
+				"providersUnavailable": "No se pudieron cargar los proveedores de Git de este proyecto.",
+				"noProviders": {
+					"title": "Ninguna plataforma Git disponible",
+					"description": "Pide a un administrador que instale un plugin de proveedor Git y lo conecte. Después los agentes podrán trabajar en repositorios."
+				},
+				"ownIdentity": "Identidad propia",
+				"usesShared": "Usa la identidad compartida",
+				"singleIdentity": "Esta plataforma tiene una identidad por host, así que se usa la compartida.",
+				"remove": "Quitar",
+				"create": {
+					"title": "Dale a este agente su propia identidad",
+					"description": "Sus commits, pull requests y comentarios aparecerán con un bot propio y se le podrá mencionar por su nombre. Lo apruebas en la plataforma y lo instalas enseguida.",
+					"button": "Crear identidad"
+				},
+				"askAdmin": "Pide a un administrador del espacio de trabajo que la cree.",
+				"install": {
+					"label": "Instalar en otra cuenta u organización",
+					"placeholder": "cuenta u organización (opcional)",
+					"button": "Instalar",
+					"help": "Abre la página de instalación de la plataforma. Deja el nombre vacío para elegir la cuenta allí.",
+					"title": "Instalar en otra cuenta u organización"
+				},
+				"triggers": {
+					"title": "Disparadores de Git",
+					"description": "Qué eventos de Git inician a este agente. Solo se muestran los eventos que los proveedores de Git instalados pueden entregar.",
+					"filters": {
+						"branches": "Solo estas ramas de destino",
+						"authors": "Solo estos autores",
+						"help": "Separados por comas. Déjalo vacío para incluir todo. Los autores que sean bots deben figurar en la lista para ser revisados.",
+						"save": "Guardar filtros"
+					},
+					"unsupported": "No compatible con las plataformas Git conectadas.",
+					"groups": {
+						"requests": {
+							"title": "Responder a solicitudes",
+							"description": "Se inicia cuando alguien solicita a este agente."
+						},
+						"followUp": {
+							"title": "Dar seguimiento a sus propios pull requests",
+							"description": "Se inicia cuando ocurre algo en un pull request que abrió este agente."
+						},
+						"proactive": {
+							"title": "Actuar por iniciativa propia",
+							"description": "Se inicia sin que nadie lo pida. Desactivado por defecto."
+						}
+					}
+				},
+				"identity": {
+					"title": "Identidad",
+					"description": "La cuenta que usa este agente en cada plataforma Git."
+				},
+				"own": {
+					"description": "Este agente tiene su propio bot, así que sus commits, pull requests y comentarios aparecen con un nombre propio.",
+					"mention": "Menciónalo con:"
+				},
+				"shared": {
+					"description": "Este agente actúa mediante el bot compartido del espacio de trabajo, como los demás agentes."
+				},
+				"permissions": "Lo que este agente puede hacer en Git depende de su rol en el proyecto: el acceso de lectura y escritura viene de los permisos Git del rol. Aprobar y fusionar pull requests no se concede por defecto."
 			}
 		},
 		"conversationView": {
@@ -465,8 +722,24 @@
 				"contextTypeAutomation": "Automatización",
 				"contextTypeAnnotation": "Comentario",
 				"noContextResults": "No se encontraron resultados",
-				"contextSearchMinChars": "Escribe al menos 2 caracteres para buscar"
+				"contextSearchMinChars": "Escribe al menos 2 caracteres para buscar",
+				"dialogDescription": "Busca y selecciona elementos para compartir con el agente. Se enviarán con tu próximo mensaje.",
+				"done": "Listo",
+				"attachedCount": "{{count}} adjuntos"
 			}
+		},
+		"acpModelEffort": {
+			"modelLabel": "Modelo",
+			"modelPlaceholder": "p. ej. claude-sonnet-4-5",
+			"modelHint": "Nombre de modelo opcional, enviado al proveedor tal como lo escribes. Déjalo vacío para usar el predeterminado del proveedor.",
+			"effortLabel": "Esfuerzo de razonamiento",
+			"effortDefault": "Predeterminado del proveedor",
+			"effort_low": "Bajo",
+			"effort_medium": "Medio",
+			"effort_high": "Alto",
+			"effort_xhigh": "Muy alto",
+			"effort_max": "Máximo",
+			"effortHint": "Opcional. Solo se aplica si el proveedor admite el nivel elegido."
 		}
 	},
 	"environments": {
@@ -730,6 +1003,15 @@
 			"deleted": "eliminó el documento",
 			"moved": "movió el documento",
 			"contentChangeDiff": "Diferencias del cambio de contenido"
+		},
+		"managedCopy": {
+			"copyOf": "Copia de {{path}} en {{repository}}",
+			"copyOfAtCommit": "Copia de {{path}} en {{repository}} en {{commit}}",
+			"locked": "Bloqueado: edita el archivo en el repositorio y súbelo con push.",
+			"unlocked": "Los cambios hechos aquí se sobrescriben en el próximo push salvo que se incorporen al archivo.",
+			"lock": "Bloquear",
+			"unlock": "Desbloquear",
+			"editNotSaved": "Tu última edición no se guardó."
 		}
 	},
 	"roles": {
@@ -893,6 +1175,26 @@
 			"projectExport": {
 				"label": "Exportar datos del proyecto",
 				"description": "Exportar las tareas (con comentarios y actividades) y la documentación de este proyecto"
+			},
+			"gitRead": {
+				"label": "Ver Git",
+				"description": "Ver los repositorios vinculados al proyecto"
+			},
+			"gitWrite": {
+				"label": "Gestionar Git",
+				"description": "Vincular y desvincular repositorios, conceder acceso a repositorios y permitir que los agentes suban cambios"
+			},
+			"gitApprove": {
+				"label": "Aprobar solicitudes de cambios",
+				"description": "Aprobar pull requests y merge requests, lo que puede cumplir una revisión obligatoria. Comentar y solicitar cambios solo requiere Gestionar Git."
+			},
+			"gitMerge": {
+				"label": "Fusionar solicitudes de cambios",
+				"description": "Fusionar pull requests y merge requests en su rama de destino. La protección de ramas de la plataforma sigue aplicándose."
+			},
+			"gitConnectionsManage": {
+				"label": "Gestionar conexiones Git",
+				"description": "Añadir y quitar las aplicaciones de GitHub y los tokens de acceso que solo usa este proyecto. Vincular repositorios sigue requiriendo acceso de escritura a Git."
 			}
 		},
 		"permissionGroups": {
@@ -908,7 +1210,8 @@
 			"environments": "Entornos",
 			"annotations": "Annotations",
 			"workflows": "Automatización",
-			"plugins": "Plugins"
+			"plugins": "Plugins",
+			"git": "Git"
 		}
 	},
 	"settings": {
@@ -1032,7 +1335,8 @@
 				"displayName": "Nombre visible",
 				"fieldKey": "Clave del campo",
 				"type": "Tipo",
-				"required": "Obligatorio"
+				"required": "Obligatorio",
+				"useInSearch": "Usar en la búsqueda"
 			},
 			"yes": "Sí",
 			"no": "No",
@@ -1054,6 +1358,8 @@
 			"noColor": "Sin color",
 			"requiredLabel": "Obligatorio",
 			"requiredHint": "Los usuarios deben completar este campo al crear o editar una tarea.",
+			"useInSearchLabel": "Usar en la búsqueda",
+			"useInSearchHint": "La búsqueda de tareas también coincide con el valor de este campo.",
 			"fieldTypes": {
 				"text": "Texto",
 				"number": "Número",
@@ -1061,7 +1367,8 @@
 				"checkbox": "Casilla de verificación",
 				"select": "Selección",
 				"multiSelect": "Selección múltiple",
-				"url": "URL"
+				"url": "URL",
+				"longText": "Texto largo"
 			},
 			"createDialog": {
 				"title": "Crear campo personalizado",
@@ -1092,7 +1399,9 @@
 			"noPermission": {
 				"title": "You don't have permission to view custom fields",
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
-			}
+			},
+			"rowsLabel": "Líneas visibles",
+			"rowsHint": "Número de líneas mostradas al editar ({{min}}–{{max}})."
 		},
 		"jev": {
 			"title": "Jev IA",
@@ -1376,7 +1685,8 @@
 		"common": {
 			"empty": "Vacío",
 			"dash": "—",
-			"unassigned": "Sin asignar"
+			"unassigned": "Sin asignar",
+			"none": "Ninguno"
 		},
 		"notFound": {
 			"title": "Tarea no encontrada",
@@ -1504,7 +1814,8 @@
 				"checkbox": "Casilla de verificación",
 				"select": "Selección",
 				"multiSelect": "Selección múltiple",
-				"url": "URL"
+				"url": "URL",
+				"longText": "Texto largo"
 			}
 		},
 		"addTaskLinkModal": {
@@ -1538,7 +1849,8 @@
 				"datePlaceholder": "Fecha",
 				"clearDate": "Borrar fecha",
 				"startDate": "Fecha de inicio",
-				"dueDate": "Fecha de vencimiento"
+				"dueDate": "Fecha de vencimiento",
+				"clearDates": "Borrar fechas"
 			},
 			"storyPointsEditor": {
 				"decrease": "Disminuir puntos de historia",
@@ -1642,6 +1954,66 @@
 			"projectClear": "Quitar proyecto",
 			"projectEmpty": "No hay proyectos para elegir",
 			"projectUnknown": "Proyecto desconocido"
+		},
+		"git": {
+			"branches": "Ramas",
+			"pullRequests": "Pull requests",
+			"linkBranch": "Vincular rama",
+			"newBranch": "Nueva rama",
+			"linkPullRequest": "Vincular pull request",
+			"noBranches": "Aún no hay ramas vinculadas.",
+			"noPullRequests": "Aún no hay pull requests vinculados.",
+			"by": "por {{author}}",
+			"unlink": "Desvincular",
+			"unlinkPullRequest": "Desvincular el pull request {{name}}",
+			"unlinkBranch": "Desvincular la rama {{name}}",
+			"copyCheckout": "Copiar comando de checkout",
+			"copy": "Copiar",
+			"copied": "Copiado",
+			"state": {
+				"open": "Abierto",
+				"draft": "Borrador",
+				"merged": "Fusionado",
+				"closed": "Cerrado"
+			},
+			"ci": {
+				"passing": "CI correcto",
+				"failing": "CI con fallos",
+				"pending": "CI en curso",
+				"failingNames": "Fallan: {{names}}",
+				"counts": "{{passed}} de {{total}} comprobaciones superadas"
+			},
+			"forms": {
+				"selectRepository": "Selecciona un repositorio…",
+				"cancel": "Cancelar",
+				"pullRequest": "Pull request",
+				"pullRequestHint": "Pega el enlace del pull request o escribe su número.",
+				"willLink": "Se vinculará {{what}} de {{repository}}",
+				"repository": "Repositorio",
+				"linkPullRequest": "Vincular pull request",
+				"existingBranch": "Rama existente",
+				"branchHint": "Escribe el nombre de una rama o pega un enlace a ella.",
+				"linkBranch": "Vincular rama",
+				"branchType": "Tipo",
+				"branchName": "Nombre de la rama",
+				"branchFrom": "Crear desde",
+				"branchFromHint": "Opcional: por defecto, la rama predeterminada del repositorio.",
+				"createBranch": "Crear rama",
+				"orLocally": "O créala en local"
+			},
+			"errors": {
+				"notFound": "No se encontró en ese repositorio.",
+				"rejected": "La plataforma Git rechazó la solicitud para este repositorio.",
+				"unavailable": "El proveedor de Git no está disponible por el momento. Inténtalo de nuevo.",
+				"noIdentity": "Ninguna identidad de Git puede actuar en este repositorio.",
+				"forbidden": "No tienes acceso para hacer eso.",
+				"generic": "Algo salió mal. Inténtalo de nuevo.",
+				"repoNotLinked": "«{{repository}}» no está vinculado a este proyecto.",
+				"selectRepository": "Selecciona un repositorio.",
+				"invalidNumber": "Escribe un número o pega un enlace.",
+				"branchRequired": "Escribe el nombre de una rama o pega un enlace.",
+				"createRefused": "La plataforma no pudo crear esa rama (el nombre puede estar en uso o no ser válido)."
+			}
 		}
 	},
 	"portForwardDetail": {
@@ -1813,6 +2185,19 @@
 		"backlog": {
 			"title": "Backlog del producto",
 			"description": "Todos los elementos de trabajo no asignados a un sprint."
+		},
+		"subtasks": {
+			"expand": "Expandir {{n}} subtareas",
+			"collapse": "Contraer {{n}} subtareas",
+			"progress": "{{done}} de {{n}} subtareas completadas",
+			"loading": "Cargando subtareas",
+			"loadError": "No se pudieron cargar las subtareas.",
+			"retry": "Reintentar",
+			"matching": "{{n}} de {{total}} subtareas coinciden con los filtros actuales",
+			"noMatch": "Ninguna subtarea coincide con los filtros actuales",
+			"loadMore": "Cargar más subtareas",
+			"add": "Añadir subtarea",
+			"addPlaceholder": "Título de la subtarea"
 		}
 	},
 	"conversationsPage": {
@@ -1882,6 +2267,7 @@
 			"deleteView": "Eliminar vista",
 			"searchTasksPlaceholder": "Buscar tareas…",
 			"pluginNotAvailable": "Plugin no disponible",
+			"columnsTruncated": "Solo se muestran las primeras {{max}} columnas; algunas tareas no están en ninguna columna. Acota la vista con un filtro para ver el resto.",
 			"viewErrors": {
 				"isLastView": "Esta es la última vista y no se puede eliminar.",
 				"deleteFailed": "No se pudo eliminar la vista. Inténtalo de nuevo.",
@@ -1955,9 +2341,21 @@
 			"tagsFilter": {
 				"addTag": "Agregar etiqueta",
 				"addTagPlaceholder": "Agregar etiqueta..."
-			}
+			},
+			"subtasksLabel": "Subtareas",
+			"subtasksCollapsed": "Anidadas, contraídas",
+			"subtasksExpanded": "Anidadas, expandidas",
+			"subtasksHidden": "Ocultas (lista plana)",
+			"ganttDependenciesLabel": "Flechas de dependencia",
+			"ganttDependenciesShown": "Visibles",
+			"ganttDependenciesHidden": "Ocultas",
+			"unsavedBadge": "Cambios sin guardar",
+			"unsavedTitle": "¿Descartar los cambios sin guardar?",
+			"unsavedDescription": "Cambiaste los ajustes de esta vista pero no los guardaste. Guárdalos o descártalos para volver a los últimos ajustes guardados.",
+			"keepEditing": "Seguir editando",
+			"discard": "Descartar"
 		},
-		"roadmap": {
+		"gantt": {
 			"taskColumnLabel": "Tarea",
 			"noTasksToDisplay": "No hay tareas para mostrar",
 			"noDatesSet": "Sin fechas establecidas",
@@ -1965,7 +2363,24 @@
 			"startDateTooltip": "Inicio: {{date}}",
 			"dueDateTooltip": "Vencimiento: {{date}}",
 			"loading": "Cargando…",
-			"viewMore": "Ver más"
+			"viewMore": "Ver más",
+			"zoomLabel": "Zoom",
+			"zoom": {
+				"day": "Día",
+				"week": "Semana",
+				"month": "Mes",
+				"quarter": "Trimestre",
+				"year": "Año"
+			},
+			"today": "Hoy",
+			"jumpToToday": "Ir a hoy",
+			"quarterLabel": "T{{n}}",
+			"startsBeforeBlocker": "Empieza antes de que termine «{{title}}»",
+			"resizeStart": "Arrastra para cambiar la fecha de inicio",
+			"resizeEnd": "Arrastra para cambiar la fecha de vencimiento",
+			"rescheduled": "Se reprogramó «{{title}}»",
+			"undo": "Deshacer",
+			"rescheduleFailed": "No se pudo reprogramar la tarea"
 		},
 		"newViewPopover": {
 			"addView": "Añadir vista",
@@ -1979,7 +2394,7 @@
 			"layouts": {
 				"board": "Tablero",
 				"table": "Tabla",
-				"roadmap": "Hoja de ruta",
+				"gantt": "Gantt",
 				"plugin": "Plugin"
 			}
 		},
@@ -2005,7 +2420,7 @@
 		},
 		"timeline": {
 			"title": "Cronología",
-			"description": "Épicas y planificación a largo plazo en una hoja de ruta."
+			"description": "Épicas y planificación a largo plazo en un diagrama de Gantt."
 		},
 		"sprintDetail": {
 			"notFound": "Sprint no encontrado o acceso denegado.",
@@ -2081,7 +2496,8 @@
 			"assignee": "Asignado",
 			"importance": "Importancia",
 			"type": "Tipo",
-			"reporter": "Reportero"
+			"reporter": "Reportero",
+			"tags": "Etiquetas"
 		},
 		"sortBy": {
 			"manual": "Manual",
@@ -2172,7 +2588,14 @@
 			"triggerGroups": {
 				"taskEvents": "Eventos de tareas",
 				"sprintEvents": "Eventos de sprints",
-				"scheduleWebhook": "Programación y webhook"
+				"scheduleWebhook": "Programación y webhook",
+				"taskActivity": "Actividad y subtareas"
+			},
+			"git": "Git",
+			"actionGroups": {
+				"taskActions": "Tarea",
+				"flowActions": "Flujo e integraciones",
+				"sprintActions": "Sprint"
 			}
 		},
 		"nodeKind": {
@@ -2197,7 +2620,12 @@
 			"sprint_created": "Sprint creado",
 			"sprint_started": "Sprint iniciado",
 			"sprint_completed": "Sprint completado",
-			"sprint_deleted": "Sprint eliminado"
+			"sprint_deleted": "Sprint eliminado",
+			"field_changed": "Campo cambiado",
+			"comment_added": "Comentario añadido",
+			"link_added": "Enlace añadido",
+			"attachment_added": "Adjunto añadido",
+			"child_changed": "Subtarea cambiada"
 		},
 		"actionTypes": {
 			"update_task": "Actualizar tarea",
@@ -2205,7 +2633,11 @@
 			"call_api": "Llamar API",
 			"wait": "Esperar",
 			"update_sprint": "Actualizar sprint",
-			"complete_sprint": "Completar sprint"
+			"complete_sprint": "Completar sprint",
+			"create_task": "Crear subtarea",
+			"link_task": "Vincular tarea",
+			"add_comment": "Añadir comentario",
+			"notify": "Enviar notificación"
 		},
 		"nodeConfig": {
 			"save": "Guardar",
@@ -2246,7 +2678,24 @@
 				"tokenShownOnceWarning": "Copia este token ahora — no se volverá a mostrar.",
 				"copy": "Copiar",
 				"copied": "Copiado",
-				"noTokenYet": "Aún no se ha generado ningún token"
+				"noTokenYet": "Aún no se ha generado ningún token",
+				"fieldLabel": "Campo a vigilar",
+				"fieldPlaceholder": "Elige un campo…",
+				"fieldChangedHint": "Se ejecuta cuando se edita este campo en una tarea.",
+				"childChangedHint": "Se ejecuta en la tarea padre cuando se crea una subtarea o cambia de estado. Añade una condición sobre sus subtareas para actuar solo cuando, por ejemplo, todas estén terminadas.",
+				"childStatusLabel": "Cuando una subtarea entra en",
+				"changedFields": {
+					"sprint": "Sprint",
+					"due_date": "Fecha límite",
+					"start_date": "Fecha de inicio",
+					"title": "Título",
+					"story_points": "Puntos de historia",
+					"reporter": "Informador",
+					"task_type": "Tipo de tarea",
+					"parent_task": "Tarea padre",
+					"description": "Descripción",
+					"custom_fields": "Campos personalizados"
+				}
 			},
 			"condition": {
 				"branchesTitle": "Ramas",
@@ -2281,8 +2730,14 @@
 					"sprint_status": "Estado del sprint",
 					"sprint_goal": "Objetivo del sprint",
 					"sprint_start_date": "Fecha de inicio del sprint",
-					"sprint_end_date": "Fecha de fin del sprint"
-				}
+					"sprint_end_date": "Fecha de fin del sprint",
+					"child_count": "Número de subtareas"
+				},
+				"dateMode": {
+					"fixed": "Fecha concreta",
+					"relative": "Relativa a hoy"
+				},
+				"relativeHint": "Días desde hoy: 0 = ahora, 3 = en 3 días, -1 = ayer. Usa «antes de» con 0 para indicar vencido."
 			},
 			"action": {
 				"memberLabel": "Asignado",
@@ -2337,7 +2792,58 @@
 				"pluginConditionLabel": "Condición de plugin",
 				"pluginConditionHint": "Delega la coincidencia de esta rama a una condición de plugin en lugar de comparar un campo de la tarea.",
 				"selectPluginPlaceholder": "Selecciona una condición de plugin…",
-				"addCustomField": "Añadir campo personalizado…"
+				"addCustomField": "Añadir campo personalizado…",
+				"createTaskHint": "Crea una tarea nueva como hija de la tarea seleccionada abajo. Añade los campos que quieras: cada uno puede ser un valor fijo o copiarse de la tarea que activó la automatización o de su padre. Si el padre ya tiene una subtarea con exactamente este título, no se crea nada.",
+				"createTitlePlaceholder": "{{task.title}} - Revisión",
+				"descriptionLabel": "Descripción",
+				"ops": {
+					"set": "Establecer en",
+					"replace": "Reemplazar por",
+					"add": "Añadir",
+					"remove": "Quitar",
+					"clear": "Vaciar",
+					"task": "Copiar de esta tarea",
+					"parent": "Copiar de la tarea padre",
+					"now": "Hoy"
+				},
+				"clearHint": "Vacía este campo.",
+				"dynamicFieldLabel": "Copiar este campo",
+				"offsetDaysLabel": "Desplazar (días)",
+				"offsetDaysHint": "Positivo = más tarde, negativo = antes.",
+				"dynamicHint": {
+					"task": "Se copia de la tarea que activó la automatización al ejecutarse. Si esa tarea no tiene valor, el campo no cambia.",
+					"parent": "Se copia de la tarea padre de la que activó la automatización. Sin padre o sin valor, el campo no cambia.",
+					"now": "La fecha de hoy al ejecutarse la automatización, desplazada por los días indicados."
+				},
+				"addMember": "Añadir un miembro…",
+				"removeMember": "Quitar miembro",
+				"commentHint": "Publica un comentario en la tarea, escrito por la automatización.",
+				"commentTextLabel": "Comentario",
+				"commentPlaceholder": "p. ej. Todas las subtareas están terminadas.",
+				"notifyHint": "Envía una notificación en la aplicación sobre la tarea a las personas indicadas.",
+				"notifyRecipientsLabel": "Notificar a",
+				"notifyRecipients": {
+					"assignees": "Asignados",
+					"reporter": "Informador",
+					"parent_assignees": "Asignados de la tarea padre"
+				},
+				"notifyMembersLabel": "Notificar también a",
+				"notifyMessageLabel": "Mensaje",
+				"notifyMessagePlaceholder": "p. ej. Listo para revisión.",
+				"linkHint": "Vincula la tarea con otra. La dirección se lee desde esta tarea.",
+				"linkTypeLabel": "Tipo de enlace",
+				"linkTypes": {
+					"blocks": "Bloquea a",
+					"is_blocked_by": "Está bloqueada por",
+					"relates_to": "Se relaciona con",
+					"duplicates": "Duplica a",
+					"is_duplicated_by": "Está duplicada por"
+				},
+				"linkToLabel": "Vincular con",
+				"createLinkLabel": "Vincular con la tarea padre",
+				"createLinkNone": "Sin enlace",
+				"createLinkHint": "Opcionalmente vincula la nueva tarea con su padre, leído desde la nueva tarea (p. ej. «Bloquea a» = la subtarea bloquea a su padre).",
+				"opsLabel": "Cómo aplicar este campo"
 			},
 			"target": {
 				"label": "Se aplica a",
@@ -2345,6 +2851,7 @@
 					"self": "Esta tarea",
 					"parent": "Tarea principal",
 					"children": "Tareas secundarias",
+					"siblings": "Tareas hermanas (otras subtareas del padre)",
 					"blocks": "Bloquea",
 					"is_blocked_by": "Está bloqueada por",
 					"relates_to": "Tarea relacionada",
@@ -2372,7 +2879,12 @@
 				"cronSchedule": "Se ejecuta {{expression}}",
 				"webhookReady": "Webhook configurado",
 				"callApiSummary": "{{method}} {{host}}",
-				"jevNoulTrue": "Sí"
+				"jevNoulTrue": "Sí",
+				"pluginField": "{{field}}: {{value}}",
+				"waitMinutes": "Esperar {{minutes}} min",
+				"createTaskSummary": "Crear: {{title}}",
+				"commentSummary": "Comentario: {{text}}",
+				"notifySummary": "Notificar: {{message}}"
 			},
 			"jev": {
 				"answerTypeLabel": "Tipo de respuesta",
@@ -2398,7 +2910,8 @@
 				"confidenceThresholdLabel": "Umbral de confianza",
 				"trueThresholdLabel": "Umbral de “verdadero”",
 				"thresholdHint": "Por debajo de esto, el flujo de trabajo sigue la rama Else en lugar de confiar en la respuesta."
-			}
+			},
+			"noConfigNeeded": "Este nodo no necesita configuración: hace su trabajo en cuanto la automatización llega a él."
 		},
 		"runHistory": {
 			"title": "Historial de ejecuciones",

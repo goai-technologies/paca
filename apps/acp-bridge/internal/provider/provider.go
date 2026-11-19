@@ -28,7 +28,8 @@ type info struct {
 
 // registry mirrors ACP_PROVIDERS in the OpenHands SDK reference
 // (apps/acp-bridge/.venv/.../openhands/sdk/settings/acp_providers.py) for
-// the three built-ins, plus "goose" — not an OpenHands built-in; the old
+// the three built-ins, plus "opencode" (`opencode acp`, same plain-subprocess
+// shape as goose) and "goose" — not an OpenHands built-in; the old
 // Python bridge added it as a local override since `goose acp` already
 // speaks ACP correctly as a plain subprocess with nothing provider-specific
 // left for a registry entry to add beyond the launch command itself.
@@ -39,7 +40,7 @@ type info struct {
 // pins.
 var registry = map[string]info{
 	"claude-code": {
-		defaultCommand: []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp@0.44.0"},
+		defaultCommand: []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp@0.107.0"},
 		permissionMode: "bypassPermissions",
 	},
 	"codex": {
@@ -52,6 +53,9 @@ var registry = map[string]info{
 	},
 	"goose": {
 		defaultCommand: []string{"goose", "acp"},
+	},
+	"opencode": {
+		defaultCommand: []string{"opencode", "acp"},
 	},
 }
 
@@ -71,6 +75,19 @@ func ResolveCommand(acpProvider string, explicit []string) ([]string, error) {
 		return nil, fmt.Errorf("no default command for acp_provider=%q; a custom acp_command is required", acpProvider)
 	}
 	return explicit, nil
+}
+
+// ModelEnv returns the KEY=VALUE environment entries that make acpProvider's
+// agent run model, or nil if the provider has no such mechanism. The Claude
+// adapter only accepts models from its own list through ACP, but the Claude
+// CLI underneath takes any model name from ANTHROPIC_MODEL — which is what a
+// custom ANTHROPIC_BASE_URL endpoint needs — and it outranks the model in the
+// user's ~/.claude/settings.json.
+func ModelEnv(acpProvider, model string) []string {
+	if acpProvider == "claude-code" && model != "" {
+		return []string{"ANTHROPIC_MODEL=" + model}
+	}
+	return nil
 }
 
 // PermissionMode returns the session mode id that suppresses interactive

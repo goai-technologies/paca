@@ -41,7 +41,7 @@ type Config struct {
 	// buildMCPServers's use of this field and services/api's
 	// verifyAgentIdentity, which enforces the same rule server-side
 	// ("a project-scoped agent's actions are attributed via its
-	// project_members.id, never a raw actor_user_id").
+	// project_members.id, never a raw actor_account_id").
 	AgentScope string
 	// AgentType is "llm" or "provider_cli" (see the AgentType* consts
 	// above) — branches buildAgentContainerEnv and coldStartEnvironment's

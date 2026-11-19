@@ -62,8 +62,11 @@
 		"errors": {
 			"titleInvalid": "Ce titre n'est pas valide.",
 			"folderNameInvalid": "Ce nom de dossier n'est pas valide.",
-			"renameFailed": "Échec du renommage. Veuillez réessayer."
-		}
+			"renameFailed": "Échec du renommage. Veuillez réessayer.",
+			"moveIntoSelf": "Un dossier ne peut pas être déplacé dans lui-même ni dans l'un de ses sous-dossiers.",
+			"moveFailed": "Impossible de déplacer cet élément. Veuillez réessayer."
+		},
+		"moveToTop": "Déplacer au niveau supérieur"
 	},
 	"notifications": {
 		"title": "Notifications",
@@ -74,14 +77,21 @@
 		"unmuteSound": "Activer le son des notifications",
 		"text": {
 			"assigned": "{{actor}} vous a assigné à la tâche #{{taskNumber}} — {{taskTitle}}",
-			"mentioned": "{{actor}} vous a mentionné dans #{{taskNumber}} — {{taskTitle}}"
-		}
+			"mentioned": "{{actor}} vous a mentionné dans #{{taskNumber}} — {{taskTitle}}",
+			"question": "{{actor}} vous a posé une question dans {{title}}",
+			"mentionedInDoc": "{{actor}} vous a mentionné dans le document {{title}}",
+			"automation": "Automatisation : {{message}} (#{{taskNumber}} — {{taskTitle}})"
+		},
+		"untitledConversation": "Conversation sans titre",
+		"globalChat": "Chat global",
+		"untitledDocument": "Document sans titre"
 	},
 	"userMenu": {
 		"signIn": "Se connecter",
-		"myProfile": "Mon profil",
+		"myProfile": "Compte",
 		"apiKeys": "Clés API",
 		"logOut": "Se déconnecter",
-		"loggingOut": "Déconnexion en cours…"
+		"loggingOut": "Déconnexion en cours…",
+		"sendFeedback": "Envoyer un retour"
 	}
 }

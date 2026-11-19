@@ -10,42 +10,44 @@ import (
 // request context so a service can Fanout an attributed event without every
 // method growing actor parameters.
 type requestActor struct {
-	userID  uuid.UUID
-	agentID *uuid.UUID
+	accountID uuid.UUID
+	origin    Origin
 }
 
 type requestActorKey struct{}
 
-// WithRequestActor returns ctx carrying the authenticated caller. The HTTP
-// authn middleware sets it on every authenticated request; agentID is nil for
-// a human session. Background workers never set it, so their events stay
+// WithRequestActor returns ctx carrying the authenticated caller: its account
+// id and the origin it acts from (OriginAgent for an agent, OriginUser for
+// anything else). The HTTP authn middleware sets it on every authenticated
+// request. Background workers never set it, so their events stay
 // system-attributed.
-func WithRequestActor(ctx context.Context, userID uuid.UUID, agentID *uuid.UUID) context.Context {
-	return context.WithValue(ctx, requestActorKey{}, requestActor{userID: userID, agentID: agentID})
+func WithRequestActor(ctx context.Context, accountID uuid.UUID, origin Origin) context.Context {
+	return context.WithValue(ctx, requestActorKey{}, requestActor{accountID: accountID, origin: origin})
+}
+
+// RequestOrigin returns the origin of the request's caller, or "" when ctx
+// carries none (a background job).
+func RequestOrigin(ctx context.Context) Origin {
+	a, _ := ctx.Value(requestActorKey{}).(requestActor)
+	return a.origin
 }
 
 // withContextActor fills an event's actor and origin from the request context
-// when its producer left all three unset. A producer that sets any of them —
-// the task and doc activity services, which carry an explicit origin — is
-// left untouched.
+// when its producer left both unset. A producer that sets either — the task
+// and doc activity services, which carry an explicit origin — is left
+// untouched.
 func withContextActor(ctx context.Context, e Event) Event {
-	if e.ActorID != nil || e.ActorAgentID != nil || e.Origin != "" {
+	if e.ActorID != nil || e.Origin != "" {
 		return e
 	}
 	a, ok := ctx.Value(requestActorKey{}).(requestActor)
 	if !ok {
 		return e
 	}
-	if a.userID != uuid.Nil {
-		userID := a.userID
-		e.ActorID = &userID
+	if a.accountID != uuid.Nil {
+		accountID := a.accountID
+		e.ActorID = &accountID
 	}
-	if a.agentID != nil {
-		agentID := *a.agentID
-		e.ActorAgentID = &agentID
-		e.Origin = OriginAgent
-	} else {
-		e.Origin = OriginUser
-	}
+	e.Origin = a.origin
 	return e
 }

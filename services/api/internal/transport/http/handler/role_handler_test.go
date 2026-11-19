@@ -28,6 +28,8 @@ type fakeRoleSvc struct {
 	gotID        uuid.UUID
 	gotIn        roledom.RoleInput
 	gotRoleIDs   []uuid.UUID
+	gotFilter    roledom.RoleFilter
+	gotLimit     int
 	gotCreatedBy *uuid.UUID
 	gotMember    uuid.UUID
 	gotSim       roledom.SimulateInput
@@ -35,10 +37,13 @@ type fakeRoleSvc struct {
 	sim          *roledom.SimulationResult
 }
 
-func (f *fakeRoleSvc) ListPlatform(context.Context) ([]*roledom.Role, error) { return f.roles, f.err }
-func (f *fakeRoleSvc) ListForProject(_ context.Context, p uuid.UUID) ([]*roledom.Role, error) {
+func (f *fakeRoleSvc) ListPlatform(_ context.Context, filter roledom.RoleFilter, _ *string, limit int) ([]*roledom.Role, bool, int, error) {
+	f.gotFilter, f.gotLimit = filter, limit
+	return f.roles, false, len(f.roles), f.err
+}
+func (f *fakeRoleSvc) ListForProject(_ context.Context, p uuid.UUID, _ roledom.RoleFilter, _ *string, _ int) ([]*roledom.Role, bool, int, error) {
 	f.gotProject = &p
-	return f.roles, f.err
+	return f.roles, false, len(f.roles), f.err
 }
 func (f *fakeRoleSvc) Get(_ context.Context, p *uuid.UUID, id uuid.UUID) (*roledom.Role, error) {
 	f.gotProject, f.gotID = p, id
@@ -216,14 +221,21 @@ func TestRoleHandler_ResponseShape(t *testing.T) {
 	}
 }
 
-func TestRoleHandler_ListIsAnArrayAndScoped(t *testing.T) {
+func TestRoleHandler_ListIsAPageAndScoped(t *testing.T) {
 	p := uuid.New()
 	svc := &fakeRoleSvc{}
 	r := newRoleRouter(svc, uuid.NewString())
 	for _, path := range []string{"/admin/roles", "/projects/" + p.String() + "/roles/"} {
 		w := doRole(t, r, http.MethodGet, path, nil)
-		if w.Code != http.StatusOK || string(decodeRole(t, w).Data) != "[]" {
-			t.Fatalf("%s: %d %s, want 200 and []", path, w.Code, w.Body.String())
+		var page struct {
+			Items      []json.RawMessage `json:"items"`
+			PageSize   int               `json:"page_size"`
+			NextCursor *string           `json:"next_cursor"`
+			TotalCount int               `json:"total_count"`
+		}
+		_ = json.Unmarshal(decodeRole(t, w).Data, &page)
+		if w.Code != http.StatusOK || len(page.Items) != 0 || page.PageSize != 30 || page.NextCursor != nil || page.TotalCount != 0 {
+			t.Fatalf("%s: %d %s, want 200 and an empty first page", path, w.Code, w.Body.String())
 		}
 	}
 	if svc.gotProject == nil || *svc.gotProject != p {
@@ -231,10 +243,13 @@ func TestRoleHandler_ListIsAnArrayAndScoped(t *testing.T) {
 	}
 	svc.roles = []*roledom.Role{sampleRole(nil), sampleRole(&p)}
 	w := doRole(t, r, http.MethodGet, "/projects/"+p.String()+"/roles/", nil)
-	var items []struct {
-		ProjectID *string `json:"project_id"`
+	var page struct {
+		Items []struct {
+			ProjectID *string `json:"project_id"`
+		} `json:"items"`
 	}
-	_ = json.Unmarshal(decodeRole(t, w).Data, &items)
+	_ = json.Unmarshal(decodeRole(t, w).Data, &page)
+	items := page.Items
 	if len(items) != 2 || items[0].ProjectID != nil || items[1].ProjectID == nil {
 		t.Fatalf("each item carries its project_id so the UI can tell them apart: %+v", items)
 	}
@@ -496,5 +511,28 @@ func TestRoleHandler_Simulate(t *testing.T) {
 	_ = json.Unmarshal(decodeRole(t, w).Data, &raw)
 	if string(raw["matched"]) != "[]" {
 		t.Fatalf("matched = %s", raw["matched"])
+	}
+}
+
+func TestRoleHandler_ListByPageNumber(t *testing.T) {
+	svc := &fakeRoleSvc{roles: []*roledom.Role{sampleRole(nil)}}
+	r := newRoleRouter(svc, uuid.NewString())
+
+	w := doRole(t, r, http.MethodGet, "/admin/roles?page=3&page_size=10", nil)
+	var page struct {
+		Page       int     `json:"page"`
+		PageSize   int     `json:"page_size"`
+		NextCursor *string `json:"next_cursor"`
+		TotalCount int     `json:"total_count"`
+	}
+	_ = json.Unmarshal(decodeRole(t, w).Data, &page)
+	if w.Code != http.StatusOK || page.Page != 3 || page.PageSize != 10 || page.NextCursor != nil || page.TotalCount != 1 {
+		t.Fatalf("page response = %d %+v", w.Code, page)
+	}
+	if svc.gotFilter.Offset != 20 || svc.gotLimit != 10 {
+		t.Fatalf("page 3 of 10 must skip 20 rows: offset=%d limit=%d", svc.gotFilter.Offset, svc.gotLimit)
+	}
+	if w := doRole(t, r, http.MethodGet, "/admin/roles?page=0", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("page=0: %d, want 400", w.Code)
 	}
 }

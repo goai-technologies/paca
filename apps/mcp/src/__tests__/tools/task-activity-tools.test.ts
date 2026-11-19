@@ -30,7 +30,9 @@ const comment = {
 
 function makeClient(overrides: Record<string, any> = {}) {
 	return {
-		listTaskActivities: vi.fn().mockResolvedValue([activity]),
+		listTaskActivities: vi
+			.fn()
+			.mockResolvedValue({ items: [activity], nextCursor: null }),
 		addTaskComment: vi.fn().mockResolvedValue(comment),
 		updateTaskComment: vi
 			.fn()
@@ -70,7 +72,26 @@ describe("handleTaskActivityTool – list_task_activities", () => {
 			{ projectId: "p1", taskId: "t1" },
 			client,
 		);
-		expect(client.listTaskActivities).toHaveBeenCalledWith("p1", "t1");
+		expect(client.listTaskActivities).toHaveBeenCalledWith("p1", "t1", {
+			cursor: undefined,
+			pageSize: undefined,
+		});
+	});
+
+	it("tells the agent how to reach older activity", async () => {
+		const client = makeClient({
+			listTaskActivities: vi
+				.fn()
+				.mockResolvedValue({ items: [activity], nextCursor: "older" }),
+		});
+		const result = await handleTaskActivityTool(
+			"list_task_activities",
+			{ projectId: "p1", taskId: "t1" },
+			client,
+		);
+		expect(result.content[0].text).toContain(
+			'call list_task_activities again with cursor="older"',
+		);
 	});
 
 	it("includes 'Task Activities:' header and activity type in response", async () => {
@@ -79,7 +100,7 @@ describe("handleTaskActivityTool – list_task_activities", () => {
 			{ projectId: "p1", taskId: "t1" },
 			makeClient(),
 		);
-		expect(result.content[0].text).toContain("Task Activities:");
+		expect(result.content[0].text).toContain("Task Activities");
 		expect(result.content[0].text).toContain("status_change");
 	});
 

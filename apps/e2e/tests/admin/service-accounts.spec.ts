@@ -230,7 +230,7 @@ test.describe("Service accounts: API keys", () => {
 		expect(listed.status()).toBe(200);
 		const body = await listed.text();
 		expect(body).not.toContain(minted.key);
-		const keys = JSON.parse(body).data as Array<{
+		const keys = JSON.parse(body).data.items as Array<{
 			id: string;
 			name: string;
 			last_used_at: string | null;

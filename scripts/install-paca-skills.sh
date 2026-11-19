@@ -12,7 +12,13 @@
 #                                                                 Cursor also supports a global
 #                                                                 ~/.cursor/skills/, this
 #                                                                 installer just doesn't use it)
-#   - Any AGENTS.md-reading tool (Codex, Windsurf, OpenCode, ...)
+#   - OpenCode      → ~/.config/opencode/skills/<name>/SKILL.md (global; OpenCode's own
+#                                                                 documented global skills folder)
+#   - Goose         → ~/.agents/skills/<name>/SKILL.md          (global; Goose's recommended
+#                                                                 global skills folder — also read
+#                                                                 by OpenCode, so selecting both
+#                                                                 loads each skill from two places)
+#   - Any AGENTS.md-reading tool (Codex, Windsurf, ...)
 #                   → <project>/AGENTS.md                     (project-scoped, merged into
 #                                                              a marker-delimited section so
 #                                                              any other content is preserved)
@@ -54,7 +60,7 @@
 # script is run from inside a git working tree.
 #
 # Skills are Agent Skills format (YAML frontmatter + markdown body). Claude
-# Code, Cursor, and both Gemini/Antigravity SKILL.md paths above get that
+# Code, Cursor, OpenCode, Goose, and both Gemini/Antigravity SKILL.md paths get that
 # content verbatim, frontmatter included. AGENTS.md and the Gemini CLI legacy
 # TOML command are the two targets that still strip frontmatter and re-shape
 # the content — AGENTS.md because it's a single shared file, not a per-skill
@@ -84,8 +90,8 @@
 #
 # By default, skills are installed to every platform listed above. To
 # install to only some of them, either set PACA_SKILL_PLATFORMS to a
-# comma/space-separated list of "claude", "gemini", "cursor", "agents"
-# (e.g. PACA_SKILL_PLATFORMS=claude,gemini), or pass --platforms=... as an
+# comma/space-separated list of "claude", "gemini", "cursor", "agents",
+# "opencode", "goose" (e.g. PACA_SKILL_PLATFORMS=claude,gemini), or pass --platforms=... as an
 # argument (works through a pipe too: curl ... | bash -s -- --platforms=claude).
 # If neither is set and there's a real terminal attached, the script prompts
 # for a selection — press Enter there to install to all of them, matching
@@ -104,6 +110,8 @@ GEMINI_LEGACY_DIR="${HOME}/.gemini/commands"
 GEMINI_PLUGIN_DIR="${HOME}/.gemini/config/plugins/paca"
 GEMINI_PLUGIN_SKILLS_DIR="${GEMINI_PLUGIN_DIR}/skills"
 GEMINI_PLUGIN_VERSION="1.0.0"
+OPENCODE_DIR="${HOME}/.config/opencode/skills"
+GOOSE_DIR="${HOME}/.agents/skills"
 
 PACA_API_URL="${PACA_API_URL:-}"
 PACA_API_KEY="${PACA_API_KEY:-}"
@@ -254,7 +262,7 @@ fi
 
 # ─── Platform selection ─────────────────────────────────────────────────────
 
-ALL_PLATFORMS="claude gemini cursor agents"
+ALL_PLATFORMS="claude gemini cursor agents opencode goose"
 PACA_SKILL_PLATFORMS="${PACA_SKILL_PLATFORMS:-}"
 
 # --platforms=... overrides PACA_SKILL_PLATFORMS — only relevant when this
@@ -272,8 +280,8 @@ done
 # deduplicated subset of ALL_PLATFORMS; returns nonzero if LIST contains no
 # recognized platform at all (an unrecognized token alone, e.g. a typo, is
 # warned about rather than treated as fatal — the run still proceeds with
-# whatever else was recognized). Accepts "1"-"4" as aliases for
-# claude/gemini/cursor/agents too, matching the numbered menu the
+# whatever else was recognized). Accepts "1"-"6" as aliases for
+# claude/gemini/cursor/agents/opencode/goose too, matching the numbered menu the
 # interactive prompt shows — resolved per token here (not by substituting
 # digits in the raw string first), so e.g. "1,4" or "1 4" unambiguously
 # means claude+agents.
@@ -288,10 +296,12 @@ normalize_platforms() {
       2) tok=gemini ;;
       3) tok=cursor ;;
       4) tok=agents ;;
-      claude|gemini|cursor|agents) ;;
+      5) tok=opencode ;;
+      6) tok=goose ;;
+      claude|gemini|cursor|agents|opencode|goose) ;;
       "") continue ;;
       *)
-        warn "Unrecognized platform '${tok}' — ignoring it (valid: claude, gemini, cursor, agents, all, or 1-4)"
+        warn "Unrecognized platform '${tok}' — ignoring it (valid: claude, gemini, cursor, agents, opencode, goose, all, or 1-6)"
         continue
         ;;
     esac
@@ -307,7 +317,7 @@ normalize_platforms() {
 
 if [[ -n "${PACA_SKILL_PLATFORMS}" ]]; then
   if ! PACA_SKILL_PLATFORMS="$(normalize_platforms "${PACA_SKILL_PLATFORMS}")"; then
-    error "PACA_SKILL_PLATFORMS/--platforms contained no recognized platform (valid: claude, gemini, cursor, agents, all)."
+    error "PACA_SKILL_PLATFORMS/--platforms contained no recognized platform (valid: claude, gemini, cursor, agents, opencode, goose, all)."
     exit 1
   fi
 elif { : < /dev/tty; } 2>/dev/null; then
@@ -317,12 +327,14 @@ elif { : < /dev/tty; } 2>/dev/null; then
   info "  2) gemini  — Gemini CLI / Antigravity (~/.gemini/config/plugins/paca/skills/)"
   info "  3) cursor  — Cursor        (project-scoped, needs a git working tree)"
   info "  4) agents  — AGENTS.md     (project-scoped, needs a git working tree)"
+  info "  5) opencode — OpenCode     (~/.config/opencode/skills/)"
+  info "  6) goose   — Goose         (~/.agents/skills/; OpenCode also reads this, so 5+6 duplicates skills)"
   read -r -p "  Enter numbers or names, space/comma-separated (Enter for all): " platform_choice < /dev/tty
   echo ""
   if [[ -z "${platform_choice// /}" ]]; then
     PACA_SKILL_PLATFORMS="${ALL_PLATFORMS}"
   elif ! PACA_SKILL_PLATFORMS="$(normalize_platforms "${platform_choice}")"; then
-    error "No recognized platform in that selection — re-run and choose from: claude, gemini, cursor, agents (or 1-4)."
+    error "No recognized platform in that selection — re-run and choose from: claude, gemini, cursor, agents, opencode, goose (or 1-6)."
     exit 1
   fi
 else
@@ -333,17 +345,23 @@ INSTALL_CLAUDE=false
 INSTALL_GEMINI=false
 INSTALL_CURSOR=false
 INSTALL_AGENTS=false
+INSTALL_OPENCODE=false
+INSTALL_GOOSE=false
 for tok in ${PACA_SKILL_PLATFORMS}; do
   case "${tok}" in
     claude) INSTALL_CLAUDE=true ;;
     gemini) INSTALL_GEMINI=true ;;
     cursor) INSTALL_CURSOR=true ;;
     agents) INSTALL_AGENTS=true ;;
+    opencode) INSTALL_OPENCODE=true ;;
+    goose) INSTALL_GOOSE=true ;;
   esac
 done
 info "Installing to: ${PACA_SKILL_PLATFORMS// /, }"
 
 if $INSTALL_CLAUDE; then mkdir -p "${CLAUDE_DIR}"; fi
+if $INSTALL_OPENCODE; then mkdir -p "${OPENCODE_DIR}"; fi
+if $INSTALL_GOOSE; then mkdir -p "${GOOSE_DIR}"; fi
 if $INSTALL_GEMINI; then
   mkdir -p "${GEMINI_DIR}" "${GEMINI_LEGACY_DIR}" "${GEMINI_PLUGIN_SKILLS_DIR}"
   # Written once per run, not per skill — this is the plugin package's own
@@ -478,6 +496,16 @@ install_one_skill() {
     cp "${raw}" "${CLAUDE_DIR}/${name}/SKILL.md"
   fi
 
+  # OpenCode and Goose: same native Agent Skills folder format, verbatim.
+  if $INSTALL_OPENCODE; then
+    mkdir -p "${OPENCODE_DIR}/${name}"
+    cp "${raw}" "${OPENCODE_DIR}/${name}/SKILL.md"
+  fi
+  if $INSTALL_GOOSE; then
+    mkdir -p "${GOOSE_DIR}/${name}"
+    cp "${raw}" "${GOOSE_DIR}/${name}/SKILL.md"
+  fi
+
   if $INSTALL_GEMINI; then
     # The verified-working path — see the header comment. plugin.json and
     # installed_version.json for the enclosing "paca" plugin are already
@@ -558,6 +586,16 @@ if ! fetch_with_status "${PACA_API_URL%/}/api/v1/skills" "${skills_json}" "${PAC
   fi
   rm -f "${skills_json}"
   exit 1
+fi
+
+# paca-workflow was renamed paca-automation; remove every artifact of the
+# retired skill so a stale copy doesn't keep documenting removed tools.
+for retired_dir in "${CLAUDE_DIR}" "${OPENCODE_DIR}" "${GOOSE_DIR}" "${GEMINI_DIR}" "${GEMINI_PLUGIN_SKILLS_DIR}"; do
+  [[ -f "${retired_dir}/paca-workflow/SKILL.md" ]] && rm -rf "${retired_dir}/paca-workflow"
+done
+rm -f "${GEMINI_LEGACY_DIR}/paca-workflow.toml"
+if [[ -n "${PROJECT_ROOT}" ]]; then
+  rm -rf "${PROJECT_ROOT}/.cursor/skills/paca-workflow"
 fi
 
 bundled_count=0
@@ -715,6 +753,8 @@ tac "${SUMMARY_TMP}" | awk '!seen[$1]++' | tac
 echo ""
 echo "  Where they went:"
 $INSTALL_CLAUDE && echo "    Claude Code   → ${CLAUDE_DIR}/"
+$INSTALL_OPENCODE && echo "    OpenCode      → ${OPENCODE_DIR}/"
+$INSTALL_GOOSE && echo "    Goose         → ${GOOSE_DIR}/"
 $INSTALL_GEMINI && echo "    Gemini CLI    → ${GEMINI_PLUGIN_SKILLS_DIR}/ (Antigravity plugin, verified) + ${GEMINI_DIR}/ + ${GEMINI_LEGACY_DIR}/ (unverified fallbacks)"
 if [[ -n "${PROJECT_ROOT}" ]]; then
   $INSTALL_CURSOR && echo "    Cursor        → ${PROJECT_ROOT}/.cursor/skills/"

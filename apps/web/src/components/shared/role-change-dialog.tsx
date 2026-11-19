@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
+	type RemoteRoleSearch,
 	type RoleOption,
 	RoleSelectPanel,
 } from "@/components/admin/global-roles/role-select";
@@ -26,7 +27,13 @@ interface RoleChangeDialogProps<T extends RoleOption> {
 	title: string;
 	description: string;
 	person: { avatar: AvatarIdentity; handle?: string };
+	/** The roles offered (with `remote`, the ones matching the search so far). */
 	roles: T[];
+	/** Roles that may be held or picked without being in `roles` (not on a
+	 *  loaded page), e.g. the ones the person holds today. */
+	knownRoles?: T[];
+	/** Search and page `roles` on the server. */
+	remote?: RemoteRoleSearch;
 	/** Shown in place of the list and summary while the roles are not
 	 * available (loading, failed, none). */
 	status?: ReactNode;
@@ -62,6 +69,8 @@ export function RoleChangeDialog<T extends RoleOption>({
 	description,
 	person,
 	roles,
+	knownRoles = [],
+	remote,
 	status,
 	currentIds,
 	minSelected = 0,
@@ -93,10 +102,13 @@ export function RoleChangeDialog<T extends RoleOption>({
 		if (!open) setPick(null);
 	}, [open]);
 
-	const added = roles.filter(
+	const allRoles = [
+		...new Map([...knownRoles, ...roles].map((r) => [r.id, r])).values(),
+	];
+	const added = allRoles.filter(
 		(r) => ids.includes(r.id) && !currentIds.includes(r.id),
 	);
-	const removed = roles.filter(
+	const removed = allRoles.filter(
 		(r) => !ids.includes(r.id) && currentIds.includes(r.id),
 	);
 
@@ -131,6 +143,8 @@ export function RoleChangeDialog<T extends RoleOption>({
 						<>
 							<RoleSelectPanel
 								roles={roles}
+								knownRoles={knownRoles}
+								remote={remote}
 								values={ids}
 								currentRoleIds={currentIds}
 								label={`${title}: ${person.avatar.name}`}
@@ -184,7 +198,7 @@ export function RoleChangeDialog<T extends RoleOption>({
 					{change && warnings
 						? warnings({
 								ids: change,
-								roles: roles.filter((r) => change.includes(r.id)),
+								roles: allRoles.filter((r) => change.includes(r.id)),
 							})
 						: null}
 					{error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
@@ -220,7 +234,7 @@ function ChangeRow({
 			<span
 				className={
 					tone === "add"
-						? "min-w-20 shrink-0 font-medium text-emerald-600 dark:text-emerald-400"
+						? "min-w-20 shrink-0 font-medium text-success"
 						: "min-w-20 shrink-0 font-medium text-destructive"
 				}
 			>

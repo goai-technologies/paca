@@ -14,8 +14,9 @@ var ErrNotFound = errors.New("project export not found")
 // Repository defines persistence operations for project exports.
 type Repository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*ProjectExport, error)
-	// ListByProject returns the project's most recent exports, newest first.
-	ListByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*ProjectExport, error)
+	// ListByProject returns one page of the project's exports, newest first:
+	// limit rows after skipping offset, plus the project's total export count.
+	ListByProject(ctx context.Context, projectID uuid.UUID, offset, limit int) (exports []*ProjectExport, total int, err error)
 	// CreateIfIdle inserts e unless the project already has a pending or
 	// processing export updated at or after notBefore (older ones are treated
 	// as abandoned), and reports whether it inserted. The check and the insert

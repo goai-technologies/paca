@@ -3,14 +3,19 @@
 // Starts the Socket.IO server and the Valkey Pub/Sub subscriber, then blocks
 // until a SIGTERM or SIGINT signal triggers a graceful shutdown.
 //
-// Two separate ioredis clients are created:
-//   sessionRedis  — regular R/W client for session data (join/leave/disconnect).
-//   subscriber    — client locked into subscriber mode (subscribe/psubscribe only).
-//                   ioredis requires a dedicated client for this mode.
+// The ioredis subscriber is a dedicated client locked into subscriber mode
+// (subscribe/psubscribe only), which ioredis requires. Nothing else talks to
+// Valkey except a command client that reads the change log: sessions live in
+// memory and every decision comes from the API.
 
 import Redis from "ioredis";
 import pino from "pino";
+import { AccessDecider } from "./access.ts";
+import { ValkeyChangeLogReader } from "./change-log.ts";
+import { CollabCluster } from "./collab-cluster.ts";
+import { ValkeyBus, ValkeyLeases } from "./collab-valkey.ts";
 import { loadConfig } from "./config.ts";
+import { IamEpochWatcher } from "./iam-epoch.ts";
 import { createSocketServer } from "./server.ts";
 import { createSubscriber } from "./subscriber.ts";
 
@@ -25,21 +30,80 @@ const logger = pino({
 
 logger.info("starting paca realtime service");
 
-// Session store client — regular command mode.
-const sessionRedis = new Redis(config.valkey.url, {
-	lazyConnect: false,
-	maxRetriesPerRequest: null,
+const decider = new AccessDecider(config.apiUrl, {
+	ttlMs: config.accessCacheTtlMs,
 });
 
-sessionRedis.on("connect", () =>
-	logger.info("valkey session client connected"),
+// A regular (non-subscriber) client, used only to read the change log.
+const commands = new Redis(config.valkey.url, { maxRetriesPerRequest: 2 });
+commands.on("error", (err: unknown) => {
+	logger.error({ err }, "valkey command client error");
+});
+
+// Collaborative editing across replicas: a room has one owner, found through a
+// lease in Valkey (see collab-cluster.ts). Off, this process owns every room.
+const collabNet = config.collabCluster
+	? {
+			leases: new ValkeyLeases(commands),
+			bus: new ValkeyBus(
+				commands,
+				new Redis(config.valkey.url, { maxRetriesPerRequest: null }),
+			),
+		}
+	: undefined;
+
+const { httpServer, io, resyncer, expiry, collab, sync } = createSocketServer(
+	config,
+	logger,
+	decider,
+	new ValkeyChangeLogReader(commands),
+	collabNet,
 );
-sessionRedis.on("error", (err: unknown) =>
-	logger.error({ err }, "valkey session client error"),
+if (collab instanceof CollabCluster) {
+	await collab.start();
+	logger.info(
+		{ replica: config.replicaId },
+		"collaborative editing is clustered",
+	);
+}
+// What an IAM change makes every open socket redo: drop decisions, re-sync
+// rooms, re-check collab editors.
+function onIamChanged(): void {
+	resyncer.onIamChanged();
+	void collab.recheck();
+}
+
+// A missed iam.changed announcement is noticed through the API's counter.
+const iamEpoch = new IamEpochWatcher({
+	read: async () => {
+		const v = await commands.get("paca:iam:epoch"); // events.IAMEpochKey
+		return v === null ? null : Number(v);
+	},
+	onChange: () => {
+		logger.warn("iam epoch moved without an announcement — re-syncing");
+		onIamChanged();
+	},
+});
+iamEpoch.start();
+
+const subscriber = createSubscriber(
+	config.valkey.url,
+	io,
+	logger,
+	decider,
+	(epoch) => {
+		iamEpoch.observe(epoch);
+		onIamChanged();
+	},
+	(type, payload, meta) => void collab.handleContentEvent(type, payload, meta),
+	(projectId) => sync?.notify(projectId),
 );
 
-const { httpServer, io } = createSocketServer(config, sessionRedis, logger);
-const subscriber = createSubscriber(config.valkey.url, io, logger);
+// A missed iam.changed announcement must cost at most one interval, as it does
+// for project rooms (see resync.ts): re-check collab editors periodically too.
+// The decider caches answers for 30 s, so each pass sees fresh decisions.
+const collabRecheck = setInterval(() => void collab.recheck(), 60_000);
+collabRecheck.unref();
 
 httpServer.listen(config.port, () => {
 	logger.info({ port: config.port }, "realtime service listening");
@@ -54,8 +118,14 @@ function shutdown(signal: string): void {
 	// then close the HTTP server so it stops accepting new connections.
 	io.close(() => {
 		httpServer.close(() => {
+			resyncer.stop();
+			expiry.stop();
+			clearInterval(collabRecheck);
+			collab.close();
+			sync?.stop();
+			iamEpoch.stop();
 			subscriber.disconnect();
-			sessionRedis.disconnect();
+			commands.disconnect();
 			logger.info("shutdown complete");
 			process.exit(0);
 		});

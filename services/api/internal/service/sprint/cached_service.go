@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	sprintdom "github.com/Paca-AI/api/internal/domain/sprint"
-	"github.com/Paca-AI/api/internal/platform/authz/iam"
 	"github.com/Paca-AI/api/internal/platform/cache"
 )
 
@@ -18,8 +17,10 @@ import (
 //
 // # What is cached
 //
-//   - ListSprints  – all sprints for a project; keyed by project ID.
-//   - GetSprint    – single sprint; keyed by sprint ID.
+//   - GetSprint – single sprint; keyed by sprint ID.
+//
+// The sprint list is not cached: it is paginated and filtered, so there is no
+// single entry to share between callers.
 //
 // Write operations (Create/Update/Delete/Complete) invalidate the relevant
 // cached entries after a successful database write.
@@ -42,40 +43,20 @@ func NewCachedSprintService(svc sprintdom.SprintService, st *cache.Store, ttl ti
 
 // --- cache key helpers -------------------------------------------------------
 
-func sprintListKey(projectID uuid.UUID) string {
-	return fmt.Sprintf("project:%s:sprints", projectID)
-}
-
 func sprintItemKey(id uuid.UUID) string {
 	return fmt.Sprintf("sprint:%s", id)
 }
 
 // --- SprintService -----------------------------------------------------------
 
-// ListSprints returns all sprints for a project, reading from cache when
-// available and populating it on a miss.
-func (c *CachedSprintService) ListSprints(ctx context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error) {
-	// A scoped list is specific to its caller: never read or fill the shared
-	// per-project entry with it.
-	if c.ttl == 0 || iam.Restricted(ctx, "sprint") {
-		return c.svc.ListSprints(ctx, projectID)
-	}
-	key := sprintListKey(projectID)
-	var result []*sprintdom.Sprint
-	if ok, err := c.st.Get(ctx, key, &result); ok {
-		return result, nil
-	} else if err != nil {
-		c.log.WarnContext(ctx, "cache: ListSprints get", "err", err)
-	}
+// ListSprints delegates to the underlying service; pages are not cached.
+func (c *CachedSprintService) ListSprints(ctx context.Context, projectID uuid.UUID, filter sprintdom.SprintFilter, cursorAfter *string, limit int) ([]*sprintdom.Sprint, bool, int, error) {
+	return c.svc.ListSprints(ctx, projectID, filter, cursorAfter, limit)
+}
 
-	result, err := c.svc.ListSprints(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.st.Set(ctx, key, result, c.ttl); err != nil {
-		c.log.WarnContext(ctx, "cache: ListSprints set", "err", err)
-	}
-	return result, nil
+// ListAllSprints delegates to the underlying service.
+func (c *CachedSprintService) ListAllSprints(ctx context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error) {
+	return c.svc.ListAllSprints(ctx, projectID)
 }
 
 // GetSprint returns a single sprint, reading from cache when available and
@@ -107,48 +88,45 @@ func (c *CachedSprintService) GetSprint(ctx context.Context, projectID, id uuid.
 	return sp, nil
 }
 
-// CreateSprint delegates to the underlying service and invalidates the sprint list cache.
+// CreateSprint delegates to the underlying service.
 func (c *CachedSprintService) CreateSprint(ctx context.Context, in sprintdom.CreateSprintInput) (*sprintdom.Sprint, error) {
 	sp, err := c.svc.CreateSprint(ctx, in)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.st.Delete(ctx, sprintListKey(in.ProjectID)); err != nil {
-		c.log.WarnContext(ctx, "cache: CreateSprint delete", "err", err)
-	}
 	return sp, nil
 }
 
-// UpdateSprint delegates to the underlying service and invalidates the sprint list and item caches.
+// UpdateSprint delegates to the underlying service and invalidates the cached sprint.
 func (c *CachedSprintService) UpdateSprint(ctx context.Context, projectID, id uuid.UUID, in sprintdom.UpdateSprintInput) (*sprintdom.Sprint, error) {
 	sp, err := c.svc.UpdateSprint(ctx, projectID, id, in)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.st.Delete(ctx, sprintListKey(projectID), sprintItemKey(id)); err != nil {
+	if err := c.st.Delete(ctx, sprintItemKey(id)); err != nil {
 		c.log.WarnContext(ctx, "cache: UpdateSprint delete", "err", err)
 	}
 	return sp, nil
 }
 
-// DeleteSprint delegates to the underlying service and invalidates the sprint list and item caches.
+// DeleteSprint delegates to the underlying service and invalidates the cached sprint.
 func (c *CachedSprintService) DeleteSprint(ctx context.Context, projectID, id uuid.UUID) error {
 	if err := c.svc.DeleteSprint(ctx, projectID, id); err != nil {
 		return err
 	}
-	if err := c.st.Delete(ctx, sprintListKey(projectID), sprintItemKey(id)); err != nil {
+	if err := c.st.Delete(ctx, sprintItemKey(id)); err != nil {
 		c.log.WarnContext(ctx, "cache: DeleteSprint delete", "err", err)
 	}
 	return nil
 }
 
-// CompleteSprint delegates to the underlying service and invalidates the sprint list and item caches.
+// CompleteSprint delegates to the underlying service and invalidates the cached sprint.
 func (c *CachedSprintService) CompleteSprint(ctx context.Context, projectID, id uuid.UUID, in sprintdom.CompleteSprintInput) (*sprintdom.Sprint, error) {
 	sp, err := c.svc.CompleteSprint(ctx, projectID, id, in)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.st.Delete(ctx, sprintListKey(projectID), sprintItemKey(id)); err != nil {
+	if err := c.st.Delete(ctx, sprintItemKey(id)); err != nil {
 		c.log.WarnContext(ctx, "cache: CompleteSprint delete", "err", err)
 	}
 	return sp, nil

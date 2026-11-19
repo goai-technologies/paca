@@ -1,5 +1,90 @@
 import { describe, expect, it } from "vitest";
-import { collapseUnchangedContext, type DiffLine } from "./diff-utils";
+import {
+	blockNoteToLines,
+	collapseUnchangedContext,
+	type DiffLine,
+	diffBlockNoteContent,
+} from "./diff-utils";
+
+function paragraph(content: unknown[], children: unknown[] = []) {
+	return { type: "paragraph", content, children };
+}
+
+function link(text: string, href = "https://example.com") {
+	return { type: "link", href, content: [{ type: "text", text, styles: {} }] };
+}
+
+describe("BlockNote diff text", () => {
+	it("includes link labels in their original inline order", () => {
+		expect(
+			blockNoteToLines([
+				paragraph([
+					{ type: "text", text: "Read " },
+					{
+						type: "link",
+						href: "https://example.com",
+						content: [
+							{ type: "text", text: "the ", styles: { bold: true } },
+							{ type: "text", text: "guide", styles: {} },
+						],
+					},
+					{ type: "text", text: " first." },
+				]),
+			]),
+		).toEqual(["Read the guide first."]);
+	});
+
+	it("includes links in nested blocks and legacy string labels", () => {
+		expect(
+			blockNoteToLines([
+				paragraph(
+					[link("Guide")],
+					[
+						paragraph([
+							{
+								type: "link",
+								href: "https://example.com",
+								content: "说明文档",
+							},
+						]),
+					],
+				),
+			]),
+		).toEqual(["Guide", "说明文档"]);
+	});
+
+	it("reports an edited link label as removed and added text", () => {
+		expect(
+			diffBlockNoteContent(
+				[paragraph([link("Old guide")])],
+				[paragraph([link("New guide")])],
+			),
+		).toEqual([
+			{ type: "removed", text: "Old guide" },
+			{ type: "added", text: "New guide" },
+		]);
+	});
+
+	it("keeps the plain-text diff convention for URL and style-only changes", () => {
+		expect(
+			diffBlockNoteContent(
+				[paragraph([link("Guide", "https://example.com/old")])],
+				[paragraph([{ type: "text", text: "Guide", styles: { bold: true } }])],
+			),
+		).toEqual([{ type: "unchanged", text: "Guide" }]);
+	});
+
+	it("keeps empty, non-text and ordinary text blocks supported", () => {
+		expect(blockNoteToLines(null)).toEqual([]);
+		expect(
+			blockNoteToLines([
+				paragraph([{ type: "text", text: "Plain" }]),
+				paragraph([{ type: "link", href: "https://example.com", content: [] }]),
+				paragraph([{ type: "custom", text: "not plain text" }]),
+			]),
+		).toEqual(["Plain", "", ""]);
+	});
+});
 
 function unchanged(texts: string[]): DiffLine[] {
 	return texts.map((text) => ({ type: "unchanged", text }));

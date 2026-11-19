@@ -32,8 +32,8 @@ func (r *fakeRepo) FindByID(_ context.Context, id uuid.UUID) (*accountdom.Accoun
 	c := *a
 	return &c, nil
 }
-func (r *fakeRepo) List(context.Context, accountdom.ServiceAccountFilter, *string, int) ([]*accountdom.Account, bool, error) {
-	return nil, false, nil
+func (r *fakeRepo) List(context.Context, accountdom.ServiceAccountFilter, *string, int) ([]*accountdom.Account, bool, int, error) {
+	return nil, false, 0, nil
 }
 func (r *fakeRepo) Update(_ context.Context, a *accountdom.Account) error {
 	c := *a
@@ -96,6 +96,28 @@ func TestDelete_UnknownIsNotFound(t *testing.T) {
 	a, _ := svc.Create(t.Context(), accountdom.CreateServiceAccountInput{Name: "x"})
 	if err := svc.Delete(t.Context(), a.ID); err != nil || len(repo.deleted) != 1 {
 		t.Fatalf("delete err=%v deleted=%v", err, repo.deleted)
+	}
+}
+
+type countingGrants struct{ calls int }
+
+func (c *countingGrants) Invalidate(...string) { c.calls++ }
+
+func TestDelete_AnnouncesLostAccess(t *testing.T) {
+	grants := &countingGrants{}
+	svc := serviceaccountsvc.New(newFakeRepo()).WithGrantsNotifier(grants)
+	if err := svc.Delete(t.Context(), uuid.New()); err == nil {
+		t.Fatal("deleting an unknown account must fail")
+	}
+	if grants.calls != 0 {
+		t.Fatalf("a failed delete announced %d times", grants.calls)
+	}
+	a, _ := svc.Create(t.Context(), accountdom.CreateServiceAccountInput{Name: "x"})
+	if err := svc.Delete(t.Context(), a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if grants.calls != 1 {
+		t.Fatalf("announced %d times, want 1", grants.calls)
 	}
 }
 

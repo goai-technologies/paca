@@ -821,7 +821,7 @@ func uuidPtrToStr(id *uuid.UUID) string {
 }
 
 // recordActivity persists changes as a task.updated activity attributed to
-// no human/agent actor (ActorID/ActorAgentID both nil — the activity feed
+// no human/agent actor (ActorID nil — the activity feed
 // renders this as "System", the same fallback used for automation-applied
 // entries), skipping cleanly if there's nothing to record or no recorder
 // configured. Best-effort: a failure here never fails the caller's autofill.

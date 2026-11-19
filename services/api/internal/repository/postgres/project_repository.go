@@ -101,12 +101,12 @@ func (r *ProjectRepository) List(ctx context.Context, offset, limit int) ([]*pro
 }
 
 // ListAccessible returns the projects that the given user is an active member of.
-func (r *ProjectRepository) ListAccessible(ctx context.Context, userID uuid.UUID, offset, limit int) ([]*projectdom.Project, int64, error) {
+func (r *ProjectRepository) ListAccessible(ctx context.Context, accountID uuid.UUID, offset, limit int) ([]*projectdom.Project, int64, error) {
 	var total int64
 	if err := r.db.GetContext(ctx, &total, `
 		SELECT COUNT(*) FROM projects
 		JOIN project_members ON project_members.project_id = projects.id
-		WHERE project_members.account_id = $1 AND project_members.deleted_at IS NULL AND projects.deleted_at IS NULL`, userID.String()); err != nil {
+		WHERE project_members.account_id = $1 AND project_members.deleted_at IS NULL AND projects.deleted_at IS NULL`, accountID.String()); err != nil {
 		return nil, 0, fmt.Errorf("project repo: list accessible count: %w", err)
 	}
 
@@ -115,7 +115,7 @@ func (r *ProjectRepository) ListAccessible(ctx context.Context, userID uuid.UUID
 		SELECT `+projectSelectColsQualified+` FROM projects
 		JOIN project_members ON project_members.project_id = projects.id
 		WHERE project_members.account_id = $1 AND project_members.deleted_at IS NULL AND projects.deleted_at IS NULL
-		ORDER BY projects.created_at ASC OFFSET $2 LIMIT $3`, userID.String(), offset, limit); err != nil {
+		ORDER BY projects.created_at ASC OFFSET $2 LIMIT $3`, accountID.String(), offset, limit); err != nil {
 		return nil, 0, fmt.Errorf("project repo: list accessible: %w", err)
 	}
 
@@ -496,14 +496,15 @@ func (r *ProjectRepository) CountDistinctAgentsByProjects(ctx context.Context, p
 	return count, nil
 }
 
-// FindMember returns a single active member record for the given project + user combo.
-func (r *ProjectRepository) FindMember(ctx context.Context, projectID, userID uuid.UUID) (*projectdom.ProjectMember, error) {
+// FindMember returns the active member record of an account (user, agent or
+// service account) in the project.
+func (r *ProjectRepository) FindMember(ctx context.Context, projectID, accountID uuid.UUID) (*projectdom.ProjectMember, error) {
 	var row projectMemberReadRow
 	err := r.db.GetContext(ctx, &row, `
 		SELECT `+projectMemberCols+`
 		FROM `+projectMemberFrom+`
 		WHERE pm.project_id = $1 AND pm.account_id = $2 AND pm.deleted_at IS NULL`,
-		projectID.String(), userID.String())
+		projectID.String(), accountID.String())
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, projectdom.ErrMemberNotFound
 	}
@@ -511,41 +512,6 @@ func (r *ProjectRepository) FindMember(ctx context.Context, projectID, userID uu
 		return nil, fmt.Errorf("project repo: find member: %w", err)
 	}
 	return r.memberWithRoles(ctx, toMemberEntity(&row))
-}
-
-// FindMemberByAgent returns a single active member record for the given project + agent combo.
-func (r *ProjectRepository) FindMemberByAgent(ctx context.Context, projectID, agentID uuid.UUID) (*projectdom.ProjectMember, error) {
-	var row projectMemberReadRow
-	err := r.db.GetContext(ctx, &row, `
-		SELECT `+projectMemberCols+`
-		FROM `+projectMemberFrom+`
-		WHERE pm.project_id = $1 AND pm.account_id = $2 AND pm.deleted_at IS NULL`,
-		projectID.String(), agentID.String())
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, projectdom.ErrMemberNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("project repo: find member by agent: %w", err)
-	}
-	return r.memberWithRoles(ctx, toMemberEntity(&row))
-}
-
-// FindMemberByUserProject returns the active member record for a (user_id, project_id)
-// pair. It is used by the activity consumer to resolve a user UUID to a member UUID.
-func (r *ProjectRepository) FindMemberByUserProject(ctx context.Context, userID, projectID uuid.UUID) (*projectdom.ProjectMember, error) {
-	return r.FindMember(ctx, projectID, userID)
-}
-
-// FindMemberByActor resolves an actor to a project member.
-// When agentID is non-nil the agent's member record is returned via
-// FindMemberByAgent; otherwise the user's member record is returned via
-// FindMemberByUserProject. This is the single canonical actor-resolution method
-// used by activity services and stream consumers.
-func (r *ProjectRepository) FindMemberByActor(ctx context.Context, projectID, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error) {
-	if agentID != nil {
-		return r.FindMemberByAgent(ctx, projectID, *agentID)
-	}
-	return r.FindMemberByUserProject(ctx, actorID, projectID)
 }
 
 // FindMemberByID returns the active member record for the given project_members.id.
@@ -671,11 +637,11 @@ func removeMembersSQL(where string) string {
 }
 
 // RemoveMember soft-deletes the membership row for the given project + user.
-func (r *ProjectRepository) RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error {
+func (r *ProjectRepository) RemoveMember(ctx context.Context, projectID, accountID uuid.UUID) error {
 	now := time.Now().UTC()
 	var n int64
 	err := r.db.QueryRowContext(ctx, removeMembersSQL(`project_id = $2 AND account_id = $3`),
-		now, projectID.String(), userID.String()).Scan(&n)
+		now, projectID.String(), accountID.String()).Scan(&n)
 	if err != nil {
 		return fmt.Errorf("project repo: remove member: %w", err)
 	}

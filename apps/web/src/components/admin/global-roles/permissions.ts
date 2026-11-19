@@ -1,6 +1,7 @@
 import {
 	Bot,
 	FolderKanban,
+	GitBranch,
 	KeyRound,
 	type LucideIcon,
 	Puzzle,
@@ -100,6 +101,12 @@ export const KNOWN_PERMISSIONS = [
 		domain: "agents",
 	},
 	{
+		key: "git.identities:manage",
+		labelKey: "globalRoles.permissions.gitIdentitiesManage.label",
+		descriptionKey: "globalRoles.permissions.gitIdentitiesManage.description",
+		domain: "git",
+	},
+	{
 		key: "plugins:read",
 		labelKey: "globalRoles.permissions.pluginsRead.label",
 		descriptionKey: "globalRoles.permissions.pluginsRead.description",
@@ -121,6 +128,12 @@ export const KNOWN_PERMISSIONS = [
 		key: "settings.sso:write",
 		labelKey: "globalRoles.permissions.settingsSsoWrite.label",
 		descriptionKey: "globalRoles.permissions.settingsSsoWrite.description",
+		domain: "settings",
+	},
+	{
+		key: "settings.security:write",
+		labelKey: "globalRoles.permissions.settingsSecurityWrite.label",
+		descriptionKey: "globalRoles.permissions.settingsSecurityWrite.description",
 		domain: "settings",
 	},
 ] as const satisfies KnownPermission[];
@@ -156,6 +169,11 @@ export const PERMISSION_GROUPS = [
 		domain: "projects",
 		labelKey: "globalRoles.permissionGroups.projects",
 		Icon: FolderKanban,
+	},
+	{
+		domain: "git",
+		labelKey: "globalRoles.permissionGroups.git",
+		Icon: GitBranch,
 	},
 	{
 		domain: "plugins",

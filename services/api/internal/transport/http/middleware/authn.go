@@ -236,12 +236,16 @@ func withPrincipal(r *http.Request, p Principal, claims *domainauth.Claims) *htt
 	}
 	ctx := context.WithValue(r.Context(), claimsContextKey{}, claims)
 	ctx = context.WithValue(ctx, principalContextKey{}, p)
-	var agentID *uuid.UUID
+	origin := events.OriginUser
 	if p.Kind == accountdom.KindAgent {
-		id := p.AccountID
-		agentID = &id
+		origin = events.OriginAgent
 	}
-	ctx = events.WithRequestActor(ctx, p.AccountID, agentID)
+	ctx = events.WithRequestActor(ctx, p.AccountID, origin)
+	// A browser stamps its mutations so it can skip the echo of its own change.
+	ctx = events.WithClientOp(ctx, r.Header.Get(events.ClientOpHeader))
+	// And names its realtime socket, so a live collaborative editor's own save
+	// is not merged back into its room (see services/realtime collab.ts).
+	ctx = events.WithCollabSocket(ctx, r.Header.Get(events.CollabSocketHeader))
 	return r.WithContext(ctx)
 }
 

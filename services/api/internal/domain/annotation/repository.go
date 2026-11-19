@@ -71,7 +71,7 @@ type Repository interface {
 	MarkScreenshotFileUploaded(ctx context.Context, fileID uuid.UUID) error
 
 	// ResolvePortForward looks up which project/environment/port-forward
-	// currently owns hostPort, scoped to projects userID is a member of —
+	// currently owns hostPort, scoped to projects accountID is a member of —
 	// environment_port_forwards.host_port has a whole-table unique index,
 	// so at most one row can match at any given moment. Returns
 	// ErrPortForwardNotFound if none does (including "it exists, but not
@@ -79,5 +79,5 @@ type Repository interface {
 	// from the general not-found case, so this endpoint never confirms or
 	// denies the existence of a port forward in a project the caller isn't
 	// a member of).
-	ResolvePortForward(ctx context.Context, userID uuid.UUID, hostPort int) (*PortForwardMatch, error)
+	ResolvePortForward(ctx context.Context, accountID uuid.UUID, hostPort int) (*PortForwardMatch, error)
 }

@@ -12,6 +12,10 @@ spec:
       {{- include "paca.selectorLabels" (dict "root" . "component" "api") | nindent 6 }}
   template:
     metadata:
+      {{- if not .Values.secrets.existingSecret }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      {{- end }}
       labels:
         {{- include "paca.componentLabels" (dict "root" . "component" "api") | nindent 8 }}
     spec:
@@ -31,6 +35,10 @@ spec:
               value: "production"
             - name: PORT
               value: "8080"
+            # Same value agent-runner reads: this service only echoes it on
+            # GET /environments/config so the UI can hide the docker toggles.
+            - name: SANDBOX_DOCKER_IN_SANDBOX
+              value: {{ .Values.agentRunner.sandbox.dockerInSandbox | quote }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -56,6 +64,8 @@ spec:
               value: {{ .Values.api.cookieSecure | quote }}
             - name: AUTH_RATE_LIMIT_PER_MINUTE
               value: {{ .Values.api.authRateLimitPerMinute | quote }}
+            - name: TRUSTED_PROXY_HOPS
+              value: {{ .Values.api.trustedProxyHops | quote }}
             - name: ADMIN_USERNAME
               value: {{ .Values.api.admin.username | quote }}
             - name: ADMIN_PASSWORD
@@ -105,6 +115,11 @@ spec:
                   key: ENCRYPTION_KEY
             - name: PUBLIC_URL
               value: {{ .Values.publicUrl | quote }}
+            - name: GIT_WEBHOOK_PUBLIC_URL
+              value: {{ .Values.gitWebhookPublicUrl | quote }}
+            - name: PLUGINS_STORE
+              value: {{ .Values.api.plugins.store | default "local" | quote }}
+            {{- if ne (.Values.api.plugins.store | default "local") "s3" }}
             - name: PLUGINS_WASM_DIR
               value: /plugins
             - name: PLUGINS_FRONTEND_DIR
@@ -113,6 +128,9 @@ spec:
               value: /plugins-mcp
             - name: PLUGINS_SKILLS_DIR
               value: /plugins-skills
+            {{- end }}
+            - name: PLUGIN_FETCH_PRIVATE_HOSTS
+              value: {{ .Values.api.plugins.fetchPrivateHosts | quote }}
             {{- if .Values.agentRunner.enabled }}
             - name: AI_AGENT_URL
               value: "http://{{ include "paca.fullname" . }}-agent-runner:8080"
@@ -144,6 +162,7 @@ spec:
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20
+          {{- if ne (.Values.api.plugins.store | default "local") "s3" }}
           volumeMounts:
             - name: plugins
               mountPath: /plugins
@@ -157,8 +176,11 @@ spec:
             - name: plugins
               mountPath: /plugins-skills
               subPath: skills
+          {{- end }}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
+      {{- if ne (.Values.api.plugins.store | default "local") "s3" }}
       volumes:
         - name: plugins
           {{- include "paca.pluginsVolume" . | nindent 10 }}
+      {{- end }}

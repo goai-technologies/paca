@@ -103,7 +103,7 @@ func (f *fakeDueDateTaskReader) FindTaskStatusByID(context.Context, uuid.UUID) (
 func (f *fakeDueDateTaskReader) ListChildTasks(context.Context, uuid.UUID, uuid.UUID) ([]*taskdom.Task, error) {
 	return nil, nil
 }
-func (f *fakeDueDateTaskReader) ListTaskLinks(context.Context, uuid.UUID) ([]*taskdom.TaskLink, error) {
+func (f *fakeDueDateTaskReader) ListAllTaskLinks(context.Context, uuid.UUID) ([]*taskdom.TaskLink, error) {
 	return nil, nil
 }
 

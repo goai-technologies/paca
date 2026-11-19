@@ -11,6 +11,13 @@ import {
 } from "@/lib/plugin-api";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 
+/**
+ * The extension points a user can reorder or hide. `app.page` is left out: it
+ * is routed by URL (never listed), and hiding a callback page would only break
+ * the flow that depends on it.
+ */
+type PreferencePoint = Exclude<ExtensionPointId, "app.page">;
+
 const EXTENSION_POINT_LABEL_KEYS = {
 	"sidebar.general.section": "preferences.extensionPoints.sidebarGeneral",
 	"sidebar.project.section": "preferences.extensionPoints.sidebarProject",
@@ -20,9 +27,9 @@ const EXTENSION_POINT_LABEL_KEYS = {
 	"project.page": "preferences.extensionPoints.projectPage",
 	"admin.page": "preferences.extensionPoints.adminPage",
 	"user.settings.tab": "preferences.extensionPoints.userSettingsTab",
-} as const satisfies Record<ExtensionPointId, string>;
+} as const satisfies Record<PreferencePoint, string>;
 
-const ALL_POINTS: ExtensionPointId[] = [
+const ALL_POINTS: PreferencePoint[] = [
 	"sidebar.general.section",
 	"sidebar.project.section",
 	"task.detail.section",
@@ -35,7 +42,7 @@ const ALL_POINTS: ExtensionPointId[] = [
 
 interface DraggableItemProps {
 	reg: PluginRegistration;
-	point: ExtensionPointId;
+	point: PreferencePoint;
 	index: number;
 	total: number;
 	onToggleHidden: (reg: PluginRegistration) => void;
@@ -97,11 +104,11 @@ function DraggableItem({
 }
 
 interface PointSectionProps {
-	point: ExtensionPointId;
+	point: PreferencePoint;
 	registrations: PluginRegistration[];
-	onToggleHidden: (point: ExtensionPointId, reg: PluginRegistration) => void;
+	onToggleHidden: (point: PreferencePoint, reg: PluginRegistration) => void;
 	onReorder: (
-		point: ExtensionPointId,
+		point: PreferencePoint,
 		fromIndex: number,
 		toIndex: number,
 	) => void;
@@ -168,6 +175,7 @@ export function PluginPreferencesPanel() {
 	const { getRegistrations } = usePluginRegistry();
 
 	const mutation = useMutation({
+		meta: { success: "updated", subject: "pluginPreferences" },
 		mutationFn: updatePluginExtensionSetting,
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ["plugins"] });
@@ -175,7 +183,7 @@ export function PluginPreferencesPanel() {
 	});
 
 	const handleToggleHidden = useCallback(
-		(point: ExtensionPointId, reg: PluginRegistration) => {
+		(point: PreferencePoint, reg: PluginRegistration) => {
 			mutation.mutate({
 				plugin_id: reg.pluginUUID, // Use UUID for API call
 				extension_point: point,
@@ -186,7 +194,7 @@ export function PluginPreferencesPanel() {
 	);
 
 	const handleReorder = useCallback(
-		(point: ExtensionPointId, fromIndex: number, toIndex: number) => {
+		(point: PreferencePoint, fromIndex: number, toIndex: number) => {
 			const regs = getRegistrations(point);
 			const reordered = [...regs];
 			const [moved] = reordered.splice(fromIndex, 1);

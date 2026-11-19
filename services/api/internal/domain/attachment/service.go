@@ -51,9 +51,14 @@ type Service interface {
 	// ErrAttachmentContentTooLarge if the file exceeds MaxAttachmentContentSize.
 	GetAttachmentContent(ctx context.Context, projectID, taskID, attachmentID uuid.UUID) (data []byte, contentType string, err error)
 
-	// ListTaskAttachments returns all confirmed attachments for the given task.
+	// GetTaskAttachment returns one attachment of the task with its file
+	// metadata (ErrAttachmentNotFound when it is not on that task).
+	GetTaskAttachment(ctx context.Context, projectID, taskID, attachmentID uuid.UUID) (*TaskAttachment, error)
+
+	// ListTaskAttachments returns one page of the attachments of the given task;
+	// see TaskAttachmentRepository.ListTaskAttachments for the paging contract.
 	// Verifies taskID belongs to projectID before proceeding.
-	ListTaskAttachments(ctx context.Context, projectID, taskID uuid.UUID) ([]*TaskAttachment, error)
+	ListTaskAttachments(ctx context.Context, projectID, taskID uuid.UUID, cursorAfter *string, limit int) ([]*TaskAttachment, bool, int, error)
 
 	// DeleteTaskAttachment removes the task→file association for the given
 	// attachment. Verifies the attachment belongs to taskID and that taskID

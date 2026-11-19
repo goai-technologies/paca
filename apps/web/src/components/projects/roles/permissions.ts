@@ -1,6 +1,7 @@
 import {
 	BookOpen,
 	Bot,
+	GitBranch,
 	Layers,
 	LayoutGrid,
 	ListTodo,
@@ -179,6 +180,37 @@ export const PROJECT_KNOWN_PERMISSIONS = [
 		descriptionKey: "roles.permissions.agentsWrite.description",
 		domain: "agents",
 	},
+	// git
+	{
+		key: "git:read",
+		labelKey: "roles.permissions.gitRead.label",
+		descriptionKey: "roles.permissions.gitRead.description",
+		domain: "git",
+	},
+	{
+		key: "git:write",
+		labelKey: "roles.permissions.gitWrite.label",
+		descriptionKey: "roles.permissions.gitWrite.description",
+		domain: "git",
+	},
+	{
+		key: "git:approve",
+		labelKey: "roles.permissions.gitApprove.label",
+		descriptionKey: "roles.permissions.gitApprove.description",
+		domain: "git",
+	},
+	{
+		key: "git:merge",
+		labelKey: "roles.permissions.gitMerge.label",
+		descriptionKey: "roles.permissions.gitMerge.description",
+		domain: "git",
+	},
+	{
+		key: "git.connections:manage",
+		labelKey: "roles.permissions.gitConnectionsManage.label",
+		descriptionKey: "roles.permissions.gitConnectionsManage.description",
+		domain: "git",
+	},
 	// conversations
 	{
 		key: "conversations:read",
@@ -286,6 +318,7 @@ export const PROJECT_PERMISSION_GROUPS = [
 		Icon: BookOpen,
 	},
 	{ domain: "agents", labelKey: "roles.permissionGroups.aiAgents", Icon: Bot },
+	{ domain: "git", labelKey: "roles.permissionGroups.git", Icon: GitBranch },
 	{
 		domain: "conversations",
 		labelKey: "roles.permissionGroups.conversations",

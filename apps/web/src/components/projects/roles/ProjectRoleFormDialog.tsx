@@ -8,7 +8,7 @@ import {
 	type Plugin,
 	pluginsQueryOptions,
 } from "@/lib/plugin-api";
-import { projectRolesQueryOptions, type Role } from "@/lib/role-api";
+import { projectRolesKey, type Role } from "@/lib/role-api";
 
 import {
 	type KnownPermission,
@@ -57,7 +57,7 @@ export function ProjectRoleFormDialog({
 			permissions={permissions}
 			groups={PROJECT_PERMISSION_GROUPS}
 			tScope={(key) => t(key as never)}
-			invalidateKey={projectRolesQueryOptions(projectId).queryKey}
+			invalidateKey={[...projectRolesKey(projectId)]}
 			labels={{
 				editTitle: t("roles.formDialog.editTitle"),
 				createTitle: t("roles.formDialog.createTitle"),

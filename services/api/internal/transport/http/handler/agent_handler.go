@@ -158,43 +158,6 @@ func (h *AgentHandler) toAgentResponse(ctx context.Context, ag *agentdom.Agent) 
 	return resp
 }
 
-// callerUserID extracts the authenticated human user's ID from the
-// request's JWT claims. Used by the global-chat handlers, which have no
-// project context and therefore no project_members.id to resolve (unlike
-// resolveMemberID) — the caller's raw user ID is the actor identity.
-func callerUserID(r *http.Request) (uuid.UUID, error) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		return uuid.Nil, apierr.New(apierr.CodeUnauthenticated, "unauthenticated")
-	}
-	userID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		return uuid.Nil, apierr.New(apierr.CodeBadRequest, "invalid subject claim")
-	}
-	return userID, nil
-}
-
-// resolveMemberID maps the authenticated caller's user ID to their
-// project_members.id within projectID. agent_chat_sessions.member_id and
-// agent_conversations.triggered_by_member_id both store the acting project
-// member rather than the raw user ID -- the latter has a foreign key to
-// project_members(id) -- so callers must not use claims.Subject directly.
-func (h *AgentHandler) resolveMemberID(r *http.Request, projectID uuid.UUID) (uuid.UUID, error) {
-	if h.memberRepo == nil {
-		return uuid.Nil, apierr.New(apierr.CodeInternalError, "member resolver not available")
-	}
-	claims := middleware.ClaimsFrom(r)
-	userID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		return uuid.Nil, apierr.New(apierr.CodeBadRequest, "invalid subject claim")
-	}
-	member, err := h.memberRepo.FindMemberByUserProject(r.Context(), userID, projectID)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return member.ID, nil
-}
-
 // --- Agents -----------------------------------------------------------------
 
 // parseAgentListParams reads the query params shared by the agent list
@@ -342,8 +305,7 @@ func (h *AgentHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "agent_type must be one of: llm, acp, provider_cli"))
 		return
 	}
-	claims := middleware.ClaimsFrom(r)
-	callerID, _ := uuid.Parse(claims.Subject)
+	callerID, _ := middleware.ActorIDFromContext(r.Context())
 
 	a, err := h.svc.CreateAgent(r.Context(), projectID, agentdom.CreateAgentInput{
 		Name:                 req.Name,
@@ -356,6 +318,8 @@ func (h *AgentHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		LLMBaseURL:           req.LLMBaseURL,
 		ACPProvider:          req.ACPProvider,
 		ACPCommand:           req.ACPCommand,
+		ACPModel:             req.ACPModel,
+		ACPEffort:            req.ACPEffort,
 		CLIProvider:          req.CLIProvider,
 		CLIModel:             req.CLIModel,
 		CLIAuthMode:          req.CLIAuthMode,
@@ -406,6 +370,8 @@ func (h *AgentHandler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		LLMBaseURL:           req.LLMBaseURL,
 		ACPProvider:          req.ACPProvider,
 		ACPCommand:           req.ACPCommand,
+		ACPModel:             req.ACPModel,
+		ACPEffort:            req.ACPEffort,
 		CLIProvider:          req.CLIProvider,
 		CLIModel:             req.CLIModel,
 		CLIAuthMode:          req.CLIAuthMode,
@@ -531,8 +497,7 @@ func (h *AgentHandler) CreateGlobalAgent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	claims := middleware.ClaimsFrom(r)
-	callerID, _ := uuid.Parse(claims.Subject)
+	callerID, _ := middleware.ActorIDFromContext(r.Context())
 
 	a, err := h.svc.CreateGlobalAgent(r.Context(), agentdom.CreateGlobalAgentInput{
 		Name:              req.Name,
@@ -545,6 +510,8 @@ func (h *AgentHandler) CreateGlobalAgent(w http.ResponseWriter, r *http.Request)
 		LLMBaseURL:        req.LLMBaseURL,
 		ACPProvider:       req.ACPProvider,
 		ACPCommand:        req.ACPCommand,
+		ACPModel:          req.ACPModel,
+		ACPEffort:         req.ACPEffort,
 		SystemPrompt:      req.SystemPrompt,
 		MaxIterations:     req.MaxIterations,
 		TimeoutMinutes:    req.TimeoutMinutes,
@@ -583,6 +550,8 @@ func (h *AgentHandler) UpdateGlobalAgent(w http.ResponseWriter, r *http.Request)
 		LLMBaseURL:        req.LLMBaseURL,
 		ACPProvider:       req.ACPProvider,
 		ACPCommand:        req.ACPCommand,
+		ACPModel:          req.ACPModel,
+		ACPEffort:         req.ACPEffort,
 		SystemPrompt:      req.SystemPrompt,
 		MaxIterations:     req.MaxIterations,
 		TimeoutMinutes:    req.TimeoutMinutes,
@@ -1335,7 +1304,7 @@ func (h *AgentHandler) ListChatSessions(w http.ResponseWriter, r *http.Request) 
 		presenter.Error(w, r, err)
 		return
 	}
-	memberID, err := h.resolveMemberID(r, projectID)
+	memberID, err := callerMemberID(r, h.memberRepo, projectID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -1378,7 +1347,7 @@ func (h *AgentHandler) StartChatSession(w http.ResponseWriter, r *http.Request) 
 		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, err.Error()))
 		return
 	}
-	memberID, err := h.resolveMemberID(r, projectID)
+	memberID, err := callerMemberID(r, h.memberRepo, projectID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -1526,7 +1495,7 @@ func (h *AgentHandler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, err.Error()))
 		return
 	}
-	memberID, err := h.resolveMemberID(r, projectID)
+	memberID, err := callerMemberID(r, h.memberRepo, projectID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -1545,7 +1514,7 @@ func (h *AgentHandler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 // Chatting with a global agent from the home page / admin pages — no
 // project context. The caller is always a JWT-authenticated human; there is
 // no project_members.id to resolve (unlike resolveMemberID above), only the
-// raw user ID from the JWT subject (see callerUserID).
+// raw user ID from the JWT subject (see callerAccountID).
 
 // ListGlobalChatSessions handles GET /agents/:agentId/chat-sessions (global).
 func (h *AgentHandler) ListGlobalChatSessions(w http.ResponseWriter, r *http.Request) {
@@ -1554,12 +1523,12 @@ func (h *AgentHandler) ListGlobalChatSessions(w http.ResponseWriter, r *http.Req
 		presenter.Error(w, r, err)
 		return
 	}
-	userID, err := callerUserID(r)
+	accountID, err := callerAccountID(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	sessions, err := h.svc.ListGlobalChatSessions(r.Context(), agentID, userID)
+	sessions, err := h.svc.ListGlobalChatSessions(r.Context(), agentID, accountID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -1623,12 +1592,12 @@ func (h *AgentHandler) StartGlobalChatSession(w http.ResponseWriter, r *http.Req
 		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, err.Error()))
 		return
 	}
-	userID, err := callerUserID(r)
+	accountID, err := callerAccountID(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	session, conv, err := h.svc.StartGlobalChatSession(r.Context(), agentID, userID, req.Message, req.ContextItems, req.OnBusy)
+	session, conv, err := h.svc.StartGlobalChatSession(r.Context(), agentID, accountID, req.Message, req.ContextItems, req.OnBusy)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -1659,12 +1628,12 @@ func (h *AgentHandler) SendGlobalChatMessage(w http.ResponseWriter, r *http.Requ
 		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, err.Error()))
 		return
 	}
-	userID, err := callerUserID(r)
+	accountID, err := callerAccountID(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	conv, err := h.svc.SendGlobalChatMessage(r.Context(), sessionID, userID, req.Message, req.ContextItems, req.OnBusy)
+	conv, err := h.svc.SendGlobalChatMessage(r.Context(), sessionID, accountID, req.Message, req.ContextItems, req.OnBusy)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -1707,7 +1676,7 @@ func (h *AgentHandler) WriteTaskDescriptionWithAI(w http.ResponseWriter, r *http
 		return
 	}
 
-	memberID, err := h.resolveMemberID(r, projectID)
+	memberID, err := callerMemberID(r, h.memberRepo, projectID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -1728,7 +1697,8 @@ func (h *AgentHandler) WriteTaskDescriptionWithAI(w http.ResponseWriter, r *http
 		_ = h.activityRec.RecordActivity(r.Context(), taskdom.RecordActivityInput{
 			TaskID:       taskID,
 			ProjectID:    projectID,
-			ActorAgentID: &agentID,
+			ActorID:      &agentID,
+			Origin:       taskdom.OriginAgent,
 			ActivityType: taskdom.ActivityTypeAgentSessionStarted,
 			Content:      content,
 		})
@@ -1778,7 +1748,16 @@ func (h *AgentHandler) GetLLMModels(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeInternalError, "failed to reach agent-runner service"))
+		if r.Context().Err() != nil {
+			return // the client went away; the runner may be fine, so nothing to log or write
+		}
+		// PACA_AGENT_RUNNER=no scales agent-runner to 0 (scripts/install.sh:776-778).
+		// Agent pages fetch this list (apps/web/src/routes/_authenticated/projects/$projectId/agents/index.tsx:44-45).
+		// {} matches the expected provider-keyed shape (apps/web/src/lib/agent-api.ts:2073-2079).
+		slog.Warn("llm models: agent-runner unreachable, returning empty list", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -2060,14 +2039,8 @@ func (h *AgentHandler) InitiateAvatarUpload(w http.ResponseWriter, r *http.Reque
 		presenter.Error(w, r, err)
 		return
 	}
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-	uploaderID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "invalid subject in token"))
+	uploaderID, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -2137,14 +2110,8 @@ func (h *AgentHandler) InitiateGlobalAvatarUpload(w http.ResponseWriter, r *http
 		presenter.Error(w, r, err)
 		return
 	}
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-	uploaderID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "invalid subject in token"))
+	uploaderID, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -2222,7 +2189,7 @@ func (h *AgentHandler) ListAgentActivities(w http.ResponseWriter, r *http.Reques
 		presenter.Error(w, r, apierr.New(apierr.CodeInternalError, "activity log not available"))
 		return
 	}
-	member, err := h.memberRepo.FindMemberByAgent(r.Context(), projectID, agentID)
+	member, err := h.memberRepo.FindMember(r.Context(), projectID, agentID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return

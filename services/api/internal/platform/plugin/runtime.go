@@ -77,6 +77,11 @@ type HostServices struct {
 	Config map[string]string
 	// HTTPClient is used by the paca.http_request host function.
 	HTTPClient *http.Client
+	// FetchPrivateHosts lists the hostnames paca.fetch may reach on a private
+	// address when a plugin's manifest names them explicitly. Nil means none.
+	// HTTPClient's dialer must be built from the same set, or the dial refuses
+	// what the check here accepted.
+	FetchPrivateHosts *netguard.PrivateHosts
 	// AllowedOutboundDomains is the allowlist for paca.http_request outbound
 	// calls.  When empty, all outbound HTTP is blocked.
 	AllowedOutboundDomains []string
@@ -145,7 +150,7 @@ type pluginInstance struct {
 
 // Runtime manages the lifecycle of all installed plugin WASM modules.
 type Runtime struct {
-	store    *Store
+	store    Store
 	limits   ResourceLimits
 	services HostServices
 	log      *slog.Logger
@@ -204,7 +209,7 @@ var disallowedFetchHeaders = map[string]struct{}{
 }
 
 // NewRuntime creates a Runtime wired to the given store and host services.
-func NewRuntime(store *Store, services HostServices, limits ResourceLimits, log *slog.Logger) *Runtime {
+func NewRuntime(store Store, services HostServices, limits ResourceLimits, log *slog.Logger) *Runtime {
 	return &Runtime{
 		store:           store,
 		limits:          limits,
@@ -314,16 +319,10 @@ func (r *Runtime) Load(ctx context.Context, p plugindom.Plugin) error {
 		_ = wasmRT.Close(ctx)
 		return fmt.Errorf("runtime load %q: compile: %w", p.Name, err)
 	}
-	// For WASI reactor builds, _initialize must be called before exported functions.
-	// WithSysWalltime/WithSysNanotime wire the module's clock to the real OS
-	// clock; without them wazero silently falls back to a fake clock frozen at
-	// 1970-01-01 (nanotime) / 2022-01-01 (walltime), which is what plugins would
-	// otherwise observe from time.Now() — see issue #339.
-	mod, err := wasmRT.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().
-		WithName(p.Name).
-		WithStartFunctions("_initialize").
-		WithSysWalltime().
-		WithSysNanotime())
+	// For WASI reactor builds, _initialize must be called before exported
+	// functions (moduleConfig sets it as the start function, and also wires the
+	// real clock and a real random source).
+	mod, err := wasmRT.InstantiateModule(ctx, compiled, moduleConfig(p.Name))
 	if err != nil {
 		_ = wasmRT.Close(ctx)
 		return fmt.Errorf("runtime load %q: instantiate: %w", p.Name, err)
@@ -653,6 +652,16 @@ func (r *Runtime) IsPluginAction(nodeType string) bool {
 	return ok && entry.kind == automationKindAction
 }
 
+// IsTasklessTrigger reports whether nodeType is a plugin-registered Trigger
+// whose manifest declares that its events carry no task. Satisfies
+// automationdom.PluginNodeResolver.
+func (r *Runtime) IsTasklessTrigger(nodeType string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.automationIndex[nodeType]
+	return ok && entry.kind == automationKindTrigger && entry.manifest.Taskless
+}
+
 // ResolveAutomationCondition returns the plugin name that owns nodeType, if
 // any plugin registered it as a Condition node — consulted by the automation
 // engine's condition leaf evaluator as a fallback after its built-in fields.
@@ -839,7 +848,20 @@ func (r *Runtime) registerDBFunctions(b wazero.HostModuleBuilder, p plugindom.Pl
 				m.Memory().WriteUint32Le(uint32(stack[7]), uint32(errPtrLen[1]))
 				return
 			}
-			resultPtrLen := writeJSONResult(m, result)
+			resultPtrLen, size, werr := writeJSONResultChecked(m, result)
+			if werr != nil {
+				// Report through errPtr/errLen: a zero-length result with no
+				// error would be indistinguishable from a zero-row success.
+				errPtrLen, _ := writeToMemory(m, []byte(responseTooLargeMessage("db_query", size, remedyLessData)))
+				if errPtrLen == nil {
+					errPtrLen = []uint64{0, 0}
+				}
+				m.Memory().WriteUint32Le(uint32(stack[4]), 0)
+				m.Memory().WriteUint32Le(uint32(stack[5]), 0)
+				m.Memory().WriteUint32Le(uint32(stack[6]), uint32(errPtrLen[0]))
+				m.Memory().WriteUint32Le(uint32(stack[7]), uint32(errPtrLen[1]))
+				return
+			}
 			m.Memory().WriteUint32Le(uint32(stack[4]), uint32(resultPtrLen[0]))
 			m.Memory().WriteUint32Le(uint32(stack[5]), uint32(resultPtrLen[1]))
 			m.Memory().WriteUint32Le(uint32(stack[6]), 0)
@@ -1768,7 +1790,15 @@ func (r *Runtime) registerSettingsFunction(b wazero.HostModuleBuilder, _ plugind
 				writeBack(writeJSONResult(m, map[string]string{"error": "settings_get: " + err.Error()}))
 				return
 			}
-			writeBack(writeJSONResult(m, snap))
+			ptrLen, size, werr := writeJSONResultChecked(m, snap)
+			if werr != nil {
+				writeBack(writeJSONResult(m, map[string]string{
+					"error": responseTooLargeMessage("settings_get", size, remedyLessData),
+					"code":  errCodeResponseTooLarge,
+				}))
+				return
+			}
+			writeBack(ptrLen)
 		}), []api.ValueType{api.ValueTypeI64, api.ValueTypeI64}, nil).
 		Export("settings_get")
 }
@@ -2172,6 +2202,7 @@ func isAllowedConfigKey(key string, backend *plugindom.BackendManifest) bool {
 // registerFetchFunction registers the paca.fetch host function that allows
 // plugins to make outbound HTTP requests to domains listed in their manifest.
 func (r *Runtime) registerFetchFunction(b wazero.HostModuleBuilder, p plugindom.Plugin) {
+	chunks := newFetchChunkStore()
 	// paca.fetch(reqPtr, reqLen, resPtrPtr, resLenPtr)
 	//   reqPtr/reqLen   – JSON-encoded fetchHostRequest in WASM memory
 	//   resPtrPtr       – pointer to uint32 that receives response JSON ptr
@@ -2204,14 +2235,55 @@ func (r *Runtime) registerFetchFunction(b wazero.HostModuleBuilder, p plugindom.
 				URL     string            `json:"url"`
 				Headers map[string]string `json:"headers"`
 				Body    string            `json:"body"`
+				// Chunked opts in to receiving a body_handle instead of a
+				// response_too_large error when the response does not fit.
+				Chunked bool `json:"chunked"`
+				// BodyHandle/Offset/Limit read a parked body (see
+				// fetch_chunks.go); URL and Method are unused then.
+				BodyHandle string `json:"body_handle"`
+				Offset     int    `json:"offset"`
+				Limit      int    `json:"limit"`
 			}
 			if err := json.Unmarshal(reqBytes, &req); err != nil {
 				writeErr("fetch: decode request: " + err.Error())
 				return
 			}
 
+			if req.BodyHandle != "" {
+				chunk, total, done, cerr := chunks.read(req.BodyHandle, req.Offset, req.Limit)
+				if cerr != nil {
+					writeErr(cerr.Error())
+					return
+				}
+				type chunkResp struct {
+					Chunk []byte `json:"chunk"` // base64 on the wire
+					Size  int    `json:"body_size"`
+					Done  bool   `json:"done"`
+				}
+				ptrLen, size, werr := writeJSONResultChecked(m, chunkResp{Chunk: chunk, Size: total, Done: done})
+				if werr != nil {
+					// The chunk did not fit; the handle is still parked, so the
+					// guest can retry with a smaller limit.
+					type tooLargeResp struct {
+						Status int    `json:"status"`
+						Error  string `json:"error"`
+						Code   string `json:"code"`
+					}
+					writeBack(writeJSONResult(m, tooLargeResp{
+						Error: responseTooLargeMessage("fetch", size, remedySmallerChunk),
+						Code:  errCodeResponseTooLarge,
+					}))
+					return
+				}
+				if done {
+					chunks.release(req.BodyHandle)
+				}
+				writeBack(ptrLen)
+				return
+			}
+
 			// Validate the target domain against the plugin's allowlist.
-			if !isAllowedFetchDomain(ctx, req.URL, p.Manifest.Backend.AllowedOutboundDomains) {
+			if !isAllowedFetchDomain(ctx, req.URL, p.Manifest.Backend.AllowedOutboundDomains, r.services.FetchPrivateHosts) {
 				writeErr("fetch: domain not permitted by plugin manifest")
 				return
 			}
@@ -2221,6 +2293,7 @@ func (r *Runtime) registerFetchFunction(b wazero.HostModuleBuilder, p plugindom.
 			if httpClient == nil {
 				httpClient = &http.Client{Timeout: 30 * time.Second}
 			}
+			httpClient = withPrivateHostRedirectGuard(httpClient, p.Manifest.Backend.AllowedOutboundDomains, r.services.FetchPrivateHosts)
 
 			var bodyReader io.Reader
 			if req.Body != "" {
@@ -2233,7 +2306,10 @@ func (r *Runtime) registerFetchFunction(b wazero.HostModuleBuilder, p plugindom.
 				return
 			}
 
-			httpReq, err := http.NewRequestWithContext(ctx, method, req.URL, bodyReader)
+			// The dialer is shared by all plugins; this tells it which private
+			// hosts this plugin's manifest names, so "*" never unlocks them.
+			dialCtx := netguard.WithAllowedPrivateHosts(ctx, manifestPrivateHosts(p.Manifest.Backend.AllowedOutboundDomains))
+			httpReq, err := http.NewRequestWithContext(dialCtx, method, req.URL, bodyReader)
 			if err != nil {
 				writeErr("fetch: build request: " + err.Error())
 				return
@@ -2277,11 +2353,52 @@ func (r *Runtime) registerFetchFunction(b wazero.HostModuleBuilder, p plugindom.
 					hdrs[k] = vv[0]
 				}
 			}
-			writeBack(writeJSONResult(m, successResp{
+			ptrLen, size, werr := writeJSONResultChecked(m, successResp{
 				Status:  resp.StatusCode,
 				Body:    string(respBody),
 				Headers: hdrs,
-			}))
+			})
+			if werr != nil && req.Chunked {
+				// Park the body host-side and hand back a handle; the guest
+				// pulls it in arena-sized pieces.
+				type chunkedResp struct {
+					Status     int               `json:"status"`
+					Headers    map[string]string `json:"headers"`
+					BodyHandle string            `json:"body_handle"`
+					BodySize   int               `json:"body_size"`
+				}
+				handle := chunks.put(respBody)
+				meta, _, merr := writeJSONResultChecked(m, chunkedResp{
+					Status: resp.StatusCode, Headers: hdrs, BodyHandle: handle, BodySize: len(respBody),
+				})
+				if merr == nil {
+					writeBack(meta)
+					return
+				}
+				chunks.release(handle) // even the metadata did not fit
+			}
+			if werr != nil {
+				// The envelope (JSON-escaped body + headers) did not fit in the
+				// plugin's arena. Deliver a small error envelope so the guest
+				// sees why, rather than an empty response.
+				type tooLargeResp struct {
+					Status int    `json:"status"`
+					Error  string `json:"error"`
+					Code   string `json:"code"`
+				}
+				// An SDK that opted in already has the escape hatch, so only the
+				// one that did not is pointed at it.
+				remedy := remedyChunked
+				if req.Chunked {
+					remedy = remedyHeaders
+				}
+				writeBack(writeJSONResult(m, tooLargeResp{
+					Error: responseTooLargeMessage("fetch", size, remedy),
+					Code:  errCodeResponseTooLarge,
+				}))
+				return
+			}
+			writeBack(ptrLen)
 		}), []api.ValueType{api.ValueTypeI64, api.ValueTypeI64, api.ValueTypeI64, api.ValueTypeI64},
 			nil).
 		Export("fetch")
@@ -2292,7 +2409,11 @@ func (r *Runtime) registerFetchFunction(b wazero.HostModuleBuilder, p plugindom.
 // entry allows any HTTPS host (used by plugins like webhook integrations that
 // must call user-supplied URLs); the scheme, hostname, and private/internal IP
 // checks below still apply in that case.
-func isAllowedFetchDomain(ctx context.Context, rawURL string, allowed []string) bool {
+//
+// A host in privateHosts may also resolve to a private network address, but
+// only if the manifest names it: "*" accepts arbitrary, often user-supplied
+// URLs, so it must not open a door to the operator's internal hosts.
+func isAllowedFetchDomain(ctx context.Context, rawURL string, allowed []string, privateHosts *netguard.PrivateHosts) bool {
 	if len(allowed) == 0 {
 		return false
 	}
@@ -2305,35 +2426,111 @@ func isAllowedFetchDomain(ctx context.Context, rawURL string, allowed []string) 
 		return false
 	}
 
-	host := parsed.Hostname() // strips port
-	if host == "" {
+	// Compare and resolve the name the transport will dial, not the raw one.
+	host, err := netguard.CanonicalHost(parsed.Hostname()) // Hostname strips the port
+	if err != nil || host == "" {
 		return false
 	}
 
-	hostAllowed := false
-	for _, a := range allowed {
-		a = strings.TrimSpace(a)
-		if a == "*" || strings.EqualFold(host, a) {
-			hostAllowed = true
-			break
+	namedInManifest := manifestNamesHost(allowed, host)
+	if !namedInManifest && !manifestAllowsAnyHost(allowed) {
+		return false
+	}
+	if !namedInManifest {
+		// A listed host is refused whatever it resolves to now: a later dial
+		// could see a private address (rebinding), and a pooled connection
+		// opened for a plugin that names the host is reused without dialing.
+		if privateHosts.Contains(host) {
+			return false
 		}
-	}
-	if !hostAllowed {
-		return false
+		privateHosts = nil
 	}
 
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	ips, err := fetchLookupIPAddr(ctx, host)
 	if err != nil {
 		return false
 	}
 
 	for _, ipAddr := range ips {
-		if netguard.IsPrivateOrInternalIP(ipAddr.IP) {
+		if privateHosts.Blocks(host, ipAddr.IP) {
 			return false
 		}
 	}
 
 	return true
+}
+
+// fetchLookupIPAddr is a seam for tests, which need hostnames that resolve to
+// private addresses.
+var fetchLookupIPAddr = net.DefaultResolver.LookupIPAddr
+
+// manifestNamesHost reports whether allowed names host. host must already be
+// canonical (netguard.CanonicalHost); manifest entries are canonicalized here,
+// and an entry with no canonical form names nothing.
+func manifestNamesHost(allowed []string, host string) bool {
+	for _, a := range allowed {
+		entry, err := netguard.CanonicalHost(strings.TrimSpace(a))
+		if err == nil && entry == host {
+			return true
+		}
+	}
+	return false
+}
+
+// manifestPrivateHosts returns the hosts the manifest names, canonicalized, as
+// the set the dialer checks per request. "*" and IP literals name no host.
+func manifestPrivateHosts(allowed []string) *netguard.PrivateHosts {
+	names := make([]string, 0, len(allowed))
+	for _, a := range allowed {
+		if name, err := netguard.CanonicalHost(strings.TrimSpace(a)); err == nil {
+			names = append(names, name)
+		}
+	}
+	hosts, _ := netguard.NewPrivateHosts(names)
+	return hosts
+}
+
+func manifestAllowsAnyHost(allowed []string) bool {
+	for _, a := range allowed {
+		if strings.TrimSpace(a) == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+// withPrivateHostRedirectGuard returns a client that applies the conditions of
+// the private host exception to redirects as well. isAllowedFetchDomain only
+// sees the first URL, so without this a public host could downgrade a listed
+// host to plain http. The dialer already refuses a listed host the manifest
+// does not name; checking it here too fails earlier, with a clearer error.
+//
+// With no private hosts configured the client is returned unchanged.
+func withPrivateHostRedirectGuard(client *http.Client, allowed []string, privateHosts *netguard.PrivateHosts) *http.Client {
+	if privateHosts.Empty() {
+		return client
+	}
+	guarded := *client
+	guarded.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		// The transport dials the IDNA form of the name, so the check must too,
+		// or "ｇｉｔｌａｂ.internal" would slip past a listed "gitlab.internal".
+		host, err := netguard.CanonicalHost(req.URL.Hostname())
+		if err != nil {
+			return fmt.Errorf("redirect to %q not permitted: %w", req.URL.Hostname(), err)
+		}
+		if privateHosts.Contains(host) && (!strings.EqualFold(req.URL.Scheme, "https") || !manifestNamesHost(allowed, host)) {
+			return fmt.Errorf("redirect to %q not permitted", host)
+		}
+		if client.CheckRedirect != nil {
+			return client.CheckRedirect(req, via)
+		}
+		// http.Client's default policy, which setting CheckRedirect replaces.
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &guarded
 }
 
 func normalizeFetchMethod(raw string) (string, bool) {
@@ -2410,14 +2607,59 @@ func readString(m api.Module, ptr, length uint64) (string, error) {
 	return string(b), err
 }
 
-// writeJSONResult marshals v to JSON and writes it into WASM memory, returning
-// the [ptr, len] pair expected by host function return conventions.
-func writeJSONResult(m api.Module, v any) []uint64 {
+// errCodeResponseTooLarge is the machine-readable "code" a host function sets
+// when its result could not be delivered because it does not fit in the
+// plugin's fixed host-allocation arena. plugin-sdk-go maps it to
+// ErrResponseTooLarge instead of reporting an empty response (which reads
+// like a network failure).
+const errCodeResponseTooLarge = "response_too_large"
+
+// Remedies appended to a response-too-large message: what the caller can do
+// differently depends on the operation, so each call site names its own.
+const (
+	// remedyLessData fits calls whose result the plugin can shrink by asking
+	// for less (a smaller page, a narrower query).
+	remedyLessData = "request less data (e.g. a smaller page size)"
+	// remedyChunked fits paca.fetch, where the plugin cannot shrink a
+	// third-party response but can read it in pieces.
+	remedyChunked = `repeat the request with "chunked": true to read the body in pieces`
+	// remedySmallerChunk fits a body_handle read that asked for too much.
+	remedySmallerChunk = "read it again with a smaller limit"
+	// remedyHeaders fits a chunked fetch whose status and headers alone do not
+	// fit, which no chunk size can fix.
+	remedyHeaders = "the response headers alone are too large to deliver"
+)
+
+// responseTooLargeMessage is the actionable text for a result of size bytes
+// that the plugin's allocator refused. The arena size is the plugin's own
+// business, so the message names the payload rather than a limit; remedy says
+// what the caller can do about it (one of the remedy constants above).
+func responseTooLargeMessage(op string, size int, remedy string) string {
+	return fmt.Sprintf("%s: response of %d bytes does not fit in the plugin's host response buffer; %s", op, size, remedy)
+}
+
+// writeJSONResultChecked marshals v to JSON and writes it into WASM memory.
+// Unlike writeJSONResult it reports an allocation failure, along with the
+// payload size, so a caller that has an error channel can tell the guest why
+// nothing was delivered.
+func writeJSONResultChecked(m api.Module, v any) (ptrLen []uint64, size int, err error) {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return writeErrorResult(m, err)
+		return nil, 0, err
 	}
-	ptrLen, err := writeToMemory(m, data)
+	ptrLen, err = writeToMemory(m, data)
+	if err != nil {
+		return nil, len(data), err
+	}
+	return ptrLen, len(data), nil
+}
+
+// writeJSONResult marshals v to JSON and writes it into WASM memory, returning
+// the [ptr, len] pair expected by host function return conventions. An
+// allocation failure yields {0,0}; callers that can report an error to the
+// guest should use writeJSONResultChecked instead.
+func writeJSONResult(m api.Module, v any) []uint64 {
+	ptrLen, _, err := writeJSONResultChecked(m, v)
 	if err != nil {
 		return []uint64{0, 0}
 	}

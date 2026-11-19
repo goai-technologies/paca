@@ -17,6 +17,41 @@ const (
 	// CodeUnauthenticated represents an unauthenticated request.
 	CodeUnauthenticated Code = "AUTH_UNAUTHENTICATED"
 
+	// CodeMFARequired means the account has MFA enabled and the login carried
+	// no second factor; retry with "otp" set.
+	CodeMFARequired Code = "AUTH_MFA_REQUIRED"
+	// CodeMFAInvalidCode means the TOTP or recovery code was wrong or reused.
+	CodeMFAInvalidCode Code = "AUTH_MFA_INVALID_CODE"
+	// CodeMFASetupRequired means policy requires MFA for this account and it
+	// has not enrolled; it must enroll before it can sign in.
+	CodeMFASetupRequired Code = "AUTH_MFA_SETUP_REQUIRED"
+	// CodeIPNotAllowed means the login came from outside an IP allow-list.
+	CodeIPNotAllowed Code = "AUTH_IP_NOT_ALLOWED"
+	// CodeMFAAlreadyEnabled means enrollment was started on an enrolled account.
+	CodeMFAAlreadyEnabled Code = "MFA_ALREADY_ENABLED"
+	// CodeMFANotEnabled means the operation needs MFA to be enabled.
+	CodeMFANotEnabled Code = "MFA_NOT_ENABLED"
+	// CodeMFAUnavailable means the server cannot store TOTP secrets
+	// (ENCRYPTION_KEY unset).
+	CodeMFAUnavailable Code = "MFA_UNAVAILABLE"
+	// CodePasskeyInvalid means a passkey registration did not verify.
+	CodePasskeyInvalid Code = "PASSKEY_INVALID"
+	// CodePasskeyLimit means the account already has the most passkeys allowed.
+	CodePasskeyLimit Code = "PASSKEY_LIMIT"
+	// CodePasskeyNotFound means the account has no passkey with that id.
+	CodePasskeyNotFound Code = "PASSKEY_NOT_FOUND"
+	// CodeInvalidCIDR means an allow-list entry is not an IP or CIDR.
+	CodeInvalidCIDR Code = "INVALID_CIDR"
+	// CodeSelfLockout means the saved allow-list would exclude the admin saving it.
+	CodeSelfLockout Code = "SELF_LOCKOUT"
+	// CodePasswordLoginDisabled means the instance is SSO-only and the account
+	// is not the default super admin: it signs in through SSO, and its
+	// password can be neither used nor set.
+	CodePasswordLoginDisabled Code = "AUTH_PASSWORD_LOGIN_DISABLED"
+	// CodeSSOOnlyNoProvider means SSO-only mode was turned on with no SSO
+	// provider enabled.
+	CodeSSOOnlyNoProvider Code = "SSO_ONLY_NO_PROVIDER"
+
 	// CodeServiceAccountNotFound represents a service account that was not found.
 	CodeServiceAccountNotFound Code = "SERVICE_ACCOUNT_NOT_FOUND"
 	// CodeServiceAccountNameInvalid indicates a service account name is empty or too long.
@@ -130,6 +165,10 @@ const (
 	// CodeTaskStatusIsDefault indicates an attempt to delete the project's default task status.
 	CodeTaskStatusIsDefault Code = "TASK_STATUS_IS_DEFAULT"
 
+	// CodeVersionConflict means an If-Match precondition failed: the row was
+	// changed since the version the caller named (HTTP 412).
+	CodeVersionConflict Code = "VERSION_CONFLICT"
+
 	// CodeSprintNotFound indicates the requested sprint does not exist.
 	CodeSprintNotFound Code = "SPRINT_NOT_FOUND"
 	// CodeSprintNameInvalid indicates an empty or invalid sprint name.
@@ -211,6 +250,27 @@ const (
 	CodeDocNotFound Code = "DOC_NOT_FOUND"
 	// CodeDocTitleInvalid indicates an empty or invalid document title.
 	CodeDocTitleInvalid Code = "DOC_TITLE_INVALID"
+	// CodeDocLocked indicates the document is a locked managed copy: its
+	// content and title change only through a push from its repository.
+	CodeDocLocked Code = "DOC_LOCKED"
+	// CodeDocLockNeedsSource indicates a lock was asked for on a document
+	// that is not a managed copy (it has no source).
+	CodeDocLockNeedsSource Code = "DOC_LOCK_NEEDS_SOURCE"
+	// CodeDocPathInvalid indicates a document path with no title (empty, or
+	// only slashes and spaces) or one that is too long.
+	CodeDocPathInvalid Code = "DOC_PATH_INVALID"
+	// CodeDocPathIsFolder indicates a document path whose last segment names
+	// a folder.
+	CodeDocPathIsFolder Code = "DOC_PATH_IS_FOLDER"
+	// CodeDocPathChanged indicates a by-path write kept finding the path
+	// changed by other writers while it wrote; the request can be retried.
+	CodeDocPathChanged Code = "DOC_PATH_CHANGED"
+	// CodeDocSourceInvalid indicates a source without a repository or path,
+	// or with a field over 500 characters.
+	CodeDocSourceInvalid Code = "DOC_SOURCE_INVALID"
+	// CodeDocNoteInvalid indicates a write's note, client label or task
+	// reference is longer than its limit.
+	CodeDocNoteInvalid Code = "DOC_NOTE_INVALID"
 	// CodeDocFolderNotFound indicates the requested document folder does not exist.
 	CodeDocFolderNotFound Code = "DOC_FOLDER_NOT_FOUND"
 	// CodeDocFolderNameInvalid indicates an empty or invalid folder name.
@@ -319,6 +379,8 @@ const (
 	CodeAgentFieldNotSupportedForType Code = "AGENT_FIELD_NOT_SUPPORTED_FOR_TYPE"
 	// CodeAgentACPCommandRequired indicates acp_command is required for the given acp_provider.
 	CodeAgentACPCommandRequired Code = "AGENT_ACP_COMMAND_REQUIRED"
+	// CodeAgentACPModelInvalid indicates acp_model or acp_effort is too long or has control characters.
+	CodeAgentACPModelInvalid Code = "AGENT_ACP_MODEL_INVALID"
 	// CodeAgentMCPServerNotFound indicates the requested MCP server does not exist.
 	CodeAgentMCPServerNotFound Code = "AGENT_MCP_SERVER_NOT_FOUND"
 	// CodeAgentSkillNotFound indicates the requested skill does not exist.
@@ -403,6 +465,34 @@ const (
 	// CodeAgentNotProviderCLI indicates VerifyCLILogin (or another provider_cli-only
 	// operation) was called on an agent whose agent_type isn't provider_cli.
 	CodeAgentNotProviderCLI Code = "AGENT_NOT_PROVIDER_CLI"
+
+	// --- Git integration errors (see docs/ai-agent/git-agent-workflow.md) ---
+
+	// CodeGitNotFound indicates the repository, identity or webhook endpoint does not exist.
+	CodeGitNotFound Code = "GIT_NOT_FOUND"
+	// CodeGitAlreadyLinked indicates the project already linked this repository.
+	CodeGitAlreadyLinked Code = "GIT_ALREADY_LINKED"
+	// CodeGitNoIdentity indicates no bot identity is set up that can act on the repository.
+	CodeGitNoIdentity Code = "GIT_NO_IDENTITY"
+	// CodeGitProviderUnavailable indicates the provider plugin is not installed, enabled or answering.
+	CodeGitProviderUnavailable Code = "GIT_PROVIDER_UNAVAILABLE"
+	// CodeGitRepositoryNotVisible indicates none of the connections offered can see the repository.
+	CodeGitRepositoryNotVisible Code = "GIT_REPOSITORY_NOT_VISIBLE"
+	// CodeGitAccessNotGranted indicates the identity cannot see the repository because it has not been
+	// granted access to the repository's owner (for example the GitHub App is not installed there).
+	CodeGitAccessNotGranted Code = "GIT_ACCESS_NOT_GRANTED"
+	// CodeGitIdentityExists indicates the agent already has its own identity for the provider.
+	CodeGitIdentityExists Code = "GIT_IDENTITY_EXISTS"
+	// CodeGitIdentityRequired indicates several connections could serve the request and the caller must choose one.
+	CodeGitIdentityRequired Code = "GIT_IDENTITY_REQUIRED"
+	// CodeGitSetupInvalid indicates the identity-setup state is unknown, expired, already used or someone else's.
+	CodeGitSetupInvalid Code = "GIT_SETUP_INVALID"
+	// CodeGitPublicURLRequired indicates PUBLIC_URL is not configured, so webhook and redirect URLs cannot be built.
+	CodeGitPublicURLRequired Code = "GIT_PUBLIC_URL_REQUIRED"
+	// CodeGitDescriptionTooLong indicates a repository description is longer than allowed.
+	CodeGitDescriptionTooLong Code = "GIT_DESCRIPTION_TOO_LONG"
+	// CodeGitProviderRejected indicates the platform refused the request (the identity lacks access, a conflict).
+	CodeGitProviderRejected Code = "GIT_PROVIDER_REJECTED"
 
 	// --- Environment errors (static environments — see
 	// docs/ai-agent/environment-management.md) --------------------------------
@@ -502,6 +592,8 @@ const (
 	CodeAutomationActivateNoAction Code = "AUTOMATION_ACTIVATE_NO_ACTION"
 	// CodeAutomationWebhookTokenInvalid indicates a webhook trigger POST presented a missing, wrong, or revoked token.
 	CodeAutomationWebhookTokenInvalid Code = "AUTOMATION_WEBHOOK_TOKEN_INVALID"
+	// CodeAutomationUpdateTaskSelfParent indicates an update_task node would set the triggered task as its own parent.
+	CodeAutomationUpdateTaskSelfParent Code = "AUTOMATION_UPDATE_TASK_SELF_PARENT"
 
 	// CodeAnnotationNotFound indicates the requested page annotation does not exist.
 	CodeAnnotationNotFound Code = "ANNOTATION_NOT_FOUND"

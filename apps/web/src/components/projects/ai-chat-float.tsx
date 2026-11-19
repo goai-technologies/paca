@@ -1,13 +1,8 @@
-import {
-	type AppendMessage,
-	AssistantRuntimeProvider,
-	useExternalStoreRuntime,
-} from "@assistant-ui/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Bot, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Thread } from "@/components/assistant-ui/thread";
+import { Thread } from "@/components/chat/thread";
 import {
 	AgentPickerContext,
 	AgentPickerInline,
@@ -19,7 +14,6 @@ import {
 	type AgentConversation,
 	agentQueryOptions,
 	CONVERSATION_HEARTBEAT_INTERVAL_MS,
-	conversationEventsQueryOptions,
 	conversationQueryOptions,
 	heartbeatConversation,
 	pauseConversation,
@@ -37,9 +31,10 @@ import {
 	chatSessionAccessDeniedKey,
 	chatSessionApiErrorMessage,
 	eventsToThreadMessages,
-	extractTextOnlyContent,
 	isEnvironmentReady,
 } from "./agents/conversation-to-thread-messages";
+import { useConversationEventWindow } from "./agents/use-conversation-event-window";
+import { useOptimisticUserMessage } from "./agents/use-optimistic-user-message";
 
 interface AIChatFloatProps {
 	projectId: string;
@@ -111,9 +106,13 @@ export function AIChatFloat({ projectId }: AIChatFloatProps) {
 		...conversationQueryOptions(projectId, conversationId ?? ""),
 		enabled: !!conversationId,
 	});
-	const { data: events = [] } = useQuery({
-		...conversationEventsQueryOptions(projectId, conversationId ?? ""),
-		enabled: !!conversationId,
+	// Live window (realtime events merged in), not the plain events query:
+	// persisted events only land in the live tail cache, so the plain query
+	// stayed stale until the next status change.
+	const { events } = useConversationEventWindow({
+		projectId,
+		conversationId: conversationId ?? "",
+		ready: !!conversationId,
 	});
 	const { data: agent } = useQuery({
 		...agentQueryOptions(projectId, conversation?.agent_id ?? ""),
@@ -122,16 +121,26 @@ export function AIChatFloat({ projectId }: AIChatFloatProps) {
 	const isACP = agent?.agent_type === "acp";
 	const environmentReady = isEnvironmentReady(isACP, events);
 
+	const optimistic = useOptimisticUserMessage(
+		events,
+		conversationId,
+		conversation?.status === "queued",
+	);
 	const isRunning =
-		conversation?.status === "queued" || conversation?.status === "running";
+		optimistic.pending ||
+		conversation?.status === "queued" ||
+		conversation?.status === "running";
 	const isTerminal =
 		conversation?.status === "finished" ||
 		conversation?.status === "failed" ||
 		conversation?.status === "stopped";
 
 	const messages = useMemo(
-		() => (conversationId ? eventsToThreadMessages(events, isRunning) : []),
-		[events, isRunning, conversationId],
+		() =>
+			conversationId || optimistic.pending
+				? eventsToThreadMessages(optimistic.events, isRunning)
+				: [],
+		[optimistic.events, optimistic.pending, isRunning, conversationId],
 	);
 
 	const invalidate = (id: string | null = conversationId) => {
@@ -145,11 +154,7 @@ export function AIChatFloat({ projectId }: AIChatFloatProps) {
 		});
 	};
 
-	const onNew = async (message: AppendMessage) => {
-		const text = extractTextOnlyContent(message);
-		if (text === null) {
-			throw new Error(t("agents.conversationView.textOnlyMessage"));
-		}
+	const onNew = async (text: string) => {
 		// Snapshot now (not read again after any await) so a badge staged
 		// mid-send can't sneak into this message or get cleared under it.
 		const contextItems = useContextInjectionStore.getState().items;
@@ -157,6 +162,7 @@ export function AIChatFloat({ projectId }: AIChatFloatProps) {
 		// Guards against a fast double-Enter firing two requests (e.g. two
 		// chat sessions) before the first one resolves and flips isRunning.
 		setIsSubmitting(true);
+		optimistic.begin({ text, contextItems });
 		setSendError(null);
 		try {
 			if (!conversationId) {
@@ -178,6 +184,7 @@ export function AIChatFloat({ projectId }: AIChatFloatProps) {
 					conversationQueryOptions(projectId, result.conversation.id).queryKey,
 					result.conversation,
 				);
+				optimistic.follow(result.conversation.id);
 				setConversationId(result.conversation.id);
 				void qc.invalidateQueries({
 					queryKey: ["projects", projectId, "conversations"],
@@ -220,10 +227,12 @@ export function AIChatFloat({ projectId }: AIChatFloatProps) {
 					conversationQueryOptions(projectId, result.id).queryKey,
 					result,
 				);
+				optimistic.follow(result.id);
 				setConversationId(result.id);
 			}
 			invalidate(result.id);
 		} catch (err) {
+			optimistic.discard();
 			const key = chatSessionAccessDeniedKey(err);
 			if (key) {
 				setSendError(t(key));
@@ -260,16 +269,6 @@ export function AIChatFloat({ projectId }: AIChatFloatProps) {
 		conversation?.status === "failed" &&
 		messages.length === 0 &&
 		!canReply;
-
-	const runtime = useExternalStoreRuntime({
-		messages,
-		isRunning,
-		convertMessage: (m) => m,
-		onNew,
-		onCancel,
-		isDisabled: !canReply,
-		isSendDisabled: (!conversationId && !agentId) || isSubmitting,
-	});
 
 	// Chat sandboxes are kept alive between replies (see conversation-view's
 	// composer) — starting a new conversation in this window should
@@ -386,34 +385,38 @@ export function AIChatFloat({ projectId }: AIChatFloatProps) {
 							<FloatingChatFailedBanner message={conversation?.error_message} />
 						) : (
 							<AgentPickerContext.Provider value={pickerState}>
-								<AssistantRuntimeProvider runtime={runtime}>
-									<Thread
-										components={THREAD_COMPONENTS}
-										environmentReady={environmentReady}
-										// A chat_message trigger always persists the user's own
-										// message before the agent runs (see handler.Handle), so
-										// a failed/recoverable turn almost never has
-										// messages.length === 0 — showFailedBanner above
-										// essentially never fires for the common case. Rendered
-										// inside the message flow (not a page footer below the
-										// composer, which read as small print easy to miss) so a
-										// failure with a visible message still explains itself.
-										viewportOverlay={
-											conversation?.error_message || sendError ? (
-												<>
-													{conversation?.error_message && (
-														<ConversationErrorBox
-															message={conversation.error_message}
-														/>
-													)}
-													{sendError && (
-														<ConversationErrorBox message={sendError} />
-													)}
-												</>
-											) : undefined
-										}
-									/>
-								</AssistantRuntimeProvider>
+								<Thread
+									messages={messages}
+									isRunning={isRunning}
+									disabled={!canReply}
+									onSend={onNew}
+									sendDisabled={(!conversationId && !agentId) || isSubmitting}
+									onCancel={onCancel}
+									components={THREAD_COMPONENTS}
+									environmentReady={environmentReady}
+									// A chat_message trigger always persists the user's own
+									// message before the agent runs (see handler.Handle), so
+									// a failed/recoverable turn almost never has
+									// messages.length === 0 — showFailedBanner above
+									// essentially never fires for the common case. Rendered
+									// inside the message flow (not a page footer below the
+									// composer, which read as small print easy to miss) so a
+									// failure with a visible message still explains itself.
+									viewportOverlay={
+										conversation?.error_message || sendError ? (
+											<>
+												{conversation?.error_message && (
+													<ConversationErrorBox
+														message={conversation.error_message}
+													/>
+												)}
+												{sendError && (
+													<ConversationErrorBox message={sendError} />
+												)}
+											</>
+										) : undefined
+									}
+								/>
 							</AgentPickerContext.Provider>
 						)}
 					</div>

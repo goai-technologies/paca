@@ -52,9 +52,7 @@ func NewTaskLinkRepository(db *sqlx.DB) *TaskLinkRepository {
 	return &TaskLinkRepository{db: db}
 }
 
-// ListTaskLinks returns all links where taskID is either source or target.
-func (r *TaskLinkRepository) ListTaskLinks(ctx context.Context, taskID uuid.UUID) ([]*taskdom.TaskLink, error) {
-	const q = `
+const taskLinkSelect = `
 		SELECT
 		    tl.id,
 		    tl.source_task_id,
@@ -74,24 +72,119 @@ func (r *TaskLinkRepository) ListTaskLinks(ctx context.Context, taskID uuid.UUID
 		    ELSE tl.source_task_id
 		END
 		WHERE (tl.source_task_id = $1 OR tl.target_task_id = $1)
-		  AND linked.deleted_at IS NULL
-		ORDER BY tl.created_at ASC`
+		  AND linked.deleted_at IS NULL`
 
-	var rows []taskLinkWithTaskRow
-	if err := r.db.SelectContext(ctx, &rows, q, taskID.String()); err != nil {
-		return nil, err
-	}
-
+func taskLinksFromRows(rows []taskLinkWithTaskRow) ([]*taskdom.TaskLink, error) {
 	links := make([]*taskdom.TaskLink, 0, len(rows))
 	for i := range rows {
-		row := &rows[i]
-		link, err := row.toDomain()
+		link, err := rows[i].toDomain()
 		if err != nil {
 			return nil, err
 		}
 		links = append(links, link)
 	}
 	return links, nil
+}
+
+// ListTaskLinks returns one page of the links where taskID is either source or
+// target, ordered by (created_at, id) ascending. The total counts every link
+// of the task whose other side is not deleted.
+func (r *TaskLinkRepository) ListTaskLinks(ctx context.Context, taskID uuid.UUID, cursorAfter *string, limit int) ([]*taskdom.TaskLink, bool, int, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	var total int
+	if err := r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM (`+taskLinkSelect+`) l`, taskID.String()); err != nil {
+		return nil, false, 0, err
+	}
+	q := taskLinkSelect
+	sink := &argList{args: []any{taskID.String()}}
+	if cursorAfter != nil {
+		at, id, err := taskdom.DecodeLinkCursor(*cursorAfter)
+		if err != nil {
+			return nil, false, 0, err
+		}
+		q += ` AND (tl.created_at, tl.id) > (` + sink.addArg(at) + `, ` + sink.addArg(id.String()) + `::uuid)`
+	}
+	q += ` ORDER BY tl.created_at ASC, tl.id ASC LIMIT ` + sink.addArg(limit+1)
+	var rows []taskLinkWithTaskRow
+	if err := r.db.SelectContext(ctx, &rows, q, sink.args...); err != nil {
+		return nil, false, 0, err
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	links, err := taskLinksFromRows(rows)
+	return links, hasMore, total, err
+}
+
+// ListAllTaskLinks returns every link where taskID is either source or target,
+// oldest first. Not exposed over the API.
+func (r *TaskLinkRepository) ListAllTaskLinks(ctx context.Context, taskID uuid.UUID) ([]*taskdom.TaskLink, error) {
+	var rows []taskLinkWithTaskRow
+	if err := r.db.SelectContext(ctx, &rows, taskLinkSelect+` ORDER BY tl.created_at ASC, tl.id ASC`, taskID.String()); err != nil {
+		return nil, err
+	}
+	return taskLinksFromRows(rows)
+}
+
+// ListProjectTaskLinks returns one page of the project's links of linkType
+// whose source and target are both live tasks, ordered by (created_at, id)
+// ascending. When the context carries a task scope (see iam.WithScope), a link
+// is listed only when the caller may read both of its tasks, filtered in the
+// query, so the page never reveals a task the caller cannot see.
+func (r *TaskLinkRepository) ListProjectTaskLinks(ctx context.Context, projectID uuid.UUID, linkType taskdom.LinkType, cursorAfter *string, limit int) ([]*taskdom.TaskLink, bool, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	sink := &argList{args: []any{projectID.String(), string(linkType)}}
+	clause, none, err := scopeSQL(ctx, "task", taskScopeColumns, sink)
+	if err != nil {
+		return nil, false, fmt.Errorf("task link repo: list project links: %w", err)
+	}
+	if none {
+		return []*taskdom.TaskLink{}, false, nil
+	}
+	scopeAnd := ""
+	if clause != "" {
+		scopeAnd = " AND " + clause
+	}
+	q := `
+		WITH visible AS (
+		    SELECT tasks.id FROM tasks
+		    WHERE tasks.project_id = $1 AND tasks.deleted_at IS NULL` + scopeAnd + `
+		)
+		SELECT tl.id, tl.source_task_id, tl.target_task_id, tl.link_type, tl.created_by, tl.created_at
+		FROM task_links tl
+		JOIN visible src ON src.id = tl.source_task_id
+		JOIN visible dst ON dst.id = tl.target_task_id
+		WHERE tl.link_type = $2`
+	if cursorAfter != nil {
+		at, id, err := taskdom.DecodeLinkCursor(*cursorAfter)
+		if err != nil {
+			return nil, false, err
+		}
+		q += ` AND (tl.created_at, tl.id) > (` + sink.addArg(at) + `, ` + sink.addArg(id.String()) + `::uuid)`
+	}
+	q += ` ORDER BY tl.created_at ASC, tl.id ASC LIMIT ` + sink.addArg(limit+1)
+	var records []taskLinkRecord
+	if err := r.db.SelectContext(ctx, &records, q, sink.args...); err != nil {
+		return nil, false, fmt.Errorf("task link repo: list project links: %w", err)
+	}
+	hasMore := len(records) > limit
+	if hasMore {
+		records = records[:limit]
+	}
+	links := make([]*taskdom.TaskLink, 0, len(records))
+	for i := range records {
+		link, err := records[i].toDomain()
+		if err != nil {
+			return nil, false, err
+		}
+		links = append(links, link)
+	}
+	return links, hasMore, nil
 }
 
 // FindTaskLinkByID returns a single link by primary key (no task join).

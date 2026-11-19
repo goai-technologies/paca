@@ -1,6 +1,8 @@
 {
 	"activityPane": {
+		"resize": "Cambiar el tamaño del panel de actividad",
 		"title": "Actividad",
+		"actions": "Acciones de la entrada",
 		"empty": "Aún no hay actividad",
 		"emptyComments": "Aún no hay comentarios",
 		"showAllActivity": "Mostrar toda la actividad",
@@ -194,5 +196,14 @@
 		"minOne": "Se requiere al menos un rol.",
 		"clear": "Borrar",
 		"placeholder": "Seleccionar roles"
+	},
+	"askQuestion": {
+		"otherPlaceholder": "O escribe tu propia respuesta…",
+		"submit": "Enviar respuesta",
+		"answered": "Respondiste: {{answer}}"
+	},
+	"paneResize": {
+		"sidebar": "Cambiar el tamaño de la barra lateral",
+		"taskColumn": "Cambiar el tamaño de la columna de tareas"
 	}
 }

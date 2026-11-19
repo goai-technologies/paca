@@ -1,6 +1,7 @@
 interface InlineContent {
 	type?: string;
 	text?: string;
+	content?: InlineContent[] | string;
 }
 
 interface Block {
@@ -9,17 +10,28 @@ interface Block {
 	children?: Block[] | null;
 }
 
+function inlineContentToText(content: InlineContent[]): string {
+	return content
+		.map((inline) => {
+			if (inline.type === "text") return inline.text ?? "";
+			if (inline.type !== "link") return "";
+			// Current BlockNote links contain styled text; older stored links
+			// may carry their label as a string.
+			if (typeof inline.content === "string") return inline.content;
+			return Array.isArray(inline.content)
+				? inlineContentToText(inline.content)
+				: "";
+		})
+		.join("");
+}
+
 export function blockNoteToLines(blocks: unknown): string[] {
 	if (!Array.isArray(blocks)) return [];
 	const lines: string[] = [];
 	for (const block of blocks as Block[]) {
 		let text = "";
 		if (Array.isArray(block.content)) {
-			for (const inline of block.content) {
-				if (inline.type === "text" && inline.text) {
-					text += inline.text;
-				}
-			}
+			text = inlineContentToText(block.content);
 		}
 		lines.push(text);
 		if (Array.isArray(block.children) && block.children.length > 0) {

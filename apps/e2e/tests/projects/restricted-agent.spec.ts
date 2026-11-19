@@ -312,9 +312,9 @@ test.describe("Restricting an agent with a role", () => {
 		}> =
 			(
 				await (
-					await request.get(`${API_URL}/projects/${projectId}/roles`)
+					await request.get(`${API_URL}/projects/${projectId}/roles?page_size=100`)
 				).json()
-			).data ?? [];
+			).data.items ?? [];
 		const denyRole = roles.find(
 			(r) => r.name === roleName && r.project_id === projectId,
 		);

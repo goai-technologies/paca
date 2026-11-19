@@ -532,7 +532,7 @@ test.describe("Environment detail Overview", () => {
 
 		for (const tab of ["Overview", "Folders", "Port forwards"]) {
 			await expect(
-				page.getByRole("button", { name: tab, exact: true }),
+				page.getByRole("tab", { name: tab, exact: true }),
 			).toBeVisible();
 		}
 		await expect(
@@ -571,11 +571,11 @@ test.describe("Environment detail Overview", () => {
 		await signIn(page);
 		await page.goto(detailUrl(projectId, env.id));
 
-		await page.getByRole("button", { name: "Folders", exact: true }).click();
+		await page.getByRole("tab", { name: "Folders", exact: true }).click();
 		await expect(page).toHaveURL(/#folders$/);
 
 		await page
-			.getByRole("button", { name: "Port forwards", exact: true })
+			.getByRole("tab", { name: "Port forwards", exact: true })
 			.click();
 		await expect(page).toHaveURL(/#portForwards$/);
 	});

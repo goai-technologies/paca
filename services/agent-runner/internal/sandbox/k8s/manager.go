@@ -53,15 +53,15 @@ const (
 	labelManaged = "paca.ai/managed-by"
 	managedValue = "agent-runner"
 
-	// podReadyTimeout bounds how long Start waits for the Job's Pod to
+	// defaultPodReadyTimeout bounds how long Start waits for the Job's Pod to
 	// exist and report a PodIP before giving up — separate from
 	// sandbox.WaitForReady's own timeout (which only starts once a
 	// candidate address exists at all), so a Pod that never schedules
 	// (e.g. no node has capacity) fails with its own clear error instead
 	// of being silently folded into WaitForReady's "never became ready"
 	// message.
-	podReadyTimeout   = 60 * time.Second
-	podReadyPollEvery = 250 * time.Millisecond
+	defaultPodReadyTimeout = 5 * time.Minute
+	podReadyPollEvery      = 250 * time.Millisecond
 
 	// jobTTLSecondsAfterFinished is a leak-safety net mirroring the
 	// Docker backend's AutoRemove: true — Stop already deletes the Job
@@ -85,6 +85,9 @@ const (
 type Options struct {
 	// Namespace is where every sandbox Job/Pod is created. Required.
 	Namespace string
+	// PodReadyTimeout bounds the wait for a Pod IP, including node provisioning.
+	// Zero uses five minutes. Negative durations are invalid.
+	PodReadyTimeout time.Duration
 	// CPULimit/MemoryLimit set both the request and the limit on the
 	// primary sandbox container, in resource.ParseQuantity syntax (e.g.
 	// "2", "4Gi"). Empty means defaultCPULimit/defaultMemoryLimit.
@@ -104,6 +107,13 @@ type Options struct {
 	// comment in ../environment.go for why the fallback has to live in
 	// this package rather than a caller that only resolves it once.
 	AgentServerImage string
+	// DockerInSandbox allows a docker_enabled sandbox's privileged DinD
+	// sidecar. False makes CreateEnvironment/Start refuse such a sandbox
+	// with an actionable error instead of submitting a Pod that Pod
+	// Security Admission forbids (a namespace enforcing Baseline rejects a
+	// privileged container outright) — see SandboxDockerInSandbox in
+	// config.Settings.
+	DockerInSandbox bool
 	// EnvironmentsStorageClassName sets StorageClassName on every
 	// PersistentVolumeClaim environment.go's CreateEnvironment provisions
 	// (SANDBOX_ENVIRONMENTS_STORAGE_CLASS). Empty leaves it unset, which
@@ -119,9 +129,10 @@ type Options struct {
 // *kubernetes.Clientset, so tests can substitute
 // k8s.io/client-go/kubernetes/fake instead of a real cluster.
 type Manager struct {
-	clientset  kubernetes.Interface
-	restConfig *rest.Config
-	namespace  string
+	clientset       kubernetes.Interface
+	restConfig      *rest.Config
+	namespace       string
+	podReadyTimeout time.Duration
 
 	cpuLimit    resource.Quantity
 	memoryLimit resource.Quantity
@@ -136,6 +147,7 @@ type Manager struct {
 	// process-wide setting the way cpuLimit/memoryLimit above are.
 	agentServerImage             string
 	environmentsStorageClassName string
+	dockerInSandbox              bool
 }
 
 var _ sandbox.Backend = (*Manager)(nil)
@@ -153,6 +165,10 @@ var _ sandbox.FullBackend = (*Manager)(nil)
 func NewManager(opts Options) (*Manager, error) {
 	if opts.Namespace == "" {
 		return nil, errors.New("sandbox/k8s: Namespace is required")
+	}
+
+	if opts.PodReadyTimeout < 0 {
+		return nil, errors.New("sandbox/k8s: PodReadyTimeout must not be negative")
 	}
 
 	restConfig, err := rest.InClusterConfig()
@@ -191,11 +207,13 @@ func NewManager(opts Options) (*Manager, error) {
 		clientset:                    clientset,
 		restConfig:                   restConfig,
 		namespace:                    opts.Namespace,
+		podReadyTimeout:              opts.PodReadyTimeout,
 		cpuLimit:                     cpuQty,
 		memoryLimit:                  memQty,
 		imagePullSecrets:             pullSecrets,
 		agentServerImage:             opts.AgentServerImage,
 		environmentsStorageClassName: opts.EnvironmentsStorageClassName,
+		dockerInSandbox:              opts.DockerInSandbox,
 	}, nil
 }
 
@@ -270,6 +288,10 @@ func (m *Manager) Start(ctx context.Context, cfg sandbox.Config) (*sandbox.Handl
 			"multi-node cluster; use the docker backend for local apps/mcp development instead")
 	}
 
+	if err := m.requireDockerInSandboxAllowed(cfg.DockerEnabled); err != nil {
+		return nil, err
+	}
+
 	secretKey, err := sandbox.RandomHex(32)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox/k8s: generate secret key: %w", err)
@@ -312,7 +334,7 @@ func (m *Manager) Start(ctx context.Context, cfg sandbox.Config) (*sandbox.Handl
 	containers := []corev1.Container{{
 		Name:      containerName,
 		Image:     cfg.Image,
-		Args:      []string{"serve", "--host", "0.0.0.0", "--port", strconv.Itoa(sandbox.GooseServePort)},
+		Args:      []string{"serve", "--host", sandbox.GooseServeHost, "--port", strconv.Itoa(sandbox.GooseServePort)},
 		Env:       env,
 		Resources: resources,
 		Ports:     []corev1.ContainerPort{{ContainerPort: int32(sandbox.GooseServePort)}},
@@ -369,7 +391,7 @@ func (m *Manager) Start(ctx context.Context, cfg sandbox.Config) (*sandbox.Handl
 		return nil, fmt.Errorf("%w (%s)", err, diag)
 	}
 
-	baseURL, err := sandbox.WaitForReady(ctx, []string{fmt.Sprintf("http://%s:%d", podIP, sandbox.GooseServePort)}, secretKey)
+	baseURL, err := sandbox.WaitForReady(ctx, []string{sandbox.GooseURL(podIP, sandbox.GooseServePort)}, secretKey)
 	if err != nil {
 		diag := m.diagnoseUnready(context.Background(), name)
 		cleanup()
@@ -397,6 +419,42 @@ func (m *Manager) Start(ctx context.Context, cfg sandbox.Config) (*sandbox.Handl
 // nothing — it just keeps running) is the backstop either way.
 func (m *Manager) Stop(ctx context.Context, h *sandbox.Handle) error {
 	return m.deleteJob(ctx, h.ContainerID)
+}
+
+// LiveConversationIDs lists the conversation IDs whose sandbox Job in this
+// namespace is still alive — the Job exists (its TTL controller deletes a
+// finished one after jobTTLSecondsAfterFinished) and has not reached the
+// JobFailed condition (BackoffLimit is 0, so a Pod that dies takes the Job
+// there immediately). Environment Deployments are a different kind and are
+// deliberately not listed: they carry environmentLabel, never labelConvID.
+func (m *Manager) LiveConversationIDs(ctx context.Context) (map[string]struct{}, error) {
+	jobs, err := m.clientset.BatchV1().Jobs(m.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelManaged + "=" + managedValue,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sandbox/k8s: list sandbox jobs in %s: %w", m.namespace, err)
+	}
+	live := make(map[string]struct{}, len(jobs.Items))
+	for _, job := range jobs.Items {
+		convID := job.Labels[labelConvID]
+		if convID == "" || jobTerminal(&job) {
+			continue
+		}
+		live[convID] = struct{}{}
+	}
+	return live, nil
+}
+
+// jobTerminal reports whether Kubernetes has declared the Job complete or
+// failed — neither outcome can still own an active agent turn, and
+// jobTTLSecondsAfterFinished may keep the object around for five more minutes.
+func jobTerminal(job *batchv1.Job) bool {
+	for _, cond := range job.Status.Conditions {
+		if (cond.Type == batchv1.JobFailed || cond.Type == batchv1.JobComplete) && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 // deleteJob issues the actual Job deletion Stop and Start's own cleanup
@@ -428,9 +486,15 @@ func (m *Manager) deleteJob(ctx context.Context, name string) error {
 // Kubernetes has no built-in equivalent of for a Deployment's Pods) —
 // this function itself has no opinion on which label a caller selects by.
 func (m *Manager) waitForPodIP(ctx context.Context, selector string) (podName, podIP string, err error) {
-	deadline := time.Now().Add(podReadyTimeout)
-	for time.Now().Before(deadline) {
-		pods, listErr := m.clientset.CoreV1().Pods(m.namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	timeout := m.podReadyTimeout
+	if timeout == 0 {
+		timeout = defaultPodReadyTimeout
+	}
+	// Bound API requests as well as polling, while honoring an earlier caller deadline.
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for waitCtx.Err() == nil {
+		pods, listErr := m.clientset.CoreV1().Pods(m.namespace).List(waitCtx, metav1.ListOptions{LabelSelector: selector})
 		if listErr == nil {
 			for _, pod := range pods.Items {
 				if pod.DeletionTimestamp != nil {
@@ -458,12 +522,14 @@ func (m *Manager) waitForPodIP(ctx context.Context, selector string) (podName, p
 			}
 		}
 		select {
-		case <-ctx.Done():
-			return "", "", ctx.Err()
+		case <-waitCtx.Done():
 		case <-time.After(podReadyPollEvery):
 		}
 	}
-	return "", "", fmt.Errorf("sandbox/k8s: no pod matching selector %q got an IP after %s", selector, podReadyTimeout)
+	if err := ctx.Err(); err != nil {
+		return "", "", err
+	}
+	return "", "", fmt.Errorf("sandbox/k8s: no pod matching selector %q got an IP after %s", selector, timeout)
 }
 
 // podNameForJob resolves a Job name (Handle.ContainerID) to its current

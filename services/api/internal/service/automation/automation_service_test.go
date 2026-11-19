@@ -3,6 +3,7 @@ package automationsvc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -308,12 +309,13 @@ func TestValidateConditionConfig_AcceptsValidBranches(t *testing.T) {
 // --- Plugin node resolver fallthrough ---------------------------------------
 
 type stubPluginResolver struct {
-	triggers, conditions, actions map[string]bool
+	triggers, conditions, actions, taskless map[string]bool
 }
 
 func (s *stubPluginResolver) IsPluginTrigger(t string) bool   { return s.triggers[t] }
 func (s *stubPluginResolver) IsPluginCondition(t string) bool { return s.conditions[t] }
 func (s *stubPluginResolver) IsPluginAction(t string) bool    { return s.actions[t] }
+func (s *stubPluginResolver) IsTasklessTrigger(t string) bool { return s.taskless[t] }
 
 func TestService_ValidateNodeTypeAndConfig_PluginActionFallthrough(t *testing.T) {
 	svc := &Service{}
@@ -508,7 +510,7 @@ func TestValidateTaskReachability_TaskLessTriggerToCallAPI_Allowed(t *testing.T)
 	action := newNode(automationdom.KindAction, string(automationdom.ActionCallAPI), "{}")
 	nodes := []*automationdom.Node{trigger, action}
 	edges := []*automationdom.Edge{newEdge(trigger.ID, action.ID)}
-	if err := validateTaskReachability(nodes, edges); err != nil {
+	if err := (&Service{}).validateTaskReachability(nodes, edges); err != nil {
 		t.Fatalf("expected a task-less cron trigger connected only to call_api to be valid, got %v", err)
 	}
 }
@@ -518,7 +520,7 @@ func TestValidateTaskReachability_TaskLessTriggerToTriggerAIAgent_Allowed(t *tes
 	action := newNode(automationdom.KindAction, string(automationdom.ActionTriggerAIAgent), "{}")
 	nodes := []*automationdom.Node{trigger, action}
 	edges := []*automationdom.Edge{newEdge(trigger.ID, action.ID)}
-	if err := validateTaskReachability(nodes, edges); err != nil {
+	if err := (&Service{}).validateTaskReachability(nodes, edges); err != nil {
 		t.Fatalf("expected a task-less api_trigger connected to trigger_ai_agent to be valid — it fires a direct message instead of assigning a task, got %v", err)
 	}
 }
@@ -528,7 +530,7 @@ func TestValidateTaskReachability_TaskLessTriggerToCondition_Rejected(t *testing
 	condition := newNode(automationdom.KindCondition, automationdom.ConditionNodeType, "{}")
 	nodes := []*automationdom.Node{trigger, condition}
 	edges := []*automationdom.Edge{newEdge(trigger.ID, condition.ID)}
-	if err := validateTaskReachability(nodes, edges); err == nil {
+	if err := (&Service{}).validateTaskReachability(nodes, edges); err == nil {
 		t.Fatal("expected a task-less predecessor_done trigger reaching a condition node to be rejected")
 	}
 }
@@ -538,7 +540,7 @@ func TestValidateTaskReachability_TaskLessTriggerToNonCallAPIAction_Rejected(t *
 	action := newNode(automationdom.KindAction, string(automationdom.ActionUpdateTask), "{}")
 	nodes := []*automationdom.Node{trigger, action}
 	edges := []*automationdom.Edge{newEdge(trigger.ID, action.ID)}
-	if err := validateTaskReachability(nodes, edges); err == nil {
+	if err := (&Service{}).validateTaskReachability(nodes, edges); err == nil {
 		t.Fatal("expected a task-less api_trigger reaching an update_task action to be rejected")
 	}
 }
@@ -549,7 +551,7 @@ func TestValidateTaskReachability_TransitiveThroughCallAPI_Rejected(t *testing.T
 	condition := newNode(automationdom.KindCondition, automationdom.ConditionNodeType, "{}")
 	nodes := []*automationdom.Node{trigger, callAPI, condition}
 	edges := []*automationdom.Edge{newEdge(trigger.ID, callAPI.ID), newEdge(callAPI.ID, condition.ID)}
-	if err := validateTaskReachability(nodes, edges); err == nil {
+	if err := (&Service{}).validateTaskReachability(nodes, edges); err == nil {
 		t.Fatal("expected the check to catch a condition reached transitively through call_api")
 	}
 }
@@ -559,13 +561,13 @@ func TestValidateTaskReachability_TriggerWithTargetTask_AllowsAnything(t *testin
 	condition := newNode(automationdom.KindCondition, automationdom.ConditionNodeType, "{}")
 	nodes := []*automationdom.Node{trigger, condition}
 	edges := []*automationdom.Edge{newEdge(trigger.ID, condition.ID)}
-	if err := validateTaskReachability(nodes, edges); err != nil {
+	if err := (&Service{}).validateTaskReachability(nodes, edges); err != nil {
 		t.Fatalf("expected a trigger with a target task to reach a condition node fine, got %v", err)
 	}
 }
 
 func TestValidateTaskReachability_EmptyGraph_NoError(t *testing.T) {
-	if err := validateTaskReachability(nil, nil); err != nil {
+	if err := (&Service{}).validateTaskReachability(nil, nil); err != nil {
 		t.Fatalf("expected an empty graph to be valid, got %v", err)
 	}
 }
@@ -680,5 +682,238 @@ func TestValidateConditionConfig_RejectsBadMatchMode(t *testing.T) {
 	})
 	if err := svc.validateConditionConfig(context.Background(), uuid.New(), cfg, true); err == nil {
 		t.Fatal("expected an invalid match_mode to be rejected")
+	}
+}
+
+// --- validateNoSelfParent ----------------------------------------------------
+
+func targetedTriggerNodeWithTask(t *testing.T, triggerType automationdom.TriggerType, targetTaskID uuid.UUID) *automationdom.Node {
+	t.Helper()
+	id := targetTaskID
+	cfg, err := json.Marshal(automationdom.TriggerConfig{TargetTaskID: &id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newNode(automationdom.KindTrigger, string(triggerType), string(cfg))
+}
+
+func updateTaskNodeWithParent(t *testing.T, parentTaskID *uuid.UUID) *automationdom.Node {
+	t.Helper()
+	cfg, err := json.Marshal(automationdom.ActionConfig{
+		Update: &automationdom.TaskFieldUpdate{ParentTaskID: parentTaskID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newNode(automationdom.KindAction, string(automationdom.ActionUpdateTask), string(cfg))
+}
+
+func TestValidateNoSelfParent_DirectChild_Rejected(t *testing.T) {
+	target := uuid.New()
+	trigger := targetedTriggerNodeWithTask(t, automationdom.TriggerAPITrigger, target)
+	update := updateTaskNodeWithParent(t, &target)
+	nodes := []*automationdom.Node{trigger, update}
+	edges := []*automationdom.Edge{newEdge(trigger.ID, update.ID)}
+
+	err := validateNoSelfParent(nodes, edges)
+	if !errors.Is(err, automationdom.ErrUpdateTaskSelfParent) {
+		t.Fatalf("expected ErrUpdateTaskSelfParent for parent_task_id == the trigger's target task, got %v", err)
+	}
+}
+
+func TestValidateNoSelfParent_TransitiveChild_Rejected(t *testing.T) {
+	target := uuid.New()
+	trigger := targetedTriggerNodeWithTask(t, automationdom.TriggerAPITrigger, target)
+	condition := newNode(automationdom.KindCondition, automationdom.ConditionNodeType, "{}")
+	update := updateTaskNodeWithParent(t, &target)
+	nodes := []*automationdom.Node{trigger, condition, update}
+	edges := []*automationdom.Edge{newEdge(trigger.ID, condition.ID), newEdge(condition.ID, update.ID)}
+
+	if err := validateNoSelfParent(nodes, edges); !errors.Is(err, automationdom.ErrUpdateTaskSelfParent) {
+		t.Fatalf("expected the check to catch a self-parent reached transitively, got %v", err)
+	}
+}
+
+func TestValidateNoSelfParent_DifferentParent_Allowed(t *testing.T) {
+	target, otherParent := uuid.New(), uuid.New()
+	trigger := targetedTriggerNodeWithTask(t, automationdom.TriggerAPITrigger, target)
+	update := updateTaskNodeWithParent(t, &otherParent)
+	nodes := []*automationdom.Node{trigger, update}
+	edges := []*automationdom.Edge{newEdge(trigger.ID, update.ID)}
+
+	if err := validateNoSelfParent(nodes, edges); err != nil {
+		t.Fatalf("expected a parent that is not the triggered task to be valid, got %v", err)
+	}
+}
+
+func TestValidateNoSelfParent_NoParentSet_Allowed(t *testing.T) {
+	target := uuid.New()
+	trigger := targetedTriggerNodeWithTask(t, automationdom.TriggerAPITrigger, target)
+	update := updateTaskNodeWithParent(t, nil)
+	nodes := []*automationdom.Node{trigger, update}
+	edges := []*automationdom.Edge{newEdge(trigger.ID, update.ID)}
+
+	if err := validateNoSelfParent(nodes, edges); err != nil {
+		t.Fatalf("expected an update_task without parent_task_id to be valid, got %v", err)
+	}
+}
+
+// An update_task node off the trigger's own path can never see the triggered
+// task, so its parent choice is none of this check's business.
+func TestValidateNoSelfParent_NotDownstream_Allowed(t *testing.T) {
+	target := uuid.New()
+	trigger := targetedTriggerNodeWithTask(t, automationdom.TriggerAPITrigger, target)
+	other := targetedTriggerNodeWithTask(t, automationdom.TriggerStatusChanged, uuid.New())
+	update := updateTaskNodeWithParent(t, &target)
+	nodes := []*automationdom.Node{trigger, other, update}
+	edges := []*automationdom.Edge{newEdge(other.ID, update.ID)}
+
+	if err := validateNoSelfParent(nodes, edges); err != nil {
+		t.Fatalf("expected an update_task outside the trigger's subtree to be valid, got %v", err)
+	}
+}
+
+// Task-activity triggers derive the task from the event, so no static target
+// task exists to compare against; runtime keeps rejecting it.
+func TestValidateNoSelfParent_EventDrivenTrigger_Skipped(t *testing.T) {
+	parent := uuid.New()
+	trigger := newNode(automationdom.KindTrigger, string(automationdom.TriggerStatusChanged), "{}")
+	update := updateTaskNodeWithParent(t, &parent)
+	nodes := []*automationdom.Node{trigger, update}
+	edges := []*automationdom.Edge{newEdge(trigger.ID, update.ID)}
+
+	if err := validateNoSelfParent(nodes, edges); err != nil {
+		t.Fatalf("expected an event-driven trigger to be skipped, got %v", err)
+	}
+}
+
+func updateTaskNodeWithParentAndTarget(t *testing.T, parentTaskID *uuid.UUID, target *automationdom.TaskTarget) *automationdom.Node {
+	t.Helper()
+	cfg, err := json.Marshal(automationdom.ActionConfig{
+		Update: &automationdom.TaskFieldUpdate{ParentTaskID: parentTaskID},
+		Target: target,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newNode(automationdom.KindAction, string(automationdom.ActionUpdateTask), string(cfg))
+}
+
+// A retargeted action mutates the task it names, so parenting that task to
+// itself is the same failure — even with no trigger in play at all.
+func TestValidateNoSelfParent_RetargetedOtherTask_Rejected(t *testing.T) {
+	other := uuid.New()
+	update := updateTaskNodeWithParentAndTarget(t, &other, &automationdom.TaskTarget{
+		Kind:        automationdom.TaskTargetOther,
+		OtherTaskID: &other,
+	})
+	if err := validateNoSelfParent([]*automationdom.Node{update}, nil); !errors.Is(err, automationdom.ErrUpdateTaskSelfParent) {
+		t.Fatalf("expected a retargeted update_task to reject parenting its own target task to itself, got %v", err)
+	}
+}
+
+// ...and parenting some unrelated task to the run's task is not a self-parent.
+func TestValidateNoSelfParent_RetargetedOtherTask_Allowed(t *testing.T) {
+	target, other := uuid.New(), uuid.New()
+	trigger := targetedTriggerNodeWithTask(t, automationdom.TriggerAPITrigger, target)
+	update := updateTaskNodeWithParentAndTarget(t, &target, &automationdom.TaskTarget{
+		Kind:        automationdom.TaskTargetOther,
+		OtherTaskID: &other,
+	})
+	nodes := []*automationdom.Node{trigger, update}
+	edges := []*automationdom.Edge{newEdge(trigger.ID, update.ID)}
+	if err := validateNoSelfParent(nodes, edges); err != nil {
+		t.Fatalf("expected a retargeted action setting another task's parent to the run's task to be valid, got %v", err)
+	}
+}
+
+// children/parent/link targets resolve per run, so the static pass must not
+// guess: the same parent_task_id that is rejected for a non-retargeted node
+// is left to the runtime check here.
+func TestValidateNoSelfParent_DynamicTarget_Skipped(t *testing.T) {
+	target := uuid.New()
+	trigger := targetedTriggerNodeWithTask(t, automationdom.TriggerAPITrigger, target)
+	update := updateTaskNodeWithParentAndTarget(t, &target, &automationdom.TaskTarget{Kind: automationdom.TaskTargetChildren})
+	nodes := []*automationdom.Node{trigger, update}
+	edges := []*automationdom.Edge{newEdge(trigger.ID, update.ID)}
+	if err := validateNoSelfParent(nodes, edges); err != nil {
+		t.Fatalf("expected a children-targeted update_task to be skipped by the static check, got %v", err)
+	}
+}
+
+type tasklessResolver struct {
+	automationdom.PluginNodeResolver
+}
+
+func (tasklessResolver) IsTasklessTrigger(nodeType string) bool { return nodeType == "x.issue" }
+
+func TestValidateTaskReachability_PluginTasklessTrigger(t *testing.T) {
+	svc := &Service{pluginResolver: &stubPluginResolver{taskless: map[string]bool{"x.issue": true}}}
+	trigger := newNode(automationdom.KindTrigger, "x.issue", "{}")
+	agent := newNode(automationdom.KindAction, string(automationdom.ActionTriggerAIAgent), "{}")
+	if err := svc.validateTaskReachability([]*automationdom.Node{trigger, agent}, []*automationdom.Edge{newEdge(trigger.ID, agent.ID)}); err != nil {
+		t.Fatalf("an agent message needs no task: %v", err)
+	}
+	update := newNode(automationdom.KindAction, string(automationdom.ActionUpdateTask), "{}")
+	if err := svc.validateTaskReachability([]*automationdom.Node{trigger, update}, []*automationdom.Edge{newEdge(trigger.ID, update.ID)}); !errors.Is(err, automationdom.ErrEdgeRequiresTargetTask) {
+		t.Fatalf("a task-less plugin trigger must not reach a task node: %v", err)
+	}
+	other := newNode(automationdom.KindTrigger, "x.other", "{}")
+	if err := svc.validateTaskReachability([]*automationdom.Node{other, update}, []*automationdom.Edge{newEdge(other.ID, update.ID)}); err != nil {
+		t.Fatalf("a trigger not declared task-less is unrestricted: %v", err)
+	}
+}
+
+func TestValidateActionConfig_NewActionsAndFieldModes(t *testing.T) {
+	svc := &Service{}
+	ok := func(a automationdom.ActionType, cfg string, strict bool) {
+		t.Helper()
+		if err := svc.validateActionConfig(context.TODO(), uuid.Nil, a, json.RawMessage(cfg), strict); err != nil {
+			t.Fatalf("%s %s: unexpected error %v", a, cfg, err)
+		}
+	}
+	bad := func(a automationdom.ActionType, cfg string, strict bool) {
+		t.Helper()
+		if err := svc.validateActionConfig(context.TODO(), uuid.Nil, a, json.RawMessage(cfg), strict); err == nil {
+			t.Fatalf("%s %s: expected an error", a, cfg)
+		}
+	}
+	ok(automationdom.ActionUpdateTask, `{"update":{"tags":["x"],"tags_mode":"add"}}`, true)
+	ok(automationdom.ActionUpdateTask, `{"update":{"clear":["due_date"]}}`, true)
+	ok(automationdom.ActionUpdateTask, `{"update":{"dynamic":{"due_date":{"source":"parent","offset_days":2}}}}`, true)
+	bad(automationdom.ActionUpdateTask, `{"update":{"tags_mode":"merge"}}`, false)
+	bad(automationdom.ActionUpdateTask, `{"update":{"clear":["title"]}}`, false)
+	bad(automationdom.ActionUpdateTask, `{"update":{"dynamic":{"title":{"source":"task"}}}}`, false)
+	bad(automationdom.ActionUpdateTask, `{"update":{"dynamic":{"importance":{"source":"now"}}}}`, false)
+	bad(automationdom.ActionUpdateTask, `{"update":{"dynamic":{"sprint_id":{"source":"task","offset_days":1}}}}`, false)
+
+	ok(automationdom.ActionAddComment, `{"comment":{"text":"hi"}}`, true)
+	bad(automationdom.ActionAddComment, `{"comment":{"text":" "}}`, true)
+	ok(automationdom.ActionAddComment, `{}`, false) // a draft may be incomplete
+
+	ok(automationdom.ActionNotify, `{"notify":{"recipients":["assignees"],"message":"m"}}`, true)
+	bad(automationdom.ActionNotify, `{"notify":{"recipients":["boss"],"message":"m"}}`, false)
+	bad(automationdom.ActionNotify, `{"notify":{"message":"m"}}`, true)
+	bad(automationdom.ActionNotify, `{"notify":{"recipients":["reporter"]}}`, true)
+
+	ok(automationdom.ActionLinkTask, `{"link":{"type":"blocks","to":{"kind":"parent"}}}`, true)
+	bad(automationdom.ActionLinkTask, `{"link":{"type":"loves","to":{"kind":"parent"}}}`, false)
+	bad(automationdom.ActionLinkTask, `{"link":{"type":"blocks","to":{"kind":"children"}}}`, false)
+	bad(automationdom.ActionLinkTask, `{"link":{"to":{"kind":"parent"}}}`, true)
+
+	ok(automationdom.ActionCreateTask, `{"create":{"title":"t","link":"relates_to"}}`, true)
+	bad(automationdom.ActionCreateTask, `{"create":{"title":"t","link":"x"}}`, false)
+}
+
+func TestValidateTriggerConfig_FieldChanged(t *testing.T) {
+	svc := &Service{}
+	if err := svc.validateTriggerConfig(context.TODO(), uuid.Nil, automationdom.TriggerFieldChanged, json.RawMessage(`{"field":"sprint"}`), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.validateTriggerConfig(context.TODO(), uuid.Nil, automationdom.TriggerFieldChanged, json.RawMessage(`{"field":"status"}`), false); err == nil {
+		t.Fatal("status is not a watchable field (it has its own trigger)")
+	}
+	if err := svc.validateTriggerConfig(context.TODO(), uuid.Nil, automationdom.TriggerFieldChanged, json.RawMessage(`{}`), true); err == nil {
+		t.Fatal("strict mode needs a field")
 	}
 }

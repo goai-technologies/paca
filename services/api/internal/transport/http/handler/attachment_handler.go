@@ -52,14 +52,8 @@ func (h *AttachmentHandler) InitiateUpload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-	uploaderID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "invalid subject in token"))
+	uploaderID, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -103,14 +97,8 @@ func (h *AttachmentHandler) CompleteUpload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-	creatorID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "invalid subject in token"))
+	creatorID, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -150,7 +138,13 @@ func (h *AttachmentHandler) ListTaskAttachments(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	attachments, err := h.svc.ListTaskAttachments(r.Context(), projectID, taskID)
+	pageSize, err := parsePageSize(r, 30, 100)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	cursor := parseCursorParam(r)
+	attachments, hasMore, total, err := h.svc.ListTaskAttachments(r.Context(), projectID, taskID, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -160,7 +154,37 @@ func (h *AttachmentHandler) ListTaskAttachments(w http.ResponseWriter, r *http.R
 	for _, a := range attachments {
 		resp = append(resp, dto.TaskAttachmentFromEntity(a))
 	}
-	presenter.OK(w, r, map[string]any{"items": resp})
+	var nextCursor *string
+	if hasMore && len(attachments) > 0 {
+		c := attachmentdom.EncodeCursor(attachments[len(attachments)-1])
+		nextCursor = &c
+	}
+	presenter.OK(w, r, map[string]any{"items": resp, "page_size": pageSize, "next_cursor": nextCursor, "total_count": total})
+}
+
+// GetTaskAttachment handles GET /projects/:projectId/tasks/:taskId/attachments/:attachmentId.
+func (h *AttachmentHandler) GetTaskAttachment(w http.ResponseWriter, r *http.Request) {
+	projectID, err := parseProjectID(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	taskID, err := parseTaskID(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	attachmentID, err := parseAttachmentID(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	a, err := h.svc.GetTaskAttachment(r.Context(), projectID, taskID, attachmentID)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.OK(w, r, dto.TaskAttachmentFromEntity(a))
 }
 
 // GetDownloadURL handles GET /projects/:projectId/tasks/:taskId/attachments/:attachmentId/download-url.

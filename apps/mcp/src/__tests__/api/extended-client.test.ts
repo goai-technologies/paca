@@ -91,7 +91,7 @@ describe("PacaAPIExtendedClient", () => {
 		fetchMock.mockResolvedValue(rawOk(raw));
 		const client = new PacaAPIExtendedClient(CONFIG);
 		const result = await client.listProjectMembers("p1");
-		expect(result).toEqual(raw);
+		expect(result.items).toEqual(raw);
 	});
 
 	// ---------------------------------------------------------------------------
@@ -106,24 +106,37 @@ describe("PacaAPIExtendedClient", () => {
 			);
 			const result = await client.listProjectMembers("p1");
 			expect(fetchMock).toHaveBeenCalledWith(
-				"https://api.example.com/api/v1/projects/p1/members?page_size=100",
+				"https://api.example.com/api/v1/projects/p1/members?page_size=50",
 				expect.objectContaining({ method: "GET" }),
 			);
-			expect(result).toEqual([{ id: "m1" }]);
+			expect(result).toEqual({ items: [{ id: "m1" }], nextCursor: null });
 		});
 
-		it("follows next_cursor until the last page", async () => {
+		it("returns the next cursor instead of fetching the next page", async () => {
 			const client = new PacaAPIExtendedClient(CONFIG);
-			fetchMock
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "m1" }], next_cursor: "c2" }),
-				)
-				.mockResolvedValueOnce(
-					okEnvelope({ items: [{ id: "m2" }], next_cursor: null }),
-				);
-			const result = await client.listProjectMembers("p1");
-			expect(fetchMock.mock.calls[1][0]).toContain("cursor=c2");
-			expect(result).toEqual([{ id: "m1" }, { id: "m2" }]);
+			fetchMock.mockResolvedValue(
+				okEnvelope({
+					items: [{ id: "m1" }],
+					next_cursor: "c2",
+					total_count: 9,
+				}),
+			);
+			const result = await client.listProjectMembers("p1", { pageSize: 1 });
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(result).toEqual({
+				items: [{ id: "m1" }],
+				nextCursor: "c2",
+				total: 9,
+			});
+		});
+
+		it("resumes from a cursor and searches by name", async () => {
+			const client = new PacaAPIExtendedClient(CONFIG);
+			fetchMock.mockResolvedValue(okEnvelope({ items: [] }));
+			await client.listProjectMembers("p1", { cursor: "c2", search: "ann" });
+			const url = fetchMock.mock.calls[0][0] as string;
+			expect(url).toContain("search=ann");
+			expect(url).toContain("cursor=c2");
 		});
 	});
 
@@ -187,14 +200,14 @@ describe("PacaAPIExtendedClient", () => {
 			fetchMock.mockResolvedValue(okEnvelope([{ id: "r1" }]));
 			const result = await client.listProjectRoles("p1");
 			expect(fetchMock.mock.calls[0][0]).toContain("/roles");
-			expect(result).toEqual([{ id: "r1" }]);
+			expect(result.items).toEqual([{ id: "r1" }]);
 		});
 
 		it("extracts .items from object response", async () => {
 			const client = new PacaAPIExtendedClient(CONFIG);
 			fetchMock.mockResolvedValue(okEnvelope({ items: [{ id: "r1" }] }));
 			const result = await client.listProjectRoles("p1");
-			expect(result).toEqual([{ id: "r1" }]);
+			expect(result.items).toEqual([{ id: "r1" }]);
 		});
 	});
 

@@ -12,7 +12,7 @@ import {
 	pluginsQueryOptions,
 } from "@/lib/plugin-api";
 import { isProjectTemplate } from "@/lib/policy";
-import { platformRolesQueryOptions, type Role } from "@/lib/role-api";
+import { platformRolesKey, type Role } from "@/lib/role-api";
 
 import {
 	KNOWN_PERMISSIONS,
@@ -71,7 +71,7 @@ export function RoleFormDialog({
 			permissions={permissions}
 			groups={template ? PROJECT_PERMISSION_GROUPS : PERMISSION_GROUPS}
 			tScope={(key) => (template ? tProjects(key as never) : t(key as never))}
-			invalidateKey={platformRolesQueryOptions.queryKey}
+			invalidateKey={[...platformRolesKey]}
 			labels={{
 				editTitle: t("globalRoles.formDialog.editTitle"),
 				createTitle: t("globalRoles.formDialog.createTitle"),

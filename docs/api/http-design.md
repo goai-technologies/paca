@@ -141,7 +141,7 @@ In the **Auth** column, actions joined by `+` are all required, and the action a
 | `PATCH` | `/api/v1/projects/:projectId` | Access token (fresh) + `projects:write` | Update project name or description. |
 | `DELETE` | `/api/v1/projects/:projectId` | Access token (fresh) + `projects:delete` | Delete a project. |
 | `POST` | `/api/v1/projects/:projectId/exports` | Access token (fresh) + `project:export` | Queue an export of the project: tasks, task comments and activities as CSV files, and the documentation as Markdown files, zipped together. Answers `202` with the queued export; returns `409 PROJECT_EXPORT_IN_PROGRESS` while another is queued or running. See [Project Export Contracts](#project-export-contracts). |
-| `GET` | `/api/v1/projects/:projectId/exports` | Access token (fresh) + `project:export` | List the project's recent exports, newest first. |
+| `GET` | `/api/v1/projects/:projectId/exports` | Access token (fresh) + `project:export` | List the project's exports, newest first, by page: `{items, page, page_size, total_count}` (`page` default 1, `page_size` default 20, max 100). |
 | `GET` | `/api/v1/projects/:projectId/exports/:exportId` | Access token (fresh) + `project:export` | Get one export's status and file metadata. |
 | `GET` | `/api/v1/projects/:projectId/exports/:exportId/download` | Access token (fresh) + `project:export` | Get a short-lived presigned URL for a completed export's zip. `409 PROJECT_EXPORT_NOT_READY` until it is `completed`; `410 PROJECT_EXPORT_EXPIRED` after the retention window. |
 | `GET` | `/api/v1/projects/:projectId/members` | Access token (fresh) + `project.members:read` | List project members, cursor-paginated: `{items, page_size, next_cursor, total_count}` (`total_count` on the first page only, i.e. when no `cursor` is sent). Query: `page_size` (1-100, default 20), `cursor`, `search` (every word must match username, name or handle), `role_id`, `member_type` (`human`, `agent`, `service_account`), `ids` (up to 100 membership or account ids — a batch lookup). |
@@ -151,7 +151,8 @@ In the **Auth** column, actions joined by `+` are all required, and the action a
 | `GET` | `/api/v1/projects/:projectId/members/:memberId/roles` | Access token (fresh) + `project.members:read` | The roles a member holds in the project. |
 | `PUT` | `/api/v1/projects/:projectId/members/:memberId/roles` | Access token (fresh) + `roles:assign` on `project/:projectId/role/:roleId` for each role added or removed (no `project.members:write`) | Replace the member's roles in the project with `role_ids`. |
 | `GET` | `/api/v1/projects/:projectId/members/me/permissions` | Access token (fresh) | The caller's effective actions in the project, `{"actions": [...]}`. |
-| `GET` | `/api/v1/projects/:projectId/roles` | Access token (fresh) + `roles:read` | List the project's own roles and the platform roles already attached inside the project. |
+| `POST` | `/api/v1/projects/:projectId/members/me/permissions/check` | Access token (fresh) | Batch access probe for services/realtime. Body `{"checks": [{"action", "resource"}, ...]}` (1-200 pairs, each resource inside the project); returns `{"allowed": [bool, ...]}` in order, judged as the caller by the IAM engine. Gates nothing. |
+| `GET` | `/api/v1/projects/:projectId/roles` | Access token (fresh) + `roles:read` | List the project's own roles (by name) followed by the platform roles already attached inside the project, cursor-paginated like `GET /admin/roles` (`cursor`, `page_size`, `search`, `ids`). |
 | `POST` | `/api/v1/projects/:projectId/roles` | Access token (fresh) + `roles:write` | Create a role owned by the project, from a policy document. |
 | `GET` | `/api/v1/projects/:projectId/roles/:roleId` | Access token (fresh) + `roles:read` | Get a project role. |
 | `PUT` | `/api/v1/projects/:projectId/roles/:roleId` | Access token (fresh) + `roles:write` | Replace a project role's name, description and policy. |
@@ -166,7 +167,7 @@ In the **Auth** column, actions joined by `+` are all required, and the action a
 | `PATCH` | `/api/v1/projects/:projectId/task-statuses/:statusId` | Access token (fresh) + `project.settings.task_statuses:write` | Update a workflow status. |
 | `DELETE` | `/api/v1/projects/:projectId/task-statuses/:statusId` | Access token (fresh) + `project.settings.task_statuses:write` | Delete a workflow status. Returns `409 TASK_STATUS_IS_DEFAULT` if it is the project's default status. |
 | `PUT` | `/api/v1/projects/:projectId/task-statuses/:statusId/set-default` | Access token (fresh) + `project.settings.task_statuses:write` | Make a status the default that new tasks start in, clearing the flag on the previous default. |
-| `GET` | `/api/v1/projects/:projectId/sprints` | Access token (fresh) + `sprints:read` | List sprints for a project ordered by creation date. |
+| `GET` | `/api/v1/projects/:projectId/sprints` | Access token (fresh) + `sprints:read` | List sprints for a project, cursor-paginated: `{items, page_size, next_cursor, total_count}` (`cursor`, `page_size` ≤ 100). Filters: `status` (comma-separated `planned,active,completed`), `search` (name words), `ids` (≤ 100, batch lookup). `sort=name` (default, case-insensitive name) or `sort=recent` (last updated first). |
 | `POST` | `/api/v1/projects/:projectId/sprints` | Access token (fresh) + `sprints:write` | Quick-create a sprint with a system-generated default name ("Sprint N"). No request body required. The sprint is created with `status = planned`. |
 | `GET` | `/api/v1/projects/:projectId/sprints/:sprintId` | Access token (fresh) + `sprints:read` | Get sprint details (goal, dates, status). |
 | `PATCH` | `/api/v1/projects/:projectId/sprints/:sprintId` | Access token (fresh) + `sprints:write` | Update sprint metadata (name, goal, start_date, end_date). Cannot be used to change `status`; use the dedicated lifecycle actions instead. |
@@ -174,7 +175,7 @@ In the **Auth** column, actions joined by `+` are all required, and the action a
 | `POST` | `/api/v1/projects/:projectId/sprints/:sprintId/start` | Access token (fresh) + `sprints:write` | Start a planned sprint: set name, goal, start date, and due date, then transition `status` to `active`. Multiple sprints may be active simultaneously. Fails with `409 SPRINT_NOT_PLANNED` if the sprint is not in `planned` state. |
 | `POST` | `/api/v1/projects/:projectId/sprints/:sprintId/complete` | Access token (fresh) + `sprints:write` | Complete an active sprint: transition `status` to `completed` and move all incomplete tasks to the specified sprint (or back to no-sprint if `move_to_sprint_id` is `null`). Fails with `409 SPRINT_NOT_ACTIVE` if the sprint is not in `active` state. |
 | `GET` | `/api/v1/projects/:projectId/views?context=sprint&sprint_id=:sprintId` | Access token (fresh) + `sprints:read` | List saved view configurations. `context` must be `sprint`, `backlog`, or `timeline`; the `sprint` context requires `sprint_id`. |
-| `POST` | `/api/v1/projects/:projectId/views?context=sprint&sprint_id=:sprintId` | Access token (fresh) + `sprints:write` | Create a saved view configuration. `context` must be `sprint`, `backlog`, or `timeline`; the `sprint` context requires `sprint_id`. Sprint creation seeds one Board and one Table view with `column_by = status`, the current sprint selected, and non-system task types. Project creation seeds one backlog Table view with `column_by = sprint` plus one timeline Roadmap view filtered to Epics. |
+| `POST` | `/api/v1/projects/:projectId/views?context=sprint&sprint_id=:sprintId` | Access token (fresh) + `sprints:write` | Create a saved view configuration. `context` must be `sprint`, `backlog`, or `timeline`; the `sprint` context requires `sprint_id`. Sprint creation seeds one Board and one Table view with `column_by = status`, the current sprint selected, and non-system task types. Project creation seeds one backlog Table view with `column_by = sprint` plus one timeline Gantt view filtered to Epics. `view_type` is `table`, `board`, `gantt` or `plugin`; the former name `roadmap` is still accepted for one release and stored as `gantt`. |
 | `GET` | `/api/v1/projects/:projectId/views/:viewId` | Access token (fresh) + `views:read` | Get a single view configuration. |
 | `PATCH` | `/api/v1/projects/:projectId/views/:viewId` | Access token (fresh) + `views:write` | Update a view's name or config. |
 | `DELETE` | `/api/v1/projects/:projectId/views/:viewId` | Access token (fresh) + `views:write` | Delete a view. Fails with `409 VIEW_IS_LAST_VIEW` if it is the only remaining view. |
@@ -187,6 +188,7 @@ In the **Auth** column, actions joined by `+` are all required, and the action a
 | `GET` | `/api/v1/projects/:projectId/tasks/:taskId` | Access token (fresh) + `tasks:read` | Get task detail. |
 | `PATCH` | `/api/v1/projects/:projectId/tasks/:taskId` | Access token (fresh) + `tasks:write` | Update a task. |
 | `DELETE` | `/api/v1/projects/:projectId/tasks/:taskId` | Access token (fresh) + `tasks:write` | Soft-delete a task. |
+| `GET` | `/api/v1/projects/:projectId/task-links?link_type=blocks` | Access token (fresh) + `tasks:read` | List the project's task links of one `link_type` (`blocks`, `relates_to` or `duplicates`, required), oldest first, cursor-paginated: `{items, page_size, next_cursor}` (`cursor`, `page_size` ≤ 500, default 100). Each item is `{id, source_task_id, target_task_id, link_type, created_at}`. A link is listed only when both of its tasks are live and readable by the caller. Backs the Gantt view's dependency arrows. |
 | `GET` | `/api/v1/projects/:projectId/custom-fields` | Access token (fresh) + `tasks:read` | List custom field definitions for a project. |
 | `POST` | `/api/v1/projects/:projectId/custom-fields` | Access token (fresh) + `project.settings.custom_fields:write` | Create a custom field definition. |
 | `GET` | `/api/v1/projects/:projectId/custom-fields/:fieldId` | Access token (fresh) + `tasks:read` | Get a custom field definition by ID. |
@@ -495,7 +497,7 @@ Roles are IAM policy documents. The endpoints below are summarized here and spec
 
 ### `GET /api/v1/admin/roles`
 
-- list platform roles; each carries its `policy` document (`{"version": ..., "statements": [...]}`), `is_system`, `is_default` and `attachment_count`.
+- list platform roles, cursor-paginated (`{items, page_size, next_cursor, total_count}`; `cursor`, or `page` for numbered paging (then `page` is echoed and `next_cursor` is null), `page_size` ≤ 100, `search` over name and description, `ids` ≤ 100 for batch lookup), sorted by name; each carries its `policy` document (`{"version": ..., "statements": [...]}`), `is_system`, `is_default` and `attachment_count`.
 
 ### `POST /api/v1/admin/roles` and `PUT /api/v1/admin/roles/:roleId`
 
@@ -780,7 +782,7 @@ Success response data:
 Function:
 
 - create a new sprint view;
-- `view_type` must be one of `board`, `table`, or `roadmap`;
+- `view_type` must be one of `board`, `table`, `gantt`, or `plugin` (`roadmap`, the former name of `gantt`, is still accepted for one release);
 - `position` defaults to the next available slot.
 
 Request body:
@@ -911,7 +913,7 @@ Success response data:
 Function:
 
 - create a new product-backlog view;
-- `view_type` must be one of `board`, `table`, or `roadmap`;
+- `view_type` must be one of `board`, `table`, `gantt`, or `plugin` (`roadmap`, the former name of `gantt`, is still accepted for one release);
 - `position` defaults to the next available slot.
 
 Request body:
@@ -1025,7 +1027,7 @@ Success response data: same envelope as the product-backlog task list.
 Function:
 
 - list all saved view configurations for the timeline ordered by `position`;
-- project creation automatically seeds a single Roadmap view (position 0) as the default.
+- project creation automatically seeds a single Gantt view (position 0) as the default.
 
 Success response data: same envelope as the product-backlog views list.
 
@@ -1034,7 +1036,7 @@ Success response data: same envelope as the product-backlog views list.
 Function:
 
 - create a new timeline view;
-- `view_type` must be one of `board`, `table`, or `roadmap`;
+- `view_type` must be one of `board`, `table`, `gantt`, or `plugin` (`roadmap`, the former name of `gantt`, is still accepted for one release);
 - `position` defaults to the next available slot.
 
 Success response: `201 Created` with view data.
@@ -1260,6 +1262,7 @@ Function:
 
 - list all non-deleted tasks for a project, with optional filtering and pagination;
 - when `view_id` is supplied, each task in the response includes its manual `view_position` and `view_group_key` from that view's ordering (these fields are omitted when the task has no recorded position in the requested view);
+- each task in the response carries `subtask_count` and `subtask_done_count` (live direct children, and how many are in a status of category `done`); both are omitted when zero. Pass `parent_task_id` to list one task's children — it overrides sprint filters, while status/assignee/type/sort filters still apply;
 - tasks with system task types (`is_system = true`, i.e. Epic and Subtask) are **included** in this general list endpoint and are distinguished by the `is_system_type` flag in the response; use `exclude_system_types=true` to omit them (default behaviour of the product-backlog and sprint-specific task list endpoints).
 
 Query parameters:
@@ -1273,6 +1276,7 @@ Query parameters:
 | `assignee_id` | – | Filter to tasks assigned to a specific user |
 | `view_id` | – | UUID of a view; enriches each task with its manual position in that view |
 | `include` | – | `assignees`, `reporter` or both (comma-separated): embed the people behind `assignee_ids` / `reporter_id` in each task as `assignees` / `reporter` |
+| `exclude_subtasks` | `false` | When `true`, omit tasks whose parent is a live, non-Epic task in the same sprint (or both in the backlog); they are listed under that parent instead. Tasks that only belong to an Epic, or whose parent is in another sprint, stay. Ignored when `parent_task_id` is set |
 | `exclude_system_types` | `false` | When `true`, omit tasks whose type has `is_system = true` (Epic, Subtask) |
 
 Success response data (without `view_id`):
@@ -1331,7 +1335,7 @@ Notes:
 
 Custom field definitions describe extra metadata fields that can be attached to tasks within a project. Each definition is scoped to a project and has an immutable `field_key` that uniquely identifies it within the project.
 
-**Supported `field_type` values:** `text`, `number`, `date`, `select`, `multi_select`, `boolean`, `url`
+**Supported `field_type` values:** `text`, `number`, `date`, `select`, `multi_select`, `boolean`, `url`, `long_text`
 
 ### `GET /api/v1/projects/:projectId/custom-fields`
 
@@ -1366,6 +1370,7 @@ Function:
 - create a new custom field definition;
 - `field_key` must be unique within the project and is immutable after creation;
 - `options` is required (and used) only for `select` and `multi_select` types.
+- `rows` (2–20, default 3) sets the visible line count of a `long_text` field and is ignored by other types.
 
 Request body:
 
@@ -1408,7 +1413,7 @@ Error codes:
 
 Function:
 
-- update mutable fields: `display_name`, `field_type`, `options`, `is_required`;
+- update mutable fields: `display_name`, `field_type`, `options`, `is_required`, `use_in_search`;
 - `field_key` is **immutable** and cannot be changed after creation;
 - only supplied fields are updated (partial update).
 
@@ -1792,7 +1797,7 @@ The schema and HTTP contract are consistent. Before adding the next slice (proje
 | `SPRINT_STATUS_INVALID` | 400 | Sprint status value is not one of the allowed values. |
 | `VIEW_NOT_FOUND` | 404 | Sprint view with the given ID does not exist. |
 | `VIEW_NAME_INVALID` | 400 | View name is empty or invalid. |
-| `VIEW_TYPE_INVALID` | 400 | View type is not one of `board`, `table`, or `roadmap`. |
+| `VIEW_TYPE_INVALID` | 400 | View type is not one of `board`, `table`, `gantt`, or `plugin`. |
 | `VIEW_IS_LAST_VIEW` | 409 | View cannot be deleted because it is the only remaining view on the sprint. |
 | `CUSTOM_FIELD_NOT_FOUND` | 404 | Custom field definition with the given ID does not exist. |
 | `CUSTOM_FIELD_KEY_INVALID` | 400 | `field_key` is empty or contains invalid characters. |

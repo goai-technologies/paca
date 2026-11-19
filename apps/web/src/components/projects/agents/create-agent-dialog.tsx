@@ -12,7 +12,6 @@ import {
 	Eye,
 	EyeOff,
 	FlaskConical,
-	Loader2,
 	Lock,
 	Search,
 	Server,
@@ -50,6 +49,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -77,11 +77,16 @@ import {
 } from "@/lib/agent-api";
 import { invalidateAgentDirectory } from "@/lib/agent-directory";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
-import { environmentQueryOptions } from "@/lib/environment-api";
+import { copyToClipboard } from "@/lib/clipboard";
+import {
+	environmentConfigQueryOptions,
+	environmentQueryOptions,
+} from "@/lib/environment-api";
 import type { Role } from "@/lib/role-api";
 import { splitShellCommand } from "@/lib/shell-command";
 import { cn } from "@/lib/utils";
 import { AcpBridgeSetup, CommandBox } from "./acp-bridge-setup";
+import { AcpModelEffortFields } from "./acp-model-effort-fields";
 import { ProjectRolePicker } from "./project-role-picker";
 import { useSetAgentGlobalRole } from "./use-set-agent-global-role";
 
@@ -212,12 +217,18 @@ export function CreateAgentDialog({
 	);
 	const [acpProvider, setAcpProvider] = useState<ACPProvider>("claude-code");
 	const [acpCommand, setAcpCommand] = useState("");
+	const [acpModel, setAcpModel] = useState("");
+	const [acpEffort, setAcpEffort] = useState("");
 	const [cliProvider, setCliProvider] = useState<CLIProvider>("claude-code");
 	const [cliModel, setCliModel] = useState("");
 	const [copiedCliLoginCommand, setCopiedCliLoginCommand] = useState(false);
 	const [systemPrompt, setSystemPrompt] = useState("");
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [dockerEnabled, setDockerEnabled] = useState(false);
+	// Older APIs predate docker_in_sandbox and always allowed it, so only an
+	// explicit false hides the toggle.
+	const { data: deploymentConfig } = useQuery(environmentConfigQueryOptions());
+	const dockerInSandbox = deploymentConfig?.docker_in_sandbox !== false;
 	const [defaultEnvironmentId, setDefaultEnvironmentIdState] = useState("");
 	const [defaultFolderId, setDefaultFolderId] = useState("");
 	// Changing the default environment clears any previously-picked default
@@ -261,6 +272,8 @@ export function CreateAgentDialog({
 		setLlmBaseUrl(llmModels.anthropic?.base_url ?? "");
 		setAcpProvider("claude-code");
 		setAcpCommand("");
+		setAcpModel("");
+		setAcpEffort("");
 		setCliProvider("claude-code");
 		setCliModel("");
 		setCopiedCliLoginCommand(false);
@@ -358,6 +371,7 @@ export function CreateAgentDialog({
 	const acpCommandParts = splitShellCommand(acpCommand);
 
 	const createMutation = useMutation({
+		meta: { success: "created", subject: "agent", silent: true },
 		mutationFn: async () => {
 			const typeFields =
 				agentType === "llm"
@@ -394,6 +408,8 @@ export function CreateAgentDialog({
 							}
 						: {
 								acp_provider: acpProvider,
+								...(acpModel.trim() ? { acp_model: acpModel.trim() } : {}),
+								...(acpEffort ? { acp_effort: acpEffort } : {}),
 								...(acpProvider === "custom"
 									? { acp_command: acpCommandParts }
 									: {}),
@@ -488,6 +504,7 @@ export function CreateAgentDialog({
 	// because this dialog's agent doesn't exist yet (verifyCLILogin's own
 	// endpoint is agent-scoped).
 	const verifyCliLoginMutation = useMutation({
+		meta: { silent: true },
 		mutationFn: () => {
 			if (!projectId || !defaultEnvironmentId) {
 				throw new Error("no environment selected");
@@ -829,6 +846,9 @@ export function CreateAgentDialog({
 											<SelectItem value="goose">
 												{t("agents.createDialog.acpProviderGoose")}
 											</SelectItem>
+											<SelectItem value="opencode">
+												{t("agents.createDialog.acpProviderOpenCode")}
+											</SelectItem>
 											<SelectSeparator />
 											<SelectItem value="custom">
 												{t("agents.createDialog.acpProviderCustom")}
@@ -854,6 +874,13 @@ export function CreateAgentDialog({
 										</p>
 									</div>
 								)}
+								<AcpModelEffortFields
+									idPrefix="create-agent"
+									model={acpModel}
+									effort={acpEffort}
+									onModelChange={setAcpModel}
+									onEffortChange={setAcpEffort}
+								/>
 								<p className="text-xs text-muted-foreground rounded-md bg-muted/40 px-3 py-2">
 									{t("agents.createDialog.acpGuidance")}
 								</p>
@@ -1002,22 +1029,18 @@ export function CreateAgentDialog({
 											command={cliLoginCommand(cliProvider)}
 											copied={copiedCliLoginCommand}
 											onCopy={() => {
-												navigator.clipboard
-													.writeText(cliLoginCommand(cliProvider))
-													.then(() => {
+												// On failure leave copiedCliLoginCommand untouched so
+												// the button doesn't falsely claim success.
+												void copyToClipboard(cliLoginCommand(cliProvider)).then(
+													(ok) => {
+														if (!ok) return;
 														setCopiedCliLoginCommand(true);
 														setTimeout(
 															() => setCopiedCliLoginCommand(false),
 															2000,
 														);
-													})
-													.catch(() => {
-														// Clipboard write can fail (permission denied,
-														// insecure context) — leave copiedCliLoginCommand
-														// untouched so the button doesn't falsely claim
-														// success for a command the user may need to copy
-														// manually.
-													});
+													},
+												);
 											}}
 										/>
 									</div>
@@ -1051,7 +1074,10 @@ export function CreateAgentDialog({
 											}
 										>
 											{verifyCliLoginMutation.isPending ? (
-												<Loader2 className="size-3.5 mr-1.5 animate-spin" />
+												<Spinner
+													aria-hidden="true"
+													className="size-3.5 mr-1.5"
+												/>
 											) : (
 												<Lock className="size-3.5 mr-1.5" />
 											)}
@@ -1062,7 +1088,7 @@ export function CreateAgentDialog({
 												className={cn(
 													"text-xs",
 													verifyCliLoginMutation.data.authenticated
-														? "text-emerald-600"
+														? "text-success"
 														: "text-muted-foreground",
 												)}
 											>
@@ -1203,7 +1229,7 @@ export function CreateAgentDialog({
 										</button>
 									</div>
 									<p className="text-xs text-muted-foreground flex items-center gap-1.5">
-										<span className="size-1.5 shrink-0 rounded-full bg-emerald-500 inline-block" />
+										<span className="size-1.5 shrink-0 rounded-full bg-success inline-block" />
 										{t("agents.createDialog.apiKeyHint")}
 									</p>
 								</div>
@@ -1267,7 +1293,7 @@ export function CreateAgentDialog({
 									    sandbox — once a static default environment is picked, that
 									    environment's own Docker setting (set at creation) governs
 									    instead, so this toggle no longer means anything. */}
-									{!defaultEnvironmentId && (
+									{!defaultEnvironmentId && dockerInSandbox && (
 										<div className="flex items-center justify-between gap-3">
 											<div>
 												<p className="text-sm font-medium">
@@ -1412,7 +1438,7 @@ export function CreateAgentDialog({
 								>
 									{createMutation.isPending ? (
 										<>
-											<Loader2 className="size-4 mr-1.5 animate-spin" />
+											<Spinner aria-hidden="true" className="mr-1.5" />
 											{t("agents.createDialog.creating")}
 										</>
 									) : (
@@ -1430,7 +1456,7 @@ export function CreateAgentDialog({
 								>
 									{roleIsPending ? (
 										<>
-											<Loader2 className="size-4 mr-1.5 animate-spin" />
+											<Spinner aria-hidden="true" className="mr-1.5" />
 											{roleChange === "remove"
 												? t("agents.detail.globalRole.removing")
 												: t("agents.detail.globalRole.assigning")}

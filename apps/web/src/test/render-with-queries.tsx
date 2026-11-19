@@ -4,7 +4,11 @@ import type { ReactElement } from "react";
 
 import { myPermissionsQueryOptions } from "@/lib/admin-api";
 import { actionsToPolicy } from "@/lib/policy";
-import { platformRolesQueryOptions, type Role } from "@/lib/role-api";
+import {
+	platformRolesInfiniteQueryOptions,
+	type Role,
+	rolesByIdsQueryOptions,
+} from "@/lib/role-api";
 
 /** A workspace role granting the actions in `permissions` (those set to true). */
 export function makeRole(
@@ -35,6 +39,9 @@ interface RenderWithQueriesOptions {
 	permissions?: string[];
 	/** The global roles list; `null` leaves it unloaded so a test can drive it. */
 	roles?: Role[] | null;
+	/** Id sets a component looks roles up by (e.g. the roles an account holds);
+	 *  each is seeded from `roles` so the lookup resolves without a request. */
+	heldRoleIds?: string[][];
 }
 
 /**
@@ -45,7 +52,11 @@ interface RenderWithQueriesOptions {
  */
 export function renderWithQueries(
 	ui: ReactElement,
-	{ permissions = [], roles = [] }: RenderWithQueriesOptions = {},
+	{
+		permissions = [],
+		roles = [],
+		heldRoleIds = [],
+	}: RenderWithQueriesOptions = {},
 ) {
 	const client = new QueryClient({
 		defaultOptions: {
@@ -54,7 +65,27 @@ export function renderWithQueries(
 		},
 	});
 	client.setQueryData(myPermissionsQueryOptions.queryKey, permissions);
-	if (roles) client.setQueryData(platformRolesQueryOptions.queryKey, roles);
+	if (roles) {
+		client.setQueryData(platformRolesInfiniteQueryOptions("").queryKey, {
+			pages: [
+				{
+					items: roles,
+					page_size: 30,
+					next_cursor: null,
+					total_count: roles.length,
+				},
+			],
+			pageParams: [undefined],
+		});
+		// Roles looked up by id (the ones an account holds) are seeded for each
+		// id set the test says a component will ask for.
+		for (const ids of heldRoleIds) {
+			client.setQueryData(
+				rolesByIdsQueryOptions(undefined, ids).queryKey,
+				roles.filter((r) => ids.includes(r.id)),
+			);
+		}
+	}
 
 	const wrap = (node: ReactElement) => (
 		<QueryClientProvider client={client}>{node}</QueryClientProvider>

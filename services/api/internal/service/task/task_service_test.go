@@ -354,6 +354,10 @@ func (r *fakeTaskRepo) FindTaskByNumber(_ context.Context, projectID uuid.UUID, 
 	return nil, taskdom.ErrTaskNotFound
 }
 
+func (r *fakeTaskRepo) FindTaskByKey(_ context.Context, _ string, _ int64) (*taskdom.Task, error) {
+	return nil, taskdom.ErrTaskNotFound
+}
+
 func (r *fakeTaskRepo) CreateTask(_ context.Context, t *taskdom.Task) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1213,6 +1217,31 @@ func TestUpdateTask_OK(t *testing.T) {
 	}
 	if updated.Importance != 5 {
 		t.Errorf("expected Importance=5, got %d", updated.Importance)
+	}
+}
+
+// If-Match: an update that names the version it saw applies only while the task
+// is still at that version, checked on the locked read.
+func TestUpdateTask_IfVersionRefusesAStaleWrite(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTaskRepo()
+	svc := tasksvc.New(repo)
+	task, _ := svc.CreateTask(ctx, taskdom.CreateTaskInput{ProjectID: uuid.New(), Title: "T"})
+	repo.tasks[task.ID].Version = 5
+
+	stale, fresh := int64(4), int64(5)
+	if _, err := svc.UpdateTask(ctx, task.ProjectID, task.ID, taskdom.UpdateTaskInput{Title: "stale", IfVersion: &stale}); !errors.Is(err, taskdom.ErrVersionConflict) {
+		t.Fatalf("a stale version must conflict, got %v", err)
+	}
+	if got, _ := svc.GetTask(ctx, task.ProjectID, task.ID); got.Title != "T" {
+		t.Errorf("a refused write must change nothing, title = %q", got.Title)
+	}
+	if updated, err := svc.UpdateTask(ctx, task.ProjectID, task.ID, taskdom.UpdateTaskInput{Title: "fresh", IfVersion: &fresh}); err != nil || updated.Title != "fresh" {
+		t.Fatalf("the current version must apply: %v %v", updated, err)
+	}
+	// No precondition: as it always was.
+	if _, err := svc.UpdateTask(ctx, task.ProjectID, task.ID, taskdom.UpdateTaskInput{Title: "anyway"}); err != nil {
+		t.Fatalf("a write without If-Match must apply: %v", err)
 	}
 }
 
@@ -2232,8 +2261,16 @@ func (r *fakeTaskRepo) DeleteCustomFieldDefinition(_ context.Context, id uuid.UU
 
 // --- TaskLinkRepository stubs -----------------------------------------------
 
-func (r *fakeTaskRepo) ListTaskLinks(_ context.Context, _ uuid.UUID) ([]*taskdom.TaskLink, error) {
+func (r *fakeTaskRepo) ListTaskLinks(_ context.Context, _ uuid.UUID, _ *string, _ int) ([]*taskdom.TaskLink, bool, int, error) {
+	return []*taskdom.TaskLink{}, false, 0, nil
+}
+
+func (r *fakeTaskRepo) ListAllTaskLinks(_ context.Context, _ uuid.UUID) ([]*taskdom.TaskLink, error) {
 	return []*taskdom.TaskLink{}, nil
+}
+
+func (r *fakeTaskRepo) ListProjectTaskLinks(_ context.Context, _ uuid.UUID, _ taskdom.LinkType, _ *string, _ int) ([]*taskdom.TaskLink, bool, error) {
+	return []*taskdom.TaskLink{}, false, nil
 }
 
 func (r *fakeTaskRepo) FindTaskLinkByID(_ context.Context, _ uuid.UUID) (*taskdom.TaskLink, error) {
@@ -2515,6 +2552,93 @@ func TestUpdateCustomFieldDefinition_OK(t *testing.T) {
 	}
 }
 
+func TestUpdateCustomFieldDefinition_UseInSearch(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTaskRepo()
+	svc := tasksvc.New(repo)
+
+	f, err := svc.CreateCustomFieldDefinition(ctx, taskdom.CreateCustomFieldDefinitionInput{
+		ProjectID:   uuid.New(),
+		FieldKey:    "tracking_no",
+		DisplayName: "Tracking No",
+		FieldType:   taskdom.FieldTypeText,
+		UseInSearch: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !f.UseInSearch {
+		t.Fatal("expected UseInSearch=true after create")
+	}
+
+	// Omitted use_in_search must leave the value unchanged.
+	updated, err := svc.UpdateCustomFieldDefinition(ctx, f.ProjectID, f.ID, taskdom.UpdateCustomFieldDefinitionInput{DisplayName: "Tracking"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !updated.UseInSearch {
+		t.Error("expected UseInSearch to stay true when omitted")
+	}
+
+	off := false
+	updated, err = svc.UpdateCustomFieldDefinition(ctx, f.ProjectID, f.ID, taskdom.UpdateCustomFieldDefinitionInput{UseInSearch: &off})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.UseInSearch {
+		t.Error("expected UseInSearch=false after explicit update")
+	}
+}
+
+func TestCustomFieldDefinition_LongTextRows(t *testing.T) {
+	ctx := context.Background()
+	svc := tasksvc.New(newFakeTaskRepo())
+	projectID := uuid.New()
+
+	create := func(key string, ft taskdom.FieldType, rows int) *taskdom.CustomFieldDefinition {
+		t.Helper()
+		f, err := svc.CreateCustomFieldDefinition(ctx, taskdom.CreateCustomFieldDefinitionInput{
+			ProjectID: projectID, FieldKey: key, DisplayName: key, FieldType: ft, Rows: rows,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return f
+	}
+
+	for _, tc := range []struct{ in, want int }{{0, 3}, {1, 2}, {8, 8}, {99, 20}} {
+		if got := create(fmt.Sprintf("lt%d", tc.in), taskdom.FieldTypeLongText, tc.in).Rows; got != tc.want {
+			t.Errorf("long_text rows %d: got %d, want %d", tc.in, got, tc.want)
+		}
+	}
+
+	// rows is ignored by other types.
+	text := create("txt", taskdom.FieldTypeText, 10)
+	if text.Rows != taskdom.DefaultLongTextRows {
+		t.Errorf("text rows: got %d, want default", text.Rows)
+	}
+	ten := 10
+	updated, err := svc.UpdateCustomFieldDefinition(ctx, projectID, text.ID, taskdom.UpdateCustomFieldDefinitionInput{Rows: &ten})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.Rows != taskdom.DefaultLongTextRows {
+		t.Errorf("text rows after update: got %d, want default", updated.Rows)
+	}
+
+	// Omitted rows keeps the value; explicit rows is clamped.
+	lt := create("lt2", taskdom.FieldTypeLongText, 8)
+	updated, _ = svc.UpdateCustomFieldDefinition(ctx, projectID, lt.ID, taskdom.UpdateCustomFieldDefinitionInput{DisplayName: "x"})
+	if updated.Rows != 8 {
+		t.Errorf("omitted rows: got %d, want 8", updated.Rows)
+	}
+	big := 50
+	updated, _ = svc.UpdateCustomFieldDefinition(ctx, projectID, lt.ID, taskdom.UpdateCustomFieldDefinitionInput{Rows: &big})
+	if updated.Rows != 20 {
+		t.Errorf("clamped rows: got %d, want 20", updated.Rows)
+	}
+}
+
 func TestUpdateCustomFieldDefinition_InvalidType(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeTaskRepo()
@@ -2757,4 +2881,8 @@ func (f *fakeTaskRepo) CountTasksOfType(_ context.Context, typeID uuid.UUID) (in
 		}
 	}
 	return n, nil
+}
+
+func (r *fakeTaskRepo) ListGroupColumns(_ context.Context, _ uuid.UUID, _ taskdom.TaskFilter, _, _ string) ([]taskdom.GroupColumn, error) {
+	return nil, nil
 }

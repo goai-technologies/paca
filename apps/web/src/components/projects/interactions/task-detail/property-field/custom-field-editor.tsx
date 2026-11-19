@@ -5,6 +5,7 @@ import { FieldValue } from "../primitives";
 import { CheckboxEditor } from "./checkbox-editor";
 import { SingleDateEditor } from "./date-editor";
 import { displayDate } from "./helpers";
+import { LongTextEditor } from "./long-text-editor";
 import { MultiSelectEditor } from "./multi-select-editor";
 import { NumberEditor } from "./number-editor";
 import { SelectEditor } from "./select-editor";
@@ -17,6 +18,7 @@ export function CustomFieldEditor({
 	rawValue,
 	canEdit,
 	options = [],
+	rows,
 	onChange,
 }: {
 	customType:
@@ -26,10 +28,12 @@ export function CustomFieldEditor({
 		| "Checkbox"
 		| "Select"
 		| "MultiSelect"
-		| "Url";
+		| "Url"
+		| "LongText";
 	rawValue: unknown;
 	canEdit: boolean;
 	options?: CustomFieldOption[];
+	rows?: number;
 	onChange?: (value: unknown) => void;
 }) {
 	const { t } = useTranslation("projects");
@@ -116,6 +120,15 @@ export function CustomFieldEditor({
 				/>
 			);
 		}
+		case "LongText":
+			return (
+				<LongTextEditor
+					value={rawValue != null ? String(rawValue) : null}
+					canEdit={canEdit}
+					rows={rows}
+					onChange={(v) => onChange?.(v)}
+				/>
+			);
 		case "Url":
 			return (
 				<UrlEditor

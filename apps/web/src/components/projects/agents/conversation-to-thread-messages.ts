@@ -1,4 +1,4 @@
-import type { AppendMessage, ThreadMessageLike } from "@assistant-ui/react";
+import type { ChatMessage } from "@/components/chat/types";
 import type {
 	AgentConversation,
 	AgentConversationEvent,
@@ -10,19 +10,6 @@ import {
 	isForbiddenError,
 } from "@/lib/api-error";
 import { parseContextItems } from "@/lib/context-items";
-
-// Our chat runtimes (conversation-view.tsx / ai-chat-float.tsx / the
-// Conversations page's new-conversation composer) only ever send a single
-// text part — there's no attachment UI wired up to any of them (see
-// thread.tsx's Composer comment) — so reject anything else instead of
-// silently dropping it. Returns null rather than throwing so each call site
-// can raise its own translated error message.
-export function extractTextOnlyContent(message: AppendMessage): string | null {
-	if (message.content.length !== 1 || message.content[0]?.type !== "text") {
-		return null;
-	}
-	return message.content[0].text;
-}
 
 // Literal union, not a plain string, so callers can pass this straight into
 // react-i18next's `t()` — its typed key argument rejects a widened `string`
@@ -194,6 +181,19 @@ function extractFileEditorDiff(
 	return null;
 }
 
+// ACP tool_call/tool_call_update carry the tool's input as `rawInput` (any
+// JSON value, often absent on the initial tool_call and filled in by a later
+// update). Rendered as pretty JSON, or verbatim when already a string, so the
+// tool card can show exactly what was run.
+function formatRawInput(rawInput: unknown): string | null {
+	if (rawInput === undefined || rawInput === null) return null;
+	if (typeof rawInput === "string")
+		return rawInput.length > 0 ? rawInput : null;
+	if (typeof rawInput === "object" && Object.keys(rawInput).length === 0)
+		return null;
+	return JSON.stringify(rawInput, null, 2);
+}
+
 type MutableToolCallPart = {
 	type: "tool-call";
 	toolCallId: string;
@@ -270,14 +270,12 @@ function nextToolCallId(current: InProgressMessage, rawId: string): string {
 function toThreadMessage(
 	msg: InProgressMessage,
 	isTrailingAndRunning: boolean,
-): ThreadMessageLike {
+): ChatMessage {
 	return {
 		id: msg.id,
 		role: "assistant",
 		createdAt: msg.createdAt,
-		status: isTrailingAndRunning
-			? { type: "running" }
-			: { type: "complete", reason: "stop" },
+		status: isTrailingAndRunning ? "running" : "complete",
 		content: msg.parts,
 	};
 }
@@ -367,7 +365,7 @@ export function canReplyToConversation(
 }
 
 /**
- * Converts raw conversation events into assistant-ui's ThreadMessageLike[],
+ * Converts raw conversation events into assistant-ui's ChatMessage[],
  * grouping each agent turn's thought/tool-calls/reply into one assistant
  * message's content parts (rather than one bubble per raw event) — the
  * `reasoning`/`tool-call` part types are auto-grouped into collapsible
@@ -379,8 +377,8 @@ export function canReplyToConversation(
 export function eventsToThreadMessages(
 	events: AgentConversationEvent[],
 	isThreadRunning: boolean,
-): ThreadMessageLike[] {
-	const messages: ThreadMessageLike[] = [];
+): ChatMessage[] {
+	const messages: ChatMessage[] = [];
 	let current: InProgressMessage | null = null;
 
 	const flushCurrent = () => {
@@ -427,19 +425,24 @@ export function eventsToThreadMessages(
 		// asked), so without this a chat conversation's own messages
 		// wouldn't render at all, only the agent's replies.
 		if (t === "user_message") {
-			const text = extractAcpBlockText(p.content);
-			if (!text) continue;
-			flushCurrent();
+			const text = extractAcpBlockText(p.content) ?? "";
 			// context_items (snake_case, as persisted by
 			// services/agent-runner's handler.go) round-trips back into the
 			// camelCase ContextItem[] shape here so thread.tsx's UserMessage
 			// can render a read-only badge row via metadata.custom.contextItems.
 			const contextItems = parseContextItems(p.context_items);
+			// A turn with attached context but no typed text still shows its
+			// badges (the bubble hides itself when empty); only a turn with
+			// neither is dropped.
+			if (!text && contextItems.length === 0) continue;
+			flushCurrent();
 			messages.push({
 				id: ev.id,
 				role: "user",
 				createdAt: new Date(ev.created_at),
-				content: [{ type: "text", text }],
+				// No part at all for a context-only turn: an empty text part still
+				// renders a <p>, which would defeat the bubble's empty:hidden.
+				content: text ? [{ type: "text", text }] : [],
 				...(contextItems.length > 0
 					? { metadata: { custom: { contextItems } } }
 					: {}),
@@ -493,7 +496,7 @@ export function eventsToThreadMessages(
 				type: "tool-call",
 				toolCallId: nextToolCallId(current, toolCallId),
 				toolName,
-				argsText: "",
+				argsText: formatRawInput(p.rawInput) ?? "",
 			};
 			current.parts.push(part);
 			const queue = current.openToolCalls.get(toolCallId);
@@ -529,7 +532,9 @@ export function eventsToThreadMessages(
 			// leaves it in place, so a call that gets more than one update
 			// before finishing still accumulates them all onto the same part.
 			const openPart = openQueue?.[0];
+			const argsText = formatRawInput(p.rawInput);
 			if (openPart) {
+				if (argsText) openPart.argsText = argsText;
 				if (resultText) openPart.result = resultText;
 				if (status === "failed") openPart.isError = true;
 				if (diffs) openPart.artifact = { diffs };
@@ -546,7 +551,7 @@ export function eventsToThreadMessages(
 					type: "tool-call",
 					toolCallId: nextToolCallId(current, rawId),
 					toolName: "tool",
-					argsText: "",
+					argsText: argsText ?? "",
 					result: resultText,
 					...(status === "failed" ? { isError: true } : {}),
 					...(diffs ? { artifact: { diffs } } : {}),

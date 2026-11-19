@@ -10,6 +10,7 @@
 				"taskStatuses": "タスクステータス",
 				"taskTypes": "タスクタイプ",
 				"customFields": "カスタムフィールド",
+				"git": "Git",
 				"jev": "Jev AI",
 				"dangerZone": "危険な操作",
 				"plugins": "プラグイン",
@@ -20,6 +21,195 @@
 					"title": "このタブを表示する権限がありません",
 					"description": "{{pluginName}}へのアクセス権限をプロジェクトのオーナーまたは管理者に依頼してください。"
 				}
+			}
+		},
+		"git": {
+			"title": "Git リポジトリ",
+			"description": "このプロジェクトのエージェントが、下の接続を通じて作業できるリポジトリです。",
+			"empty": {
+				"title": "リンク済みのリポジトリはありません",
+				"description": "リポジトリをリンクすると、このプロジェクトのエージェントがコードを読み、プルリクエストを作成し、メンションに応答できます。",
+				"readOnly": "リポジトリをリンクするには、このプロジェクトの Git 書き込み権限が必要です。",
+				"noConnection": "まず接続を追加し、その接続を通じてリポジトリをリンクしてください。"
+			},
+			"noProviders": "Git プロバイダーがインストールされていません。管理者にインストールを依頼してください。",
+			"link": {
+				"platform": "プラットフォーム",
+				"repository": "リポジトリ",
+				"placeholder": "owner/name またはリポジトリ URL",
+				"button": "リンク",
+				"open": "リポジトリをリンク",
+				"cancel": "キャンセル",
+				"help": "リポジトリの URL を貼り付けるか、owner/name を入力します。",
+				"noConnection": "リポジトリをリンクする前に、上で {{provider}} の接続を追加してください。",
+				"connection": "接続",
+				"anyConnection": "リポジトリを参照できる任意の接続",
+				"connectionHelp": "複数の接続（たとえば 2 つの組織）がリポジトリを参照できる場合は、1 つ選択してください。",
+				"description": "説明（任意）",
+				"descriptionPlaceholder": "例: プロダクトの Web クライアント",
+				"descriptionHelp": "このリポジトリの用途をエージェントに伝え、適切なリポジトリを選べるようにします。1000 文字まで。",
+				"title": "リポジトリをリンク",
+				"dialogDescription": "このプロジェクトのエージェントが作業するプラットフォームとリポジトリを選択します。"
+			},
+			"picker": {
+				"browse": "リポジトリを参照",
+				"unsupported": "この接続ではリポジトリを一覧できません。このウィンドウを閉じて、パスまたは URL を入力してください。",
+				"error": "一覧を読み込めませんでした。このウィンドウを閉じて、パスまたは URL を入力してください。",
+				"empty": "リポジトリが見つかりません。",
+				"linked": "リンク済み",
+				"private": "プライベート",
+				"title": "リポジトリを参照",
+				"description": "この接続から見えるものをスクロールして確認し、1 つ選んでリポジトリ欄に入力します。"
+			},
+			"unlink": {
+				"button": "リンク解除",
+				"confirm": "解除を確認",
+				"cancel": "キャンセル"
+			},
+			"resumed": "お帰りなさい。{{repository}} をリンクしてください。",
+			"access": {
+				"title": "この接続はこのリポジトリを参照できません",
+				"description": "{{provider}} のアプリは、インストールされたアカウントのリポジトリしか参照できません。{{owner}} にインストールしてください（プラットフォームに移動し、ここに戻ります）。その後もう一度リンクします。",
+				"descriptionNoOwner": "{{provider}} のアプリは、インストールされたアカウントのリポジトリしか参照できません。インストール先を選んでください（プラットフォームに移動し、ここに戻ります）。その後もう一度リンクします。",
+				"button": "{{owner}} にインストール",
+				"buttonNoOwner": "インストール先を選ぶ",
+				"connection": "インストールする接続",
+				"choose": "接続を選択"
+			},
+			"errors": {
+				"generic": "問題が発生しました。もう一度お試しください。",
+				"setupInvalid": "このリンクは無効、期限切れ、または使用済みです。最初からやり直してください。",
+				"identityExists": "ここにはすでに ID があります。",
+				"publicUrlRequired": "インスタンスの公開 URL（PUBLIC_URL）が設定されていません。",
+				"providerUnavailable": "Git プロバイダープラグインを利用できません。",
+				"providerRejected": "プラットフォームがリクエストを拒否しました。",
+				"providerDetail": "プラットフォームからの詳細: {{message}}",
+				"notFound": "見つかりません。",
+				"accessNotGranted": "この接続はこのリポジトリを参照できません。",
+				"noIdentity": "このプラットフォームで使える接続がまだありません。「接続」で追加してください。",
+				"alreadyLinked": "このリポジトリはすでにプロジェクトにリンクされています。",
+				"identityRequired": "複数の接続がこのリポジトリを参照できます。使用する接続を選んでください。",
+				"notVisible": "このプロジェクトのどの接続もこのリポジトリを参照できません。アクセス権のある接続を追加してください（GitLab ではそのプロジェクトまたはグループのトークン）。その後もう一度お試しください。",
+				"descriptionTooLong": "説明が長すぎます（最大 1000 文字）。"
+			},
+			"triggerKinds": {
+				"mention": {
+					"label": "メンション",
+					"description": "コメント、レビュー、説明文でボットがメンションされたとき。"
+				},
+				"own_cr_feedback": {
+					"label": "自分のプルリクエストへのフィードバック",
+					"description": "このエージェントが作成したプルリクエストにレビューやコメントが付いたとき。"
+				},
+				"ci_failure": {
+					"label": "自分のプルリクエストでの CI 失敗",
+					"description": "このエージェントが作成したプルリクエストの最新コミットでチェックが失敗したとき(試行は数回まで)。"
+				},
+				"review_request": {
+					"label": "レビュー依頼",
+					"description": "ボットがレビュアーに指定されたとき(プラットフォームが対応している場合)。"
+				},
+				"assignment": {
+					"label": "アサイン",
+					"description": "ボットが Issue やプルリクエストにアサインされたとき(プラットフォームが対応している場合)。"
+				},
+				"label": {
+					"label": "ラベル",
+					"description": "Issue やプルリクエストにラベル「paca」(または「paca:<エージェントのハンドル>」)が付いたとき。"
+				},
+				"auto_review": {
+					"label": "すべてのプルリクエストをレビュー",
+					"description": "新しいプルリクエストを自動でレビューします。オンにするまで無効です。ドラフトとエージェント自身のプルリクエストは対象外です。"
+				}
+			},
+			"repositories": {
+				"title": "リポジトリ",
+				"description": "このプロジェクトのエージェントは、これらのリポジトリで作業できます。",
+				"mention": "コメントでメンション:",
+				"noDescription": "説明なし",
+				"addDescription": "説明を追加",
+				"editDescription": "説明を編集",
+				"saveDescription": "保存",
+				"cancelDescription": "キャンセル",
+				"descriptionLabel": "リポジトリの説明"
+			},
+			"automation": {
+				"title": "自動化",
+				"description": "Git 上の動きがどのようにエージェントを起動するかを設定します。",
+				"locked": "まずリポジトリをリンクしてください。この設定は、このプロジェクトにリンクされたリポジトリに適用されます。",
+				"responder": {
+					"label": "デフォルトの応答エージェント",
+					"none": "デフォルトの応答エージェントなし",
+					"help": "エージェントを指定しないメンション、ラベル、レビュー依頼に応答します。メンションに「agent:<handle>」を付けると別のエージェントを指定できます。",
+					"warning": "デフォルトの応答エージェントがないと、エージェントを指定しないメンションは無視されます。"
+				},
+				"minPermission": {
+					"label": "エージェントを起動するのに必要な最低権限",
+					"help": "リポジトリへの権限がこれより低い人はコメントできますが、エージェントは実行されません。"
+				},
+				"permission": {
+					"read": "読み取り",
+					"triage": "トリアージ",
+					"write": "書き込み",
+					"maintain": "メンテナンス",
+					"admin": "管理者"
+				},
+				"paused": {
+					"label": "自動化を一時停止",
+					"help": "一時停止中は、Git の動きでエージェントは起動しません。実行中のものは完了します。"
+				},
+				"save": "保存",
+				"saved": "保存しました。",
+				"advanced": "詳細設定"
+			},
+			"usage": {
+				"title": "使い方",
+				"description": "Git プラットフォームからエージェントを起動する 3 つの方法です。",
+				"mention": {
+					"title": "ボットにメンションする",
+					"description": "Issue またはプルリクエストにコメントします。デフォルトの応答エージェントが答えます。"
+				},
+				"pick": {
+					"title": "エージェントを指定する",
+					"description": "メンションに agent:<handle> を加えると、応答するエージェントを選べます。"
+				},
+				"label": {
+					"title": "ラベルを付ける",
+					"description": "Issue またはプルリクエストに「paca」ラベルを付けます。"
+				},
+				"automatic": "エージェントは、自分のプルリクエストのフォローアップや新規プルリクエストすべてのレビューなど、自動で起動することもできます。各エージェントの Git タブで有効にします。"
+			},
+			"connections": {
+				"title": "接続",
+				"description": "Paca がリポジトリにアクセスするために使う GitHub アプリとアクセストークンです。プロジェクトには異なる組織の接続を複数持てます。各接続は、すべてのプロジェクトで共有するか、このプロジェクトに限定されます。",
+				"add": "{{provider}} を追加",
+				"empty": {
+					"title": "接続はまだありません",
+					"description": "Paca がリポジトリにアクセスできるよう接続を追加してください。アプリを使うか、プラットフォームにアプリがない場合はアクセストークンを貼り付けます。",
+					"noPermission": "Git 接続を管理できる人に追加を依頼してください。"
+				},
+				"scope": {
+					"shared": "すべてのプロジェクト",
+					"project": "このプロジェクト"
+				},
+				"expires": "{{date}} に期限切れ",
+				"expired": "期限切れ",
+				"remove": "削除"
+			},
+			"webhook": {
+				"title": "このリポジトリのイベントが Paca に届いていません",
+				"description": "Paca はこの接続を通じてこのリポジトリに Webhook を登録できませんでした。",
+				"permissionHint": "最も多い原因は、トークンに Webhook を管理する権限がないことです（GitLab は Maintainer ロール、GitHub は Webhooks 権限）。トークンにその権限を付与して（GitLab では Maintainer ロールの新しいトークンを作成し、接続として追加）、再試行してください。",
+				"retry": "再試行",
+				"descriptionNotTried": "Paca はまだこのリポジトリに Webhook を登録していません(たとえば、以前のバージョンのプラグインから引き継がれたリポジトリです)。登録すると、イベントの受信が始まります。",
+				"register": "Webhook を登録",
+				"failed": "Webhook をまだ登録できませんでした。"
+			},
+			"reconnect": {
+				"title": "このリポジトリには接続がありません",
+				"description": "接続が削除されたため、このリポジトリは使えません。リポジトリを参照できる接続で再接続してください。",
+				"noConnection": "接続が削除されました。まずリポジトリを参照できる接続を追加してから、再接続してください。",
+				"button": "再接続"
 			}
 		}
 	},
@@ -61,6 +251,7 @@
 			"acpProviderCodex": "Codex",
 			"acpProviderGeminiCli": "Gemini CLI",
 			"acpProviderGoose": "Goose",
+			"acpProviderOpenCode": "OpenCode",
 			"acpProviderCustom": "カスタム…",
 			"acpCommandLabel": "コマンド",
 			"acpCommandPlaceholder": "npx -y my-acp-server",
@@ -154,6 +345,7 @@
 			"stepSkillMcpDescription": "このエージェント自身のMCPキーを一度生成し、以下の両方のコマンドを実行してください — ツール呼び出しはあなたではなくエージェントのアクティビティとして記録されます。",
 			"stepSkillMcpSkillLabel": "スキルをインストール:",
 			"stepSkillMcpConnectLabel": "MCPサーバーに接続:",
+			"stepSkillMcpConnectLabelConfig": "これを {{file}} に追加してください（既存の \"{{section}}\" セクションがある場合は統合します）:",
 			"step3NotAvailable": "自動インストールはClaude Code、Gemini CLI、Codexで利用できます。{{provider}}には既知のカスタムプロンプトインストーラーがまだありません — 下記のPacaのMCPツールはこれがなくても機能します。",
 			"step3ViewContent": "スキルの内容を見る",
 			"step4NoKeyYet": "キーを生成すると設定コマンドが表示されます。",
@@ -173,7 +365,8 @@
 				"skills": "スキル",
 				"envVars": "環境変数",
 				"globalRole": "グローバルロール",
-				"activity": "アクティビティ"
+				"activity": "アクティビティ",
+				"git": "Git"
 			},
 			"globalRole": {
 				"title": "グローバルロール",
@@ -244,6 +437,7 @@
 				"acpProviderCodex": "Codex",
 				"acpProviderGeminiCli": "Gemini CLI",
 				"acpProviderGoose": "Goose",
+				"acpProviderOpenCode": "OpenCode",
 				"acpProviderCustom": "カスタム…",
 				"acpCommandLabel": "コマンド",
 				"acpCommandHint": "ACPサーバーの起動に使用する、スペース区切りのコマンドです。",
@@ -373,6 +567,69 @@
 			},
 			"system": {
 				"badge": "システム"
+			},
+			"git": {
+				"title": "Git ID",
+				"description": "既定では、このエージェントはワークスペース共有の Git ID で動作します。専用の ID を与えると、コミット、プルリクエスト、コメントが別のボットとして表示されます。その ID を、エージェントが扱うリポジトリのアカウントや組織にインストールしてください。",
+				"providersUnavailable": "このプロジェクトの Git プロバイダーを読み込めませんでした。",
+				"noProviders": {
+					"title": "利用できる Git プラットフォームがありません",
+					"description": "管理者に Git プロバイダープラグインのインストールと接続を依頼してください。その後、エージェントがリポジトリで作業できるようになります。"
+				},
+				"ownIdentity": "専用 ID",
+				"usesShared": "共有 ID を使用",
+				"singleIdentity": "このプラットフォームはホストごとに ID が 1 つのため、共有 ID が使われます。",
+				"remove": "削除",
+				"create": {
+					"title": "このエージェント専用の ID を作成",
+					"description": "コミット、プルリクエスト、コメントが専用ボットとして表示され、名前でメンションできるようになります。プラットフォームで承認し、そのままインストールします。",
+					"button": "ID を作成"
+				},
+				"askAdmin": "ワークスペース管理者に作成を依頼してください。",
+				"install": {
+					"label": "別のアカウントまたは組織にインストール",
+					"placeholder": "アカウントまたは組織（任意）",
+					"button": "インストール",
+					"help": "プラットフォームのインストールページが開きます。名前を空にすると、そこでアカウントを選べます。",
+					"title": "別のアカウントまたは組織にインストール"
+				},
+				"triggers": {
+					"title": "Git トリガー",
+					"description": "このエージェントを起動する Git イベントです。インストール済みの Git プロバイダーが配信できるイベントのみ表示されます。",
+					"filters": {
+						"branches": "対象ブランチを限定",
+						"authors": "作成者を限定",
+						"help": "カンマ区切り。空欄ならすべて対象です。ボットが作成したものをレビューするには、一覧に含める必要があります。",
+						"save": "フィルターを保存"
+					},
+					"unsupported": "接続中の Git プラットフォームでは未対応です。",
+					"groups": {
+						"requests": {
+							"title": "リクエストに応答",
+							"description": "誰かがこのエージェントを呼び出したときに起動します。"
+						},
+						"followUp": {
+							"title": "自分のプルリクエストをフォローアップ",
+							"description": "このエージェントが作成したプルリクエストで動きがあったときに起動します。"
+						},
+						"proactive": {
+							"title": "自発的に動く",
+							"description": "誰も依頼しなくても起動します。デフォルトではオフです。"
+						}
+					}
+				},
+				"identity": {
+					"title": "ID",
+					"description": "このエージェントが各 Git プラットフォームで使うアカウントです。"
+				},
+				"own": {
+					"description": "このエージェントは専用ボットを持つため、コミット、プルリクエスト、コメントが別の名前で表示されます。",
+					"mention": "メンション:"
+				},
+				"shared": {
+					"description": "このエージェントは、他のエージェントと同じくワークスペースの共有ボットを通じて動作します。"
+				},
+				"permissions": "このエージェントが Git でできることはプロジェクトでのロールに従います。読み取りと書き込みはロールの Git 権限によります。プルリクエストの承認とマージは、デフォルトでは許可されません。"
 			}
 		},
 		"conversationView": {
@@ -465,8 +722,24 @@
 				"contextTypeAutomation": "自動化",
 				"contextTypeAnnotation": "コメント",
 				"noContextResults": "結果が見つかりません",
-				"contextSearchMinChars": "検索するには2文字以上入力してください"
+				"contextSearchMinChars": "検索するには2文字以上入力してください",
+				"dialogDescription": "エージェントと共有する項目を検索して選択します。次のメッセージと一緒に送信されます。",
+				"done": "完了",
+				"attachedCount": "{{count}}件を添付中"
 			}
+		},
+		"acpModelEffort": {
+			"modelLabel": "モデル",
+			"modelPlaceholder": "例: claude-sonnet-4-5",
+			"modelHint": "実行に使用するモデル名（任意）。入力したとおりにプロバイダーへ送信されます。空欄の場合はプロバイダーのデフォルトを使用します。",
+			"effortLabel": "推論の労力",
+			"effortDefault": "プロバイダーのデフォルト",
+			"effort_low": "低",
+			"effort_medium": "中",
+			"effort_high": "高",
+			"effort_xhigh": "非常に高",
+			"effort_max": "最大",
+			"effortHint": "任意。プロバイダーが選択したレベルに対応している場合のみ適用されます。"
 		}
 	},
 	"environments": {
@@ -730,6 +1003,15 @@
 			"deleted": "ドキュメントを削除しました",
 			"moved": "ドキュメントを移動しました",
 			"contentChangeDiff": "内容の変更差分"
+		},
+		"managedCopy": {
+			"copyOf": "{{repository}} の {{path}} のコピー",
+			"copyOfAtCommit": "{{repository}} の {{path}} のコピー（{{commit}}）",
+			"locked": "ロック中: リポジトリでファイルを編集してプッシュしてください。",
+			"unlocked": "ここでの編集は、ファイルに取り込まない限り次のプッシュで上書きされます。",
+			"lock": "ロック",
+			"unlock": "ロック解除",
+			"editNotSaved": "最後の編集は保存されていません。"
 		}
 	},
 	"roles": {
@@ -893,6 +1175,26 @@
 			"projectExport": {
 				"label": "プロジェクトデータのエクスポート",
 				"description": "このプロジェクトのタスク（コメントとアクティビティを含む）とドキュメントをエクスポートします"
+			},
+			"gitRead": {
+				"label": "Git の表示",
+				"description": "プロジェクトにリンクされたリポジトリを表示します"
+			},
+			"gitWrite": {
+				"label": "Git の管理",
+				"description": "リポジトリのリンク・解除、リポジトリへのアクセス付与、エージェントによる変更のプッシュを許可します"
+			},
+			"gitApprove": {
+				"label": "変更リクエストの承認",
+				"description": "プルリクエストやマージリクエストを承認します。必須レビューを満たすことがあります。コメントと変更の依頼には Git の管理のみが必要です。"
+			},
+			"gitMerge": {
+				"label": "変更リクエストのマージ",
+				"description": "プルリクエストやマージリクエストをターゲットブランチにマージします。プラットフォーム側のブランチ保護は引き続き適用されます。"
+			},
+			"gitConnectionsManage": {
+				"label": "Git 接続を管理",
+				"description": "このプロジェクトだけが使う GitHub アプリとアクセストークンを追加・削除します。リポジトリのリンクには引き続き Git の書き込み権限が必要です。"
 			}
 		},
 		"permissionGroups": {
@@ -908,7 +1210,8 @@
 			"environments": "環境",
 			"annotations": "Annotations",
 			"workflows": "自動化",
-			"plugins": "プラグイン"
+			"plugins": "プラグイン",
+			"git": "Git"
 		}
 	},
 	"settings": {
@@ -1032,7 +1335,8 @@
 				"displayName": "表示名",
 				"fieldKey": "フィールドキー",
 				"type": "タイプ",
-				"required": "必須"
+				"required": "必須",
+				"useInSearch": "検索に使用"
 			},
 			"yes": "はい",
 			"no": "いいえ",
@@ -1054,6 +1358,8 @@
 			"noColor": "色なし",
 			"requiredLabel": "必須",
 			"requiredHint": "タスクの作成・編集時にユーザーはこのフィールドを入力する必要があります。",
+			"useInSearchLabel": "検索に使用",
+			"useInSearchHint": "タスク検索でこのフィールドの値も対象になります。",
 			"fieldTypes": {
 				"text": "テキスト",
 				"number": "数値",
@@ -1061,7 +1367,8 @@
 				"checkbox": "チェックボックス",
 				"select": "選択",
 				"multiSelect": "複数選択",
-				"url": "URL"
+				"url": "URL",
+				"longText": "長文テキスト"
 			},
 			"createDialog": {
 				"title": "カスタムフィールドを作成",
@@ -1092,7 +1399,9 @@
 			"noPermission": {
 				"title": "You don't have permission to view custom fields",
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
-			}
+			},
+			"rowsLabel": "表示行数",
+			"rowsHint": "編集時に表示する行数（{{min}}〜{{max}}）。"
 		},
 		"jev": {
 			"title": "Jev AI",
@@ -1376,7 +1685,8 @@
 		"common": {
 			"empty": "空",
 			"dash": "—",
-			"unassigned": "未割り当て"
+			"unassigned": "未割り当て",
+			"none": "なし"
 		},
 		"notFound": {
 			"title": "タスクが見つかりません",
@@ -1504,7 +1814,8 @@
 				"checkbox": "チェックボックス",
 				"select": "選択",
 				"multiSelect": "複数選択",
-				"url": "URL"
+				"url": "URL",
+				"longText": "長文テキスト"
 			}
 		},
 		"addTaskLinkModal": {
@@ -1538,7 +1849,8 @@
 				"datePlaceholder": "日付",
 				"clearDate": "日付をクリア",
 				"startDate": "開始日",
-				"dueDate": "期日"
+				"dueDate": "期日",
+				"clearDates": "日付をクリア"
 			},
 			"storyPointsEditor": {
 				"decrease": "ストーリーポイントを減らす",
@@ -1642,6 +1954,66 @@
 			"projectClear": "プロジェクトをクリア",
 			"projectEmpty": "選択できるプロジェクトがありません",
 			"projectUnknown": "不明なプロジェクト"
+		},
+		"git": {
+			"branches": "ブランチ",
+			"pullRequests": "プルリクエスト",
+			"linkBranch": "ブランチをリンク",
+			"newBranch": "新しいブランチ",
+			"linkPullRequest": "プルリクエストをリンク",
+			"noBranches": "リンクされたブランチはまだありません。",
+			"noPullRequests": "リンクされたプルリクエストはまだありません。",
+			"by": "作成者: {{author}}",
+			"unlink": "リンク解除",
+			"unlinkPullRequest": "プルリクエスト {{name}} のリンクを解除",
+			"unlinkBranch": "ブランチ {{name}} のリンクを解除",
+			"copyCheckout": "checkout コマンドをコピー",
+			"copy": "コピー",
+			"copied": "コピーしました",
+			"state": {
+				"open": "オープン",
+				"draft": "ドラフト",
+				"merged": "マージ済み",
+				"closed": "クローズ"
+			},
+			"ci": {
+				"passing": "CI 成功",
+				"failing": "CI 失敗",
+				"pending": "CI 実行中",
+				"failingNames": "失敗: {{names}}",
+				"counts": "{{total}} 件中 {{passed}} 件のチェックが成功"
+			},
+			"forms": {
+				"selectRepository": "リポジトリを選択…",
+				"cancel": "キャンセル",
+				"pullRequest": "プルリクエスト",
+				"pullRequestHint": "プルリクエストのリンクを貼り付けるか、番号を入力してください。",
+				"willLink": "{{repository}} の {{what}} をリンクします",
+				"repository": "リポジトリ",
+				"linkPullRequest": "プルリクエストをリンク",
+				"existingBranch": "既存のブランチ",
+				"branchHint": "ブランチ名を入力するか、そのリンクを貼り付けてください。",
+				"linkBranch": "ブランチをリンク",
+				"branchType": "種類",
+				"branchName": "ブランチ名",
+				"branchFrom": "作成元",
+				"branchFromHint": "任意 — 既定ではリポジトリの既定ブランチです。",
+				"createBranch": "ブランチを作成",
+				"orLocally": "またはローカルで作成"
+			},
+			"errors": {
+				"notFound": "そのリポジトリには見つかりませんでした。",
+				"rejected": "Git プラットフォームがこのリポジトリへのリクエストを拒否しました。",
+				"unavailable": "Git プロバイダーが一時的に利用できません。もう一度お試しください。",
+				"noIdentity": "このリポジトリで操作できる Git ID がありません。",
+				"forbidden": "この操作を行う権限がありません。",
+				"generic": "問題が発生しました。もう一度お試しください。",
+				"repoNotLinked": "「{{repository}}」はこのプロジェクトにリンクされていません。",
+				"selectRepository": "リポジトリを選択してください。",
+				"invalidNumber": "番号を入力するか、リンクを貼り付けてください。",
+				"branchRequired": "ブランチ名を入力するか、リンクを貼り付けてください。",
+				"createRefused": "プラットフォームがそのブランチを作成できませんでした(名前が使用済みか無効の可能性があります)。"
+			}
 		}
 	},
 	"portForwardDetail": {
@@ -1813,6 +2185,19 @@
 		"backlog": {
 			"title": "プロダクトバックログ",
 			"description": "スプリントに割り当てられていないすべての作業項目です。"
+		},
+		"subtasks": {
+			"expand": "{{n}} 件のサブタスクを展開",
+			"collapse": "{{n}} 件のサブタスクを折りたたむ",
+			"progress": "{{n}} 件中 {{done}} 件のサブタスクが完了",
+			"loading": "サブタスクを読み込み中",
+			"loadError": "サブタスクを読み込めませんでした。",
+			"retry": "再試行",
+			"matching": "{{total}} 件中 {{n}} 件のサブタスクが現在のフィルターに一致",
+			"noMatch": "現在のフィルターに一致するサブタスクはありません",
+			"loadMore": "さらにサブタスクを読み込む",
+			"add": "サブタスクを追加",
+			"addPlaceholder": "サブタスクのタイトル"
 		}
 	},
 	"conversationsPage": {
@@ -1882,6 +2267,7 @@
 			"deleteView": "ビューを削除",
 			"searchTasksPlaceholder": "タスクを検索…",
 			"pluginNotAvailable": "プラグインを利用できません",
+			"columnsTruncated": "最初の{{max}}列のみ表示されています。一部のタスクはどの列にも表示されません。フィルターで絞り込むと残りを確認できます。",
 			"viewErrors": {
 				"isLastView": "最後のビューは削除できません。",
 				"deleteFailed": "ビューの削除に失敗しました。もう一度お試しください。",
@@ -1955,9 +2341,21 @@
 			"tagsFilter": {
 				"addTag": "タグを追加",
 				"addTagPlaceholder": "タグを追加..."
-			}
+			},
+			"subtasksLabel": "サブタスク",
+			"subtasksCollapsed": "ネスト表示（折りたたみ）",
+			"subtasksExpanded": "ネスト表示（展開）",
+			"subtasksHidden": "非表示（フラット表示）",
+			"ganttDependenciesLabel": "依存関係の矢印",
+			"ganttDependenciesShown": "表示",
+			"ganttDependenciesHidden": "非表示",
+			"unsavedBadge": "未保存の変更",
+			"unsavedTitle": "未保存の変更を破棄しますか？",
+			"unsavedDescription": "このビューの設定を変更しましたが、保存されていません。保存するか、破棄して最後に保存した設定に戻してください。",
+			"keepEditing": "編集を続ける",
+			"discard": "破棄"
 		},
-		"roadmap": {
+		"gantt": {
 			"taskColumnLabel": "タスク",
 			"noTasksToDisplay": "表示するタスクはありません",
 			"noDatesSet": "日付が設定されていません",
@@ -1965,7 +2363,24 @@
 			"startDateTooltip": "開始: {{date}}",
 			"dueDateTooltip": "期日: {{date}}",
 			"loading": "読み込み中…",
-			"viewMore": "もっと見る"
+			"viewMore": "もっと見る",
+			"zoomLabel": "ズーム",
+			"zoom": {
+				"day": "日",
+				"week": "週",
+				"month": "月",
+				"quarter": "四半期",
+				"year": "年"
+			},
+			"today": "今日",
+			"jumpToToday": "今日へ移動",
+			"quarterLabel": "Q{{n}}",
+			"startsBeforeBlocker": "「{{title}}」の終了前に開始します",
+			"resizeStart": "ドラッグして開始日を変更",
+			"resizeEnd": "ドラッグして期日を変更",
+			"rescheduled": "「{{title}}」の日程を変更しました",
+			"undo": "元に戻す",
+			"rescheduleFailed": "タスクの日程を変更できませんでした"
 		},
 		"newViewPopover": {
 			"addView": "ビューを追加",
@@ -1979,7 +2394,7 @@
 			"layouts": {
 				"board": "ボード",
 				"table": "テーブル",
-				"roadmap": "ロードマップ",
+				"gantt": "ガント",
 				"plugin": "プラグイン"
 			}
 		},
@@ -2005,7 +2420,7 @@
 		},
 		"timeline": {
 			"title": "タイムライン",
-			"description": "ロードマップ上でのエピックと長期的な計画。"
+			"description": "ガントチャート上でのエピックと長期的な計画。"
 		},
 		"sprintDetail": {
 			"notFound": "スプリントが見つからないか、アクセスが拒否されました。",
@@ -2081,7 +2496,8 @@
 			"assignee": "担当者",
 			"importance": "重要度",
 			"type": "タイプ",
-			"reporter": "報告者"
+			"reporter": "報告者",
+			"tags": "タグ"
 		},
 		"sortBy": {
 			"manual": "手動",
@@ -2172,7 +2588,14 @@
 			"triggerGroups": {
 				"taskEvents": "タスクイベント",
 				"sprintEvents": "スプリントイベント",
-				"scheduleWebhook": "スケジュールとWebhook"
+				"scheduleWebhook": "スケジュールとWebhook",
+				"taskActivity": "アクティビティとサブタスク"
+			},
+			"git": "Git",
+			"actionGroups": {
+				"taskActions": "タスク",
+				"flowActions": "フローと連携",
+				"sprintActions": "スプリント"
 			}
 		},
 		"nodeKind": {
@@ -2197,7 +2620,12 @@
 			"sprint_created": "スプリント作成",
 			"sprint_started": "スプリント開始",
 			"sprint_completed": "スプリント完了",
-			"sprint_deleted": "スプリント削除"
+			"sprint_deleted": "スプリント削除",
+			"field_changed": "フィールド変更",
+			"comment_added": "コメント追加",
+			"link_added": "リンク追加",
+			"attachment_added": "添付ファイル追加",
+			"child_changed": "サブタスク変更"
 		},
 		"actionTypes": {
 			"update_task": "タスクを更新",
@@ -2205,7 +2633,11 @@
 			"call_api": "APIを呼び出し",
 			"wait": "待機",
 			"update_sprint": "スプリントを更新",
-			"complete_sprint": "スプリントを完了"
+			"complete_sprint": "スプリントを完了",
+			"create_task": "サブタスクを作成",
+			"link_task": "タスクをリンク",
+			"add_comment": "コメントを追加",
+			"notify": "通知を送信"
 		},
 		"nodeConfig": {
 			"save": "保存",
@@ -2246,7 +2678,24 @@
 				"tokenShownOnceWarning": "このトークンを今すぐコピーしてください — 二度と表示されません。",
 				"copy": "コピー",
 				"copied": "コピーしました",
-				"noTokenYet": "トークンはまだ生成されていません"
+				"noTokenYet": "トークンはまだ生成されていません",
+				"fieldLabel": "監視するフィールド",
+				"fieldPlaceholder": "フィールドを選択…",
+				"fieldChangedHint": "タスクのこのフィールドが編集されたときに実行されます。",
+				"childChangedHint": "サブタスクが作成されたりステータスが変わったときに、親タスクに対して実行されます。サブタスクへの条件を追加すると、たとえば全て完了したときだけ動作させられます。",
+				"childStatusLabel": "サブタスクが次になったとき",
+				"changedFields": {
+					"sprint": "スプリント",
+					"due_date": "期限",
+					"start_date": "開始日",
+					"title": "タイトル",
+					"story_points": "ストーリーポイント",
+					"reporter": "報告者",
+					"task_type": "タスクタイプ",
+					"parent_task": "親タスク",
+					"description": "説明",
+					"custom_fields": "カスタムフィールド"
+				}
 			},
 			"condition": {
 				"branchesTitle": "分岐",
@@ -2281,8 +2730,14 @@
 					"sprint_status": "スプリントステータス",
 					"sprint_goal": "スプリントの目標",
 					"sprint_start_date": "スプリント開始日",
-					"sprint_end_date": "スプリント終了日"
-				}
+					"sprint_end_date": "スプリント終了日",
+					"child_count": "サブタスク数"
+				},
+				"dateMode": {
+					"fixed": "特定の日付",
+					"relative": "今日を基準"
+				},
+				"relativeHint": "今日からの日数：0 = 今、3 = 3日後、-1 = 昨日。「より前」と 0 の組み合わせで期限切れを表せます。"
 			},
 			"action": {
 				"memberLabel": "担当者",
@@ -2337,7 +2792,58 @@
 				"pluginConditionLabel": "プラグイン条件",
 				"pluginConditionHint": "タスクフィールドの比較の代わりに、このブランチの判定をプラグイン提供の条件に委任します。",
 				"selectPluginPlaceholder": "プラグイン条件を選択…",
-				"addCustomField": "カスタムフィールドを追加…"
+				"addCustomField": "カスタムフィールドを追加…",
+				"createTaskHint": "下で選択したタスクの子として新しいタスクを作成します。必要なフィールドを追加でき、それぞれ固定値、または起動したタスクやその親からのコピーにできます。親にまったく同じタイトルのサブタスクが既にある場合は作成されません。",
+				"createTitlePlaceholder": "{{task.title}} - レビュー",
+				"descriptionLabel": "説明",
+				"ops": {
+					"set": "設定",
+					"replace": "置き換え",
+					"add": "追加",
+					"remove": "削除",
+					"clear": "クリア",
+					"task": "このタスクからコピー",
+					"parent": "親タスクからコピー",
+					"now": "今日"
+				},
+				"clearHint": "このフィールドを空にします。",
+				"dynamicFieldLabel": "コピーするフィールド",
+				"offsetDaysLabel": "ずらす日数",
+				"offsetDaysHint": "正の数は後ろ、負の数は前にずらします。",
+				"dynamicHint": {
+					"task": "実行時に、自動化を起動したタスクからコピーします。値がなければ変更しません。",
+					"parent": "起動したタスクの親タスクからコピーします。親や値がなければ変更しません。",
+					"now": "実行時の今日の日付を、指定した日数だけずらします。"
+				},
+				"addMember": "メンバーを追加…",
+				"removeMember": "メンバーを削除",
+				"commentHint": "自動化によるコメントをタスクに投稿します。",
+				"commentTextLabel": "コメント",
+				"commentPlaceholder": "例：すべてのサブタスクが完了しました。",
+				"notifyHint": "以下の人にタスクに関するアプリ内通知を送ります。",
+				"notifyRecipientsLabel": "通知先",
+				"notifyRecipients": {
+					"assignees": "担当者",
+					"reporter": "報告者",
+					"parent_assignees": "親タスクの担当者"
+				},
+				"notifyMembersLabel": "追加の通知先",
+				"notifyMessageLabel": "メッセージ",
+				"notifyMessagePlaceholder": "例：レビューの準備ができました。",
+				"linkHint": "タスクを別のタスクにリンクします。向きはこのタスク側から読みます。",
+				"linkTypeLabel": "リンクの種類",
+				"linkTypes": {
+					"blocks": "ブロックする",
+					"is_blocked_by": "ブロックされている",
+					"relates_to": "関連する",
+					"duplicates": "重複している",
+					"is_duplicated_by": "重複されている"
+				},
+				"linkToLabel": "リンク先",
+				"createLinkLabel": "親タスクにリンク",
+				"createLinkNone": "リンクなし",
+				"createLinkHint": "必要に応じて新しいタスクを親タスクにリンクします（新タスク側から読みます。例：「ブロックする」＝サブタスクが親をブロック）。",
+				"opsLabel": "このフィールドの適用方法"
 			},
 			"target": {
 				"label": "適用先",
@@ -2345,6 +2851,7 @@
 					"self": "このタスク",
 					"parent": "親タスク",
 					"children": "子タスク",
+					"siblings": "兄弟タスク（親の他のサブタスク）",
 					"blocks": "ブロックしているタスク",
 					"is_blocked_by": "ブロックされているタスク",
 					"relates_to": "関連タスク",
@@ -2372,7 +2879,12 @@
 				"cronSchedule": "{{expression}} に実行",
 				"webhookReady": "Webhook設定済み",
 				"callApiSummary": "{{method}} {{host}}",
-				"jevNoulTrue": "はい"
+				"jevNoulTrue": "はい",
+				"pluginField": "{{field}}: {{value}}",
+				"waitMinutes": "{{minutes}}分待機",
+				"createTaskSummary": "作成: {{title}}",
+				"commentSummary": "コメント: {{text}}",
+				"notifySummary": "通知: {{message}}"
 			},
 			"jev": {
 				"answerTypeLabel": "回答タイプ",
@@ -2398,7 +2910,8 @@
 				"confidenceThresholdLabel": "信頼度のしきい値",
 				"trueThresholdLabel": "「真」のしきい値",
 				"thresholdHint": "これを下回ると、ワークフローは回答を信頼せずElse分岐に従います。"
-			}
+			},
+			"noConfigNeeded": "このノードに設定は不要です。オートメーションがここに到達すると自動的に実行されます。"
 		},
 		"runHistory": {
 			"title": "実行履歴",

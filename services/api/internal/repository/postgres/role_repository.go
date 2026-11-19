@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,33 +91,79 @@ func uuidStrings(ids []uuid.UUID) []string {
 	return out
 }
 
-// ListPlatform implements roledom.Repository.
-func (r *RoleRepository) ListPlatform(ctx context.Context) ([]*roledom.Role, error) {
-	var recs []roleRecord
-	err := r.db.SelectContext(ctx, &recs, `
-		SELECT `+roleCols+`,
-		       (SELECT COUNT(*) FROM role_attachments ra WHERE ra.role_id = r.id) AS attachment_count
-		FROM roles r WHERE r.project_id IS NULL ORDER BY r.name`)
-	if err != nil {
-		return nil, fmt.Errorf("role repo: list platform: %w", err)
+// defaultRolePageSize is the page size role lists use when none is given.
+const defaultRolePageSize = 30
+
+// roleFilterSQL appends the search and id conditions of f (roles aliased r),
+// adding their arguments to sink.
+func roleFilterSQL(f roledom.RoleFilter, sink *argList) string {
+	var q string
+	for _, word := range strings.Fields(f.Search) {
+		p := sink.addArg("%" + escapeLike(word) + "%")
+		q += ` AND (LOWER(r.name) LIKE LOWER(` + p + `) ESCAPE '\' OR LOWER(r.description) LIKE LOWER(` + p + `) ESCAPE '\')`
 	}
-	return entities(recs)
+	if len(f.IDs) > 0 {
+		q += ` AND r.id = ANY(` + sink.addArg(uuidStrings(f.IDs)) + `::uuid[])`
+	}
+	return q
+}
+
+// listRoles runs a paged role query. from/where select the roles (alias r),
+// countExpr is the attachment-count subquery, and shared is the SQL
+// expression that is true for the roles listed after the scope's own (empty
+// for a single group). Pages are ordered by (shared, LOWER(name), id).
+func (r *RoleRepository) listRoles(ctx context.Context, where, countExpr, shared string, sink *argList, filter roledom.RoleFilter, cursorAfter *string, limit int) ([]*roledom.Role, bool, int, error) {
+	if limit <= 0 {
+		limit = defaultRolePageSize
+	}
+	where += roleFilterSQL(filter, sink)
+	var total int
+	if err := r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM roles r WHERE `+where, sink.args...); err != nil {
+		return nil, false, 0, fmt.Errorf("role repo: count: %w", err)
+	}
+	rank := `0::int`
+	if shared != "" {
+		rank = `(CASE WHEN ` + shared + ` THEN 1 ELSE 0 END)`
+	}
+	if cursorAfter != nil && filter.Offset == 0 {
+		sharedRank, name, id, err := roledom.DecodeCursor(*cursorAfter)
+		if err != nil {
+			return nil, false, 0, err
+		}
+		if shared == "" {
+			sharedRank = 0 // a single group: the cursor's own/shared flag does not apply
+		}
+		where += ` AND (` + rank + `, LOWER(r.name), r.id) > (` + sink.addArg(sharedRank) + `::int, LOWER(` + sink.addArg(name) + `::text), ` + sink.addArg(id.String()) + `::uuid)`
+	}
+	var recs []roleRecord
+	q := `SELECT ` + roleCols + `, ` + countExpr + ` AS attachment_count FROM roles r WHERE ` + where +
+		` ORDER BY ` + rank + `, LOWER(r.name), r.id` + fmt.Sprintf(` LIMIT %d OFFSET %d`, limit+1, filter.Offset)
+	if err := r.db.SelectContext(ctx, &recs, q, sink.args...); err != nil {
+		return nil, false, 0, fmt.Errorf("role repo: list: %w", err)
+	}
+	hasMore := len(recs) > limit
+	if hasMore {
+		recs = recs[:limit]
+	}
+	out, err := entities(recs)
+	return out, hasMore, total, err
+}
+
+// ListPlatform implements roledom.Repository.
+func (r *RoleRepository) ListPlatform(ctx context.Context, filter roledom.RoleFilter, cursorAfter *string, limit int) ([]*roledom.Role, bool, int, error) {
+	sink := &argList{}
+	return r.listRoles(ctx, `r.project_id IS NULL`,
+		`(SELECT COUNT(*) FROM role_attachments ra WHERE ra.role_id = r.id)`,
+		"", sink, filter, cursorAfter, limit)
 }
 
 // ListForProject implements roledom.Repository.
-func (r *RoleRepository) ListForProject(ctx context.Context, projectID uuid.UUID) ([]*roledom.Role, error) {
-	var recs []roleRecord
-	err := r.db.SelectContext(ctx, &recs, `
-		SELECT `+roleCols+`,
-		       (SELECT COUNT(*) FROM role_attachments ra WHERE ra.role_id = r.id AND ra.project_id = $1::uuid) AS attachment_count
-		FROM roles r
-		WHERE r.project_id = $1::uuid
-		   OR EXISTS (SELECT 1 FROM role_attachments ra WHERE ra.role_id = r.id AND ra.project_id = $1::uuid)
-		ORDER BY (r.project_id IS NULL), r.name`, projectID.String())
-	if err != nil {
-		return nil, fmt.Errorf("role repo: list for project: %w", err)
-	}
-	return entities(recs)
+func (r *RoleRepository) ListForProject(ctx context.Context, projectID uuid.UUID, filter roledom.RoleFilter, cursorAfter *string, limit int) ([]*roledom.Role, bool, int, error) {
+	sink := &argList{args: []any{projectID.String()}}
+	return r.listRoles(ctx, `(r.project_id = $1::uuid
+		   OR EXISTS (SELECT 1 FROM role_attachments ra WHERE ra.role_id = r.id AND ra.project_id = $1::uuid))`,
+		`(SELECT COUNT(*) FROM role_attachments ra WHERE ra.role_id = r.id AND ra.project_id = $1::uuid)`,
+		`r.project_id IS NULL`, sink, filter, cursorAfter, limit)
 }
 
 // FindByID implements roledom.Repository.

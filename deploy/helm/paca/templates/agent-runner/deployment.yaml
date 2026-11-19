@@ -13,6 +13,10 @@ spec:
       {{- include "paca.selectorLabels" (dict "root" . "component" "agent-runner") | nindent 6 }}
   template:
     metadata:
+      {{- if not .Values.secrets.existingSecret }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      {{- end }}
       labels:
         {{- include "paca.componentLabels" (dict "root" . "component" "agent-runner") | nindent 8 }}
     spec:
@@ -80,6 +84,10 @@ spec:
             # error this comment is here to prevent.
             - name: SANDBOX_NAMESPACE
               value: {{ include "paca.sandboxNamespace" . | quote }}
+            - name: SANDBOX_POD_READY_TIMEOUT
+              value: {{ .Values.agentRunner.sandbox.podReadyTimeout | quote }}
+            - name: SANDBOX_DOCKER_IN_SANDBOX
+              value: {{ .Values.agentRunner.sandbox.dockerInSandbox | quote }}
             - name: SANDBOX_CPU_LIMIT
               value: {{ .Values.agentRunner.sandbox.cpuLimit | quote }}
             - name: SANDBOX_MEMORY_LIMIT

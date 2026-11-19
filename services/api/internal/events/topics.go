@@ -4,6 +4,12 @@ package events
 // fan-out to connected Socket.IO clients.
 const ChannelRealtime = "paca.events"
 
+// IAMEpochKey is the Valkey counter bumped on every announced IAM change (see
+// NotifyIAMChanges). services/realtime polls it, so an iam.changed message it
+// missed (a Pub/Sub gap) is noticed in seconds rather than at its next
+// periodic pass. It never expires and only ever grows.
+const IAMEpochKey = "paca:iam:epoch"
+
 // StreamAnalytics is the Valkey Stream key used for durable analytics and audit log events.
 const StreamAnalytics = "paca.analytics"
 
@@ -83,6 +89,12 @@ const StreamProjectExports = "paca.project_exports"
 
 // Event type constants used in both Pub/Sub messages and Stream entries.
 const (
+	// --- IAM events ---------------------------------------------------------
+	// TopicIAMChanged is published to ChannelRealtime when a role or one of its
+	// attachments changed (see NotifyIAMChanges). services/realtime handles it
+	// itself; it is never delivered to a client.
+	TopicIAMChanged = "iam.changed"
+
 	// --- Auth events --------------------------------------------------------
 	TopicUserCreated = "user.created"
 	TopicUserDeleted = "user.deleted"
@@ -159,7 +171,7 @@ const (
 
 	// --- Notification events ------------------------------------------------
 	// TopicNotificationCreated is published to ChannelRealtime when a new
-	// notification is created.  The payload includes recipient_user_id so the
+	// notification is created.  The payload includes recipient_account_id so the
 	// realtime service can route the event to the correct user room.
 	TopicNotificationCreated = "notification.created"
 

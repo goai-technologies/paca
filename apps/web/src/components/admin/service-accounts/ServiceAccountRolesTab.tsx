@@ -1,8 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck, ShieldOff } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { PermissionSummary } from "@/components/admin/global-roles/permission-summary";
 import { ServiceAccountRoleDialog } from "@/components/admin/service-accounts/ServiceAccountRoleDialog";
 import { InlineNotice } from "@/components/shared/inline-notice";
@@ -10,7 +8,7 @@ import { RoleBadgeList, toRoleBadgeData } from "@/components/shared/role-badge";
 import { Button } from "@/components/ui/button";
 import { useCanAssignGlobalRole } from "@/hooks/use-can-assign-global-role";
 import { usePermissions } from "@/hooks/use-permissions";
-import { platformRolesQueryOptions } from "@/lib/role-api";
+import { useRolesByIds } from "@/hooks/use-role-search";
 import type { ServiceAccount } from "@/lib/service-account-api";
 
 /** How many of the role's permissions to list before folding the rest into "+N". */
@@ -38,12 +36,12 @@ export function ServiceAccountRolesTab({
 
 	// The account only carries its roles' ids and names; what they grant comes
 	// from the roles list, which needs roles:read.
-	const { data: allRoles } = useQuery({
-		...platformRolesQueryOptions,
-		enabled: hasPermission("roles:read"),
-	});
 	const heldIds = account.roles.map((r) => r.id);
-	const heldRoles = (allRoles ?? []).filter((r) => heldIds.includes(r.id));
+	const heldRoles = useRolesByIds(
+		undefined,
+		heldIds,
+		hasPermission("roles:read"),
+	);
 	const hasRole = heldIds.length > 0;
 
 	return (

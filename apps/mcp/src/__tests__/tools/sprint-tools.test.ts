@@ -18,7 +18,9 @@ const sprint = {
 
 function makeClient(overrides: Record<string, any> = {}) {
 	return {
-		listSprints: vi.fn().mockResolvedValue([sprint]),
+		listSprints: vi
+			.fn()
+			.mockResolvedValue({ items: [sprint], nextCursor: null }),
 		getSprint: vi.fn().mockResolvedValue(sprint),
 		createSprint: vi.fn().mockResolvedValue(sprint),
 		updateSprint: vi.fn().mockResolvedValue({ ...sprint, name: "Sprint 2" }),
@@ -48,7 +50,32 @@ describe("handleSprintTool – list_sprints", () => {
 	it("calls client.listSprints with projectId", async () => {
 		const client = makeClient();
 		await handleSprintTool("list_sprints", { projectId: "p1" }, client);
-		expect(client.listSprints).toHaveBeenCalledWith("p1");
+		expect(client.listSprints).toHaveBeenCalledWith("p1", {
+			cursor: undefined,
+			pageSize: undefined,
+		});
+	});
+
+	it("tells the agent how to fetch the next page, and passes the cursor on", async () => {
+		const client = makeClient({
+			listSprints: vi.fn().mockResolvedValue({
+				items: [sprint],
+				nextCursor: "c2",
+				total: 7,
+			}),
+		});
+		const result = await handleSprintTool(
+			"list_sprints",
+			{ projectId: "p1", cursor: "c1", pageSize: 1 },
+			client,
+		);
+		expect(client.listSprints).toHaveBeenCalledWith("p1", {
+			cursor: "c1",
+			pageSize: 1,
+		});
+		const text = result.content[0].text;
+		expect(text).toContain("Showing 1 of 7");
+		expect(text).toContain('call list_sprints again with cursor="c2"');
 	});
 
 	it("returns formatted sprint list", async () => {
@@ -114,7 +141,44 @@ describe("handleSprintTool – create_sprint", () => {
 			name: "Sprint 1",
 			start_date: "2024-01-01",
 			end_date: "2024-01-14",
+			goal: undefined,
 		});
+	});
+
+	it("passes goal through to client.createSprint", async () => {
+		const client = makeClient();
+		await handleSprintTool(
+			"create_sprint",
+			{
+				projectId: "p1",
+				name: "Sprint 1",
+				startDate: "2024-01-01",
+				endDate: "2024-01-14",
+				goal: "Ship the demo",
+			},
+			client,
+		);
+		expect(client.createSprint).toHaveBeenCalledWith(
+			expect.objectContaining({ goal: "Ship the demo" }),
+		);
+	});
+
+	it("accepts goal null on create", async () => {
+		const client = makeClient();
+		await handleSprintTool(
+			"create_sprint",
+			{
+				projectId: "p1",
+				name: "Sprint 1",
+				startDate: "2024-01-01",
+				endDate: "2024-01-14",
+				goal: null,
+			},
+			client,
+		);
+		expect(client.createSprint).toHaveBeenCalledWith(
+			expect.objectContaining({ goal: null }),
+		);
 	});
 
 	it("includes 'created successfully' in response", async () => {
@@ -154,7 +218,50 @@ describe("handleSprintTool – update_sprint", () => {
 			name: "Sprint 2",
 			start_date: undefined,
 			end_date: undefined,
+			goal: undefined,
 		});
+	});
+
+	it("passes goal through to client.updateSprint", async () => {
+		const client = makeClient();
+		await handleSprintTool(
+			"update_sprint",
+			{ projectId: "p1", sprintId: "s1", goal: "Ship the demo" },
+			client,
+		);
+		expect(client.updateSprint).toHaveBeenCalledWith(
+			"p1",
+			"s1",
+			expect.objectContaining({ goal: "Ship the demo" }),
+		);
+	});
+
+	it("passes goal null through to clear the goal", async () => {
+		const client = makeClient();
+		await handleSprintTool(
+			"update_sprint",
+			{ projectId: "p1", sprintId: "s1", goal: null },
+			client,
+		);
+		expect(client.updateSprint).toHaveBeenCalledWith(
+			"p1",
+			"s1",
+			expect.objectContaining({ goal: null }),
+		);
+	});
+
+	it("sends an empty goal as null so the column is cleared, not blanked", async () => {
+		const client = makeClient();
+		await handleSprintTool(
+			"update_sprint",
+			{ projectId: "p1", sprintId: "s1", goal: "" },
+			client,
+		);
+		expect(client.updateSprint).toHaveBeenCalledWith(
+			"p1",
+			"s1",
+			expect.objectContaining({ goal: null }),
+		);
 	});
 
 	it("includes 'updated successfully' in response", async () => {

@@ -27,6 +27,16 @@ func Load() (*Config, error) {
 	// .env is optional; ignore "file not found" error.
 	_ = godotenv.Load()
 
+	// An unparseable value keeps the permissive default rather than silently
+	// disabling a feature an operator still expects — agent-runner applies the
+	// same rule to the same variable, so the two never disagree.
+	dockerInSandbox := true
+	if v := env("SANDBOX_DOCKER_IN_SANDBOX", ""); v != "" {
+		if parsed, parseErr := strconv.ParseBool(v); parseErr == nil {
+			dockerInSandbox = parsed
+		}
+	}
+
 	accessTTL, err := parseDuration(env("JWT_ACCESS_TTL", "15m"))
 	if err != nil {
 		return nil, fmt.Errorf("config: JWT_ACCESS_TTL: %w", err)
@@ -43,6 +53,11 @@ func Load() (*Config, error) {
 	cookieSecure, err := strconv.ParseBool(env("COOKIE_SECURE", "false"))
 	if err != nil {
 		return nil, fmt.Errorf("config: COOKIE_SECURE: %w", err)
+	}
+
+	proxyHops, err := strconv.Atoi(env("TRUSTED_PROXY_HOPS", "1"))
+	if err != nil || proxyHops < 0 {
+		return nil, fmt.Errorf("config: TRUSTED_PROXY_HOPS must be a non-negative integer, got %q", env("TRUSTED_PROXY_HOPS", "1"))
 	}
 
 	authRateLimit, err := strconv.Atoi(env("AUTH_RATE_LIMIT_PER_MINUTE", "20"))
@@ -158,12 +173,18 @@ func Load() (*Config, error) {
 
 	return &Config{
 		Env: env("ENV", "development"),
+		// Defaults to true: an existing deployment that never set this keeps
+		// offering docker toggles exactly as before.
+		DockerInSandbox: dockerInSandbox,
 		Server: ServerConfig{
 			Port:               env("PORT", "8080"),
 			CookieSecure:       cookieSecure,
 			PublicURL:          env("PUBLIC_URL", ""),
-			CORSAllowedOrigins: parseCORSOrigins(env("CORS_ORIGINS", "*")),
+			WebhookPublicURL:   env("GIT_WEBHOOK_PUBLIC_URL", ""),
+			PasskeyRPID:        env("PASSKEY_RP_ID", ""),
+			CORSAllowedOrigins: parseCommaList(env("CORS_ORIGINS", "*")),
 			AuthRateLimit:      authRateLimit,
+			TrustedProxyHops:   proxyHops,
 		},
 		Database: DatabaseConfig{
 			DSN: dsn,
@@ -203,9 +224,10 @@ func Load() (*Config, error) {
 			EncryptionKey: env("ENCRYPTION_KEY", env("GITHUB_ENCRYPTION_KEY", "")),
 		},
 		Plugins: PluginsConfig{
-			// PLUGINS_STORE controls where WASM binaries are loaded from.
-			// "local" reads from the local filesystem; "s3" reads from the
-			// object-storage bucket configured via STORAGE_* variables.
+			// PLUGINS_STORE controls where installed plugins (backend, frontend,
+			// MCP and skills bundles) are stored. "local" uses the PLUGINS_*_DIR
+			// folders; "s3" uses the object-storage bucket configured via
+			// STORAGE_* variables under PLUGINS_S3_PREFIX.
 			Store:                 env("PLUGINS_STORE", "local"),
 			WASMDir:               env("PLUGINS_WASM_DIR", "./plugins/local/backend"),
 			FrontendDir:           env("PLUGINS_FRONTEND_DIR", "./plugins/local/frontend"),
@@ -214,6 +236,7 @@ func Load() (*Config, error) {
 			S3Prefix:              env("PLUGINS_S3_PREFIX", "plugins"),
 			MarketplaceCatalogURL: env("PLUGINS_MARKETPLACE_CATALOG_URL", "https://raw.githubusercontent.com/Paca-AI/paca-plugins/master/catalog/plugins.json"),
 			MarketplaceTimeout:    marketplaceTimeout,
+			FetchPrivateHosts:     parseCommaList(env("PLUGIN_FETCH_PRIVATE_HOSTS", "")),
 			Limits: PluginLimitsConfig{
 				MaxCallDuration:     pluginMaxCallDuration,
 				MaxMemoryPages:      pluginMaxMemoryPages,
@@ -234,18 +257,18 @@ func Load() (*Config, error) {
 	}, nil
 }
 
-// parseCORSOrigins splits a comma-separated CORS_ORIGINS value into an
-// allow-list, trimming whitespace and dropping empty entries.
-func parseCORSOrigins(v string) []string {
+// parseCommaList splits a comma-separated value into a list, trimming
+// whitespace and dropping empty entries.
+func parseCommaList(v string) []string {
 	parts := strings.Split(v, ",")
-	origins := make([]string, 0, len(parts))
+	items := make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		if p != "" {
-			origins = append(origins, p)
+			items = append(items, p)
 		}
 	}
-	return origins
+	return items
 }
 
 // env returns the environment variable value or a fallback default.

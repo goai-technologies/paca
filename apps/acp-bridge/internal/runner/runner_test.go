@@ -62,7 +62,7 @@ func (c *capturedSends) all() []map[string]any {
 func newTestRunner(t *testing.T) (*Runner, *capturedSends) {
 	t.Helper()
 	sent := newCapturedSends()
-	handler := New(t.TempDir(), Config{}, nil)(sent.send)
+	handler := New(t.TempDir(), Config{StateDir: t.TempDir()}, nil)(sent.send)
 	r, ok := handler.(*Runner)
 	if !ok {
 		t.Fatalf("New's handler is not *Runner (got %T)", handler)
@@ -156,11 +156,11 @@ func TestStartTurnReportsFailureForUnresolvableCustomProvider(t *testing.T) {
 
 func TestInterruptIsANoOpForUnknownOrIdleConversation(t *testing.T) {
 	r, _ := newTestRunner(t)
-	r.Interrupt("does-not-exist")
-	r.Interrupt("")
+	r.Interrupt("does-not-exist", false)
+	r.Interrupt("", false)
 
 	r.conversations["conv-idle"] = &conversationState{chunks: newChunkBuffer()}
-	r.Interrupt("conv-idle") // turnRunning is false; must not panic or block
+	r.Interrupt("conv-idle", false) // turnRunning is false; must not panic or block
 }
 
 // TestHandleUpdateNeverBlocksOnAStalledSend is the core guarantee
@@ -361,6 +361,21 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// recordFakeMethod appends method to the file named by PACA_FAKE_AGENT_LOG
+// (if set) so tests can assert which session calls the runner made.
+func recordFakeMethod(method string) {
+	path := os.Getenv("PACA_FAKE_AGENT_LOG")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = f.WriteString(method + "\n")
+}
+
 func runFakeACPAgent(behavior string) {
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 64*1024), 1<<20)
@@ -382,9 +397,27 @@ func runFakeACPAgent(behavior string) {
 			if behavior == "stall_init" {
 				continue // never respond, simulating a slow npx cold start
 			}
-			write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(msg.ID),
-				"result": map[string]any{"protocolVersion": 1}})
+			result := map[string]any{"protocolVersion": 1}
+			if behavior == "load" || behavior == "load_fail" {
+				result["agentCapabilities"] = map[string]any{"loadSession": true}
+			}
+			write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(msg.ID), "result": result})
+		case "session/load":
+			recordFakeMethod(msg.Method)
+			if behavior == "load_fail" {
+				write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(msg.ID),
+					"error": map[string]any{"code": -32602, "message": "unknown session"}})
+				continue
+			}
+			// History replay precedes the response, per the ACP spec.
+			write(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
+				"sessionId": "sess-old",
+				"update": map[string]any{"sessionUpdate": "agent_message_chunk",
+					"content": map[string]any{"type": "text", "text": "REPLAYED"}},
+			}})
+			write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(msg.ID), "result": map[string]any{}})
 		case "session/new":
+			recordFakeMethod(msg.Method)
 			write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(msg.ID),
 				"result": map[string]any{"sessionId": "sess-1"}})
 		case "session/set_mode":
@@ -475,6 +508,107 @@ func TestEndToEndTurnEmitsEventsAndFinishes(t *testing.T) {
 	want := []string{"user_message", "tool_call", "agent_message_chunk", "turn_end"}
 	if !reflect.DeepEqual(eventTypes, want) {
 		t.Fatalf("event types = %v, want %v", eventTypes, want)
+	}
+}
+
+func userMessagePayload(t *testing.T, sent *capturedSends) (map[string]any, bool) {
+	t.Helper()
+	for _, m := range sent.all() {
+		if m["type"] == "event" && m["event_type"] == "user_message" {
+			var p map[string]any
+			if err := json.Unmarshal(m["payload"].(json.RawMessage), &p); err != nil {
+				t.Fatalf("bad user_message payload: %v", err)
+			}
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+func runDisplayMessageTurn(t *testing.T, msg map[string]any) *capturedSends {
+	t.Helper()
+	setFakeAgentEnv(t, "normal")
+	r, sent := newTestRunner(t)
+	r.mu.Lock()
+	r.conversations["conv-1"] = &conversationState{
+		chunks:      newChunkBuffer(),
+		acpProvider: "custom",
+		command:     []string{os.Args[0]},
+	}
+	r.mu.Unlock()
+	msg["conversation_id"] = "conv-1"
+	msg["project_id"] = "proj-1"
+	r.StartTurn(context.Background(), msg)
+	waitForStatus(t, sent, "finished")
+	return sent
+}
+
+func TestUserMessageUsesDisplayMessageAndContextItems(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns a real subprocess")
+	}
+	items := []any{map[string]any{"type": "task", "id": "t-1", "title": "A task"}}
+	sent := runDisplayMessageTurn(t, map[string]any{
+		"message":         "/paca wrapped prompt ## Current Project Context",
+		"display_message": "what I typed",
+		"context_items":   items,
+	})
+	p, ok := userMessagePayload(t, sent)
+	if !ok {
+		t.Fatal("no user_message event")
+	}
+	text := p["content"].(map[string]any)["text"]
+	if text != "what I typed" {
+		t.Fatalf("user_message text = %q, want the display message", text)
+	}
+	if !reflect.DeepEqual(p["context_items"], items) {
+		t.Fatalf("context_items = %v, want %v", p["context_items"], items)
+	}
+}
+
+func TestUserMessageFallsBackToMessageWhenDisplayMessageAbsent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns a real subprocess")
+	}
+	sent := runDisplayMessageTurn(t, map[string]any{"message": "older server prompt"})
+	p, ok := userMessagePayload(t, sent)
+	if !ok {
+		t.Fatal("no user_message event")
+	}
+	if text := p["content"].(map[string]any)["text"]; text != "older server prompt" {
+		t.Fatalf("user_message text = %q, want the message", text)
+	}
+}
+
+func TestBlankDisplayMessageRecordsNoUserMessage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns a real subprocess")
+	}
+	sent := runDisplayMessageTurn(t, map[string]any{
+		"message":         "/paca wrapped prompt for a bare task assignment",
+		"display_message": "",
+	})
+	if _, ok := userMessagePayload(t, sent); ok {
+		t.Fatal("a blank display_message must not record the prompt-wrapped message")
+	}
+}
+
+func TestBlankDisplayMessageStillRecordsContextItems(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns a real subprocess")
+	}
+	items := []any{map[string]any{"type": "task", "id": "t-1", "title": "A task"}}
+	sent := runDisplayMessageTurn(t, map[string]any{
+		"message":         "/paca wrapped prompt",
+		"display_message": "",
+		"context_items":   items,
+	})
+	p, ok := userMessagePayload(t, sent)
+	if !ok {
+		t.Fatal("no user_message event")
+	}
+	if !reflect.DeepEqual(p["context_items"], items) {
+		t.Fatalf("context_items = %v, want %v", p["context_items"], items)
 	}
 }
 
@@ -573,7 +707,7 @@ func TestEndToEndInterruptSuppressesTurnStatus(t *testing.T) {
 	// sitting inside session/prompt) before interrupting it.
 	waitForEventType(t, sent, "user_message")
 
-	r.Interrupt("conv-1")
+	r.Interrupt("conv-1", false)
 
 	deadline := time.Now().Add(testTimeout)
 	for {
@@ -643,7 +777,7 @@ func TestEndToEndInterruptDuringSessionSetupSuppressesTurnStatus(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	r.Interrupt("conv-1")
+	r.Interrupt("conv-1", false)
 
 	deadline = time.Now().Add(testTimeout)
 	for {
@@ -663,5 +797,133 @@ func TestEndToEndInterruptDuringSessionSetupSuppressesTurnStatus(t *testing.T) {
 		if m["type"] == "turn_status" {
 			t.Fatalf("expected no turn_status for an interrupt during session setup, got %+v", m)
 		}
+	}
+}
+
+func waitForTurnEnd(t *testing.T, state *conversationState) {
+	t.Helper()
+	deadline := time.Now().Add(testTimeout)
+	for {
+		state.mu.Lock()
+		running := state.turnRunning
+		state.mu.Unlock()
+		if !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the interrupted turn to finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestEndToEndPauseReportsFinished: unlike a stop, a pause_turn must report
+// "finished" once the agent honors session/cancel — the API writes no status for
+// a pause, so without this the conversation would stay "running" forever.
+func TestEndToEndPauseReportsFinished(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns a real subprocess")
+	}
+	setFakeAgentEnv(t, "cancel")
+
+	r, sent := newTestRunner(t)
+	state := &conversationState{
+		chunks:      newChunkBuffer(),
+		acpProvider: "custom",
+		command:     []string{os.Args[0]},
+	}
+	r.mu.Lock()
+	r.conversations["conv-1"] = state
+	r.mu.Unlock()
+
+	r.StartTurn(context.Background(), map[string]any{
+		"conversation_id": "conv-1",
+		"project_id":      "proj-1",
+		"message":         "do something long-running",
+	})
+	waitForEventType(t, sent, "user_message")
+
+	r.Interrupt("conv-1", true)
+
+	msg := waitForStatus(t, sent, "finished")
+	if msg["conversation_id"] != "conv-1" {
+		t.Fatalf("finished status for %v, want conv-1", msg["conversation_id"])
+	}
+	waitForTurnEnd(t, state)
+}
+
+// TestEndToEndPauseDuringSessionSetupReportsFinished: the same, when the pause
+// lands while the subprocess is still spawning (Interrupt's client == nil
+// branch, which unwinds via context.Canceled).
+func TestEndToEndPauseDuringSessionSetupReportsFinished(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns a real subprocess")
+	}
+	setFakeAgentEnv(t, "stall_init")
+
+	r, sent := newTestRunner(t)
+	state := &conversationState{
+		chunks:      newChunkBuffer(),
+		acpProvider: "custom",
+		command:     []string{os.Args[0]},
+	}
+	r.mu.Lock()
+	r.conversations["conv-1"] = state
+	r.mu.Unlock()
+
+	r.StartTurn(context.Background(), map[string]any{
+		"conversation_id": "conv-1",
+		"project_id":      "proj-1",
+		"message":         "hi",
+	})
+	deadline := time.Now().Add(testTimeout)
+	for {
+		state.mu.Lock()
+		spawning := state.turnRunning && state.client == nil
+		state.mu.Unlock()
+		if spawning {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the turn to be mid session-setup")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	r.Interrupt("conv-1", true)
+
+	waitForStatus(t, sent, "finished")
+	waitForTurnEnd(t, state)
+}
+
+// TestInterruptStopSupersedesPause: a stop_turn that follows a pause_turn on
+// the same turn clears the pending pause, so the turn reports nothing — the
+// API already wrote "stopped" and a "finished" would overwrite it.
+func TestInterruptStopSupersedesPause(t *testing.T) {
+	r, _ := newTestRunner(t)
+	state := &conversationState{
+		turnRunning: true,
+		turnCancel:  func() {},
+		turnDone:    make(chan struct{}),
+	}
+	r.mu.Lock()
+	r.conversations["conv-1"] = state
+	r.convIndex["conv-1"] = "conv-1"
+	r.mu.Unlock()
+
+	r.Interrupt("conv-1", true)
+	state.mu.Lock()
+	finishRequested := state.finishRequested
+	state.mu.Unlock()
+	if !finishRequested {
+		t.Fatal("pause_turn did not mark the turn as finish-requested")
+	}
+
+	r.Interrupt("conv-1", false)
+	state.mu.Lock()
+	finishRequested = state.finishRequested
+	state.mu.Unlock()
+	if finishRequested {
+		t.Fatal("stop_turn after pause_turn left the turn finish-requested; it would report finished over stopped")
 	}
 }

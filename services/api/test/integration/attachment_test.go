@@ -112,7 +112,7 @@ func (r *fakeAttachmentRepo) DeleteFile(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (r *fakeAttachmentRepo) ListTaskAttachments(_ context.Context, taskID uuid.UUID) ([]*attachmentdom.TaskAttachment, error) {
+func (r *fakeAttachmentRepo) ListTaskAttachments(_ context.Context, taskID uuid.UUID, _ *string, _ int) ([]*attachmentdom.TaskAttachment, bool, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []*attachmentdom.TaskAttachment
@@ -127,7 +127,7 @@ func (r *fakeAttachmentRepo) ListTaskAttachments(_ context.Context, taskID uuid.
 			out = append(out, &cp)
 		}
 	}
-	return out, nil
+	return out, false, len(out), nil
 }
 
 func (r *fakeAttachmentRepo) FindTaskAttachmentByID(_ context.Context, id uuid.UUID) (*attachmentdom.TaskAttachment, error) {

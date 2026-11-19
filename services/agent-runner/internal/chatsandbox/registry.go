@@ -35,10 +35,10 @@ type State struct {
 	// ProjectID is uuid.Nil for a global-chat conversation — see
 	// agent.Trigger.ProjectID's own doc comment on the same convention.
 	ProjectID uuid.UUID
-	// ActorUserID is set only for a global-chat conversation — mirrors
-	// agent.Trigger.ActorUserID.
-	ActorUserID  *uuid.UUID
-	LastActiveAt time.Time
+	// ActorAccountID is set only for a global-chat conversation — mirrors
+	// agent.Trigger.ActorAccountID.
+	ActorAccountID *uuid.UUID
+	LastActiveAt   time.Time
 }
 
 // Registry is a process-local map of conversation_id to its paused chat

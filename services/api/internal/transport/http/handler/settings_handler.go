@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Paca-AI/api/internal/apierr"
 	attachmentdom "github.com/Paca-AI/api/internal/domain/attachment"
 	settingsdom "github.com/Paca-AI/api/internal/domain/settings"
+	"github.com/Paca-AI/api/internal/apierr"
 	"github.com/Paca-AI/api/internal/transport/http/dto"
 	"github.com/Paca-AI/api/internal/transport/http/middleware"
 	"github.com/Paca-AI/api/internal/transport/http/presenter"
@@ -40,6 +40,7 @@ func (h *SettingsHandler) toBrandingResponse(ctx context.Context, ws *settingsdo
 		CommitmentsProjectID: uuidPtrToStringPtr(ws.CommitmentsProjectID),
 		PrimaryColorLight:    ws.PrimaryColorLight,
 		PrimaryColorDark:     ws.PrimaryColorDark,
+		FeedbackEnabled:      ws.FeedbackEnabled,
 	}
 	if h.avatarSvc != nil {
 		resp.LogoURL, _ = h.avatarSvc.ResolveAvatarURL(ctx, ws.LogoKey)
@@ -77,24 +78,8 @@ func (h *SettingsHandler) GetBranding(w http.ResponseWriter, r *http.Request) {
 	presenter.OK(w, r, h.toBrandingResponse(r.Context(), ws))
 }
 
-// actingUserID extracts the authenticated caller's user ID from JWT claims,
-// writing an error response and returning ok=false if absent/invalid.
-func actingUserID(w http.ResponseWriter, r *http.Request) (id uuid.UUID, ok bool) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return uuid.Nil, false
-	}
-	id, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
-		return uuid.Nil, false
-	}
-	return id, true
-}
-
 func (h *SettingsHandler) initiateUpload(w http.ResponseWriter, r *http.Request, slot settingsdom.ImageSlot) {
-	id, ok := actingUserID(w, r)
+	id, ok := requireAccountID(w, r)
 	if !ok {
 		return
 	}
@@ -113,7 +98,7 @@ func (h *SettingsHandler) initiateUpload(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *SettingsHandler) completeUpload(w http.ResponseWriter, r *http.Request, slot settingsdom.ImageSlot) {
-	id, ok := actingUserID(w, r)
+	id, ok := requireAccountID(w, r)
 	if !ok {
 		return
 	}
@@ -132,7 +117,7 @@ func (h *SettingsHandler) completeUpload(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *SettingsHandler) deleteImage(w http.ResponseWriter, r *http.Request, slot settingsdom.ImageSlot) {
-	id, ok := actingUserID(w, r)
+	id, ok := requireAccountID(w, r)
 	if !ok {
 		return
 	}
@@ -185,7 +170,7 @@ func uuidPtrToStringPtr(id *uuid.UUID) *string {
 
 // SetCommitmentsProject handles PUT /admin/settings/commitments-project.
 func (h *SettingsHandler) SetCommitmentsProject(w http.ResponseWriter, r *http.Request) {
-	id, ok := actingUserID(w, r)
+	id, ok := requireAccountID(w, r)
 	if !ok {
 		return
 	}
@@ -219,7 +204,7 @@ func (h *SettingsHandler) SetCommitmentsProject(w http.ResponseWriter, r *http.R
 
 // UpdateSettings handles PATCH /admin/settings.
 func (h *SettingsHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
-	id, ok := actingUserID(w, r)
+	id, ok := requireAccountID(w, r)
 	if !ok {
 		return
 	}
@@ -229,7 +214,7 @@ func (h *SettingsHandler) UpdateSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ws, err := h.svc.UpdateSettings(r.Context(), req.BrandName, req.PrimaryColorLight, req.PrimaryColorDark, id)
+	ws, err := h.svc.UpdateSettings(r.Context(), req.BrandName, req.PrimaryColorLight, req.PrimaryColorDark, req.FeedbackEnabled, id)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return

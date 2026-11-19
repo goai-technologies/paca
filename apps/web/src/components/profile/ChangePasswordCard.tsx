@@ -51,11 +51,13 @@ export function ChangePasswordCard({ mustChange }: ChangePasswordCardProps) {
 			const message =
 				code === ApiErrorCode.InvalidCurrentPassword
 					? t("changePassword.errors.currentPasswordIncorrect")
-					: code === ApiErrorCode.Unauthenticated
-						? t("changePassword.errors.sessionExpired")
-						: code === ApiErrorCode.InternalError
-							? t("changePassword.errors.serverError")
-							: t("changePassword.errors.changeFailed");
+					: code === ApiErrorCode.PasswordLoginDisabled
+						? t("changePassword.errors.passwordLoginDisabled")
+						: code === ApiErrorCode.Unauthenticated
+							? t("changePassword.errors.sessionExpired")
+							: code === ApiErrorCode.InternalError
+								? t("changePassword.errors.serverError")
+								: t("changePassword.errors.changeFailed");
 			setError(message);
 			setSuccess(false);
 		},
@@ -105,7 +107,7 @@ export function ChangePasswordCard({ mustChange }: ChangePasswordCardProps) {
 					</div>
 				</div>
 				{mustChange ? (
-					<div className="mt-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-400">
+					<div className="mt-3 rounded-md bg-warning/10 border border-warning/30 px-3 py-2 text-xs text-warning">
 						{t("changePassword.temporaryPasswordNotice")}
 					</div>
 				) : null}

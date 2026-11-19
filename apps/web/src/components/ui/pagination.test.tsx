@@ -97,3 +97,74 @@ describe("Pagination", () => {
 		);
 	});
 });
+
+describe("Pagination with a rows-per-page menu", () => {
+	function setup(over: Partial<React.ComponentProps<typeof Pagination>> = {}) {
+		const props = {
+			page: 2,
+			totalPages: 5,
+			total: 95,
+			pageSize: 20,
+			onPageChange: vi.fn(),
+			onPageSizeChange: vi.fn(),
+			...over,
+		};
+		render(<Pagination {...props} />);
+		return props;
+	}
+
+	it("shows the visible row range and the total", () => {
+		setup();
+		expect(screen.getByText("21–40 of 95")).toBeInTheDocument();
+	});
+
+	it("clamps the range on the last, partial page", () => {
+		setup({ page: 5 });
+		expect(screen.getByText("81–95 of 95")).toBeInTheDocument();
+	});
+
+	it("reports a new page size", async () => {
+		const user = userEvent.setup();
+		const props = setup();
+		await user.selectOptions(screen.getByRole("combobox"), "50");
+		expect(props.onPageSizeChange).toHaveBeenCalledWith(50);
+	});
+
+	it("stays on a single page so the size can be changed back", () => {
+		setup({ page: 1, totalPages: 1, total: 15, pageSize: 50 });
+		expect(screen.getByRole("combobox")).toBeInTheDocument();
+		expect(screen.getByText("1–15 of 15")).toBeInTheDocument();
+	});
+
+	it("still shows the rows-per-page menu for a short list, without page buttons", () => {
+		render(
+			<Pagination
+				page={1}
+				totalPages={1}
+				total={8}
+				pageSize={10}
+				onPageChange={vi.fn()}
+				onPageSizeChange={vi.fn()}
+			/>,
+		);
+		expect(screen.getByRole("combobox")).toBeInTheDocument();
+		expect(screen.getByText("1–8 of 8")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Next page" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("renders nothing when there are no rows", () => {
+		const { container } = render(
+			<Pagination
+				page={1}
+				totalPages={1}
+				total={0}
+				pageSize={20}
+				onPageChange={vi.fn()}
+				onPageSizeChange={vi.fn()}
+			/>,
+		);
+		expect(container).toBeEmptyDOMElement();
+	});
+});

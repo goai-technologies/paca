@@ -23,12 +23,14 @@ function modeTab(page: Page, name: 'Simple' | 'Advanced (JSON)') {
 
 /** The actions the workspace role called `roleName` allows, as stored. */
 async function storedActions(page: Page, roleName: string): Promise<string[]> {
-  const response = await page.request.get(`${BASE_URL}/api/v1/admin/roles`);
+  const response = await page.request.get(
+    `${BASE_URL}/api/v1/admin/roles?page_size=100&search=${encodeURIComponent(roleName)}`,
+  );
   expect(response.ok()).toBeTruthy();
   const roles: Array<{
     name: string;
     policy: { statements: Array<{ effect: string; actions: string[] }> };
-  }> = (await response.json()).data ?? [];
+  }> = (await response.json()).data.items ?? [];
   const role = roles.find((r) => r.name === roleName);
   expect(role, `role ${roleName} should exist`).toBeTruthy();
   return (role?.policy.statements ?? [])
@@ -46,11 +48,13 @@ async function cleanupTestRoles(request: APIRequestContext): Promise<void> {
     data: { username: USERNAME, password: PASSWORD, rememberMe: false },
   });
 
-  const listResp = await request.get(`${BASE_URL}/api/v1/admin/roles`);
+  const listResp = await request.get(
+    `${BASE_URL}/api/v1/admin/roles?page_size=100&search=${encodeURIComponent(TEST_ROLE_PREFIX)}`,
+  );
   if (!listResp.ok()) return;
 
   const body = await listResp.json();
-  const roles: Array<{ id: string; name: string }> = body.data ?? [];
+  const roles: Array<{ id: string; name: string }> = body.data.items ?? [];
 
   await Promise.all(
     roles
@@ -727,8 +731,8 @@ test.describe('Global Roles Management', () => {
         data: { username: USERNAME, password: PASSWORD, rememberMe: false },
       });
       const roles: Array<{ id: string; name: string; is_default: boolean; is_system: boolean }> = (
-        await (await request.get(`${BASE_URL}/api/v1/admin/roles`)).json()
-      ).data;
+        await (await request.get(`${BASE_URL}/api/v1/admin/roles?page_size=100`)).json()
+      ).data.items;
       const defaultRole = roles.find((role) => role.is_default);
       if (!defaultRole) throw new Error('one role is the default');
       expect(defaultRole.name).toBe('USER');
@@ -762,7 +766,7 @@ test.describe('Global Roles Management', () => {
         promotion = { method: route.request().method(), url: route.request().url() };
         await route.fulfill({ status: 200, json: { success: true, data: { ...role, is_default: true } } });
       });
-      await page.route('**/api/v1/admin/roles', async (route) => {
+      await page.route(/\/api\/v1\/admin\/roles(\?.*)?$/, async (route) => {
         if (route.request().method() !== 'GET') {
           await route.fallback();
           return;
@@ -770,7 +774,7 @@ test.describe('Global Roles Management', () => {
         const response = await route.fetch();
         const body = await response.json();
         if (promoted) {
-          body.data = body.data.map((r: { id: string }) => ({ ...r, is_default: r.id === role.id }));
+          body.data.items = body.data.items.map((r: { id: string }) => ({ ...r, is_default: r.id === role.id }));
         }
         await route.fulfill({ response, json: body });
       });

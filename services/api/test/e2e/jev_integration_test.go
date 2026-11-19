@@ -448,14 +448,18 @@ func TestE2EJev_AutofillRespectsProjectSettings(t *testing.T) {
 		t.Error("an excluded field must not be asked about")
 	}
 
-	// Disabling autofill stops Jev calls for new tasks altogether. A
-	// follow-up task, created after the disabled one, proves the consumer
-	// has already processed (and skipped) it by the time we look.
+	// Disabling autofill stops Jev calls for new tasks altogether. The consumer
+	// reads the setting when it processes a task, not when the task is created,
+	// so autofill stays off for the rest of the test: re-enabling it right after
+	// creating the task would let a slow consumer see "enabled" and call Jev.
+	// Instead a task in a second project, whose autofill is on, acts as a
+	// barrier: once the consumer has filled it, it has already been through the
+	// disabled project's earlier task on the same stream.
 	setProjectJevSettingsViaAPI(t, env, client, token, projID, map[string]any{"autofill_enabled": false})
 	createTaskViaAPIWithBody(t, env, client, token, projID, map[string]any{"title": "Autofill disabled"})
-	setProjectJevSettingsViaAPI(t, env, client, token, projID, map[string]any{"autofill_enabled": true})
-	sentinel := createTaskViaAPIWithBody(t, env, client, token, projID, map[string]any{"title": "Sentinel"})
-	waitForTaskField(t, env, client, token, projID, idOf(sentinel), 20*time.Second, func(d map[string]any) bool {
+	barrierClient, barrierToken, barrierProj := newJevProject(t, env, "jev-autofill-barrier", fake)
+	barrier := createTaskViaAPIWithBody(t, env, barrierClient, barrierToken, barrierProj, map[string]any{"title": "Barrier"})
+	waitForTaskField(t, env, barrierClient, barrierToken, barrierProj, idOf(barrier), 20*time.Second, func(d map[string]any) bool {
 		imp, _ := d["importance"].(float64)
 		return imp == 150
 	})

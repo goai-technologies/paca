@@ -15,7 +15,6 @@ import {
 	ArrowLeft,
 	Clock,
 	Coins,
-	Loader2,
 	MessageSquare,
 	MoreVertical,
 	Pencil,
@@ -45,6 +44,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { useGlobalAgentRealtime } from "@/hooks/use-global-agent-realtime";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
@@ -89,7 +89,7 @@ import { ConversationFilters } from "./conversation-filters";
  * engine (see agent_service.go's TriggerTaskAssigned/TriggerDirectMessage:
  * triggeredByMemberID is nil for automation-triggered runs), not by someone
  * assigning a task or messaging the agent by hand. Global conversations are
- * never automation-triggered — they always carry actor_user_id instead.
+ * never automation-triggered — they always carry actor_account_id instead.
  */
 export function conversationTriggerLabel(
 	conv: AgentConversation,
@@ -97,7 +97,7 @@ export function conversationTriggerLabel(
 ): string {
 	const isAutomationTriggered =
 		!conv.triggered_by_member_id &&
-		!conv.actor_user_id &&
+		!conv.actor_account_id &&
 		(conv.trigger_type === "task_assigned" ||
 			conv.trigger_type === "automation_message");
 	return isAutomationTriggered
@@ -434,6 +434,7 @@ export function ConversationsLayout({ projectId }: { projectId?: string }) {
 	);
 
 	const renameMutation = useMutation({
+		meta: { success: "renamed", subject: "conversation", silent: true },
 		mutationFn: ({ id, title }: { id: string; title: string }) =>
 			projectId
 				? updateConversationTitle(projectId, id, title)
@@ -451,6 +452,7 @@ export function ConversationsLayout({ projectId }: { projectId?: string }) {
 	});
 
 	const deleteMutation = useMutation({
+		meta: { success: "deleted", subject: "conversation", silent: true },
 		mutationFn: (id: string) =>
 			projectId
 				? deleteConversation(projectId, id)
@@ -645,7 +647,7 @@ export function ConversationsLayout({ projectId }: { projectId?: string }) {
 							disabled={deleteMutation.isPending}
 						>
 							{deleteMutation.isPending ? (
-								<Loader2 className="size-4 animate-spin" />
+								<Spinner aria-hidden="true" />
 							) : (
 								t("conversationsPage.delete.confirm")
 							)}

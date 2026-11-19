@@ -5,7 +5,11 @@ import type { SuccessEnvelope } from "./api-error";
 
 // ── Shapes ────────────────────────────────────────────────────────────────────
 
-export type NotificationType = "assigned" | "mentioned";
+export type NotificationType =
+	| "assigned"
+	| "mentioned"
+	| "question"
+	| "automation";
 
 export interface Notification {
 	id: string;
@@ -25,8 +29,17 @@ export interface Notification {
 	task_id: string | null;
 	task_title: string;
 	task_number: number;
-	project_id: string;
+	// Null for a question asked in a global-chat conversation.
+	project_id: string | null;
 	project_name: string;
+	// Set only for a mention in a document comment.
+	document_id: string | null;
+	document_title: string;
+	// Set only for "question" notifications.
+	conversation_id: string | null;
+	conversation_title: string;
+	// Text of an "automation" notification (sent by a notify action).
+	message: string;
 	read_at: string | null;
 	created_at: string;
 }

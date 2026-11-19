@@ -8,7 +8,7 @@ vi.mock("@/lib/role-api", async () => {
 	return { ...actual, deleteRole: vi.fn() };
 });
 
-import { deleteRole, platformRolesQueryOptions } from "@/lib/role-api";
+import { deleteRole, platformRolesKey } from "@/lib/role-api";
 import { makeRole, renderWithQueries } from "@/test/render-with-queries";
 import { DeleteRoleDialog } from "./DeleteRoleDialog";
 
@@ -39,7 +39,7 @@ describe("DeleteRoleDialog", () => {
 		await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 		expect(deleteRole).toHaveBeenCalledWith("role-admin");
 		expect(invalidate).toHaveBeenCalledWith({
-			queryKey: platformRolesQueryOptions.queryKey,
+			queryKey: platformRolesKey,
 		});
 	});
 

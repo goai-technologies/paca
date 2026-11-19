@@ -19,8 +19,13 @@ type Service interface {
 
 // TaskLinkService defines task-link use cases.
 type TaskLinkService interface {
-	// ListTaskLinks returns all links for taskID, computing inverse display labels.
-	ListTaskLinks(ctx context.Context, projectID, taskID uuid.UUID) ([]*TaskLink, error)
+	// ListTaskLinks returns one page of the links for taskID, computing inverse
+	// display labels; see TaskLinkRepository.ListTaskLinks for the paging contract.
+	ListTaskLinks(ctx context.Context, projectID, taskID uuid.UUID, cursorAfter *string, limit int) ([]*TaskLink, bool, int, error)
+	// ListProjectTaskLinks returns one page of a project's links of linkType
+	// between tasks the caller may read; see
+	// TaskLinkRepository.ListProjectTaskLinks for the paging contract.
+	ListProjectTaskLinks(ctx context.Context, projectID uuid.UUID, linkType LinkType, cursorAfter *string, limit int) ([]*TaskLink, bool, error)
 	// CreateTaskLink creates a directed link between two tasks in the same project.
 	CreateTaskLink(ctx context.Context, in CreateTaskLinkInput) (*TaskLink, error)
 	// DeleteTaskLink removes the link identified by linkID, verifying it
@@ -122,6 +127,9 @@ type TaskService interface {
 	// ListDistinctTags returns every distinct tag value used anywhere in the
 	// project, sorted alphabetically — see Repository.ListDistinctTags.
 	ListDistinctTags(ctx context.Context, projectID uuid.UUID) ([]string, error)
+	// ListGroupColumns returns the columns of a group-by dimension — see
+	// Repository.ListGroupColumns.
+	ListGroupColumns(ctx context.Context, projectID uuid.UUID, filter TaskFilter, by string) ([]GroupColumn, error)
 	// GetTask returns the task identified by id, verifying it belongs to projectID.
 	GetTask(ctx context.Context, projectID, id uuid.UUID) (*Task, error)
 	// ListCommitmentWork returns every live task, in any project, attached to
@@ -132,6 +140,7 @@ type TaskService interface {
 	// type is removed. It refuses when another type is still in use there.
 	PrepareCommitmentsProject(ctx context.Context, projectID uuid.UUID) error
 	GetTaskByNumber(ctx context.Context, projectID uuid.UUID, taskNumber int64) (*Task, error)
+	GetTaskByKey(ctx context.Context, prefix string, taskNumber int64) (*Task, error)
 	CreateTask(ctx context.Context, in CreateTaskInput) (*Task, error)
 	// UpdateTask updates the task identified by id, verifying it belongs to projectID.
 	UpdateTask(ctx context.Context, projectID, id uuid.UUID, in UpdateTaskInput) (*Task, error)
@@ -202,6 +211,10 @@ type CreateTaskInput struct {
 // is stored as null), so concurrent edits of different custom fields can't
 // overwrite each other.
 type UpdateTaskInput struct {
+	// IfVersion, when set, makes the update apply only if the task is still at
+	// that version (HTTP If-Match): ErrVersionConflict otherwise. Checked under
+	// the row lock, so two saves of the same version cannot both win.
+	IfVersion    *int64
 	TaskTypeID   **uuid.UUID
 	StatusID     **uuid.UUID
 	SprintID     **uuid.UUID
@@ -251,6 +264,8 @@ type CreateCustomFieldDefinitionInput struct {
 	FieldType   FieldType
 	Options     []CustomFieldOption
 	IsRequired  bool
+	UseInSearch bool
+	Rows        int
 }
 
 // UpdateCustomFieldDefinitionInput carries mutable custom field definition
@@ -260,4 +275,6 @@ type UpdateCustomFieldDefinitionInput struct {
 	FieldType   *FieldType
 	Options     []CustomFieldOption
 	IsRequired  *bool
+	UseInSearch *bool
+	Rows        *int
 }

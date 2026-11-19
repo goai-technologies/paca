@@ -7,6 +7,7 @@
 			"installed": "설치됨",
 			"updateAvailable": "업데이트 가능",
 			"source": "출처",
+			"official": "Paca 공식 플러그인",
 			"upgrading": "업그레이드 중...",
 			"upgradeTo": "{{version}}(으)로 업그레이드",
 			"uninstalling": "제거 중...",

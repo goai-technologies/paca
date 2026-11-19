@@ -66,9 +66,15 @@ func (h *ServiceAccountHandler) List(w http.ResponseWriter, r *http.Request) {
 		presenter.Error(w, r, err)
 		return
 	}
+	page, err := parseOptionalPage(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
 	cursor := parseCursorParam(r)
-	accounts, hasMore, err := h.svc.List(r.Context(), accountdom.ServiceAccountFilter{
+	accounts, hasMore, total, err := h.svc.List(r.Context(), accountdom.ServiceAccountFilter{
 		Search: strings.TrimSpace(r.URL.Query().Get("search")),
+		Offset: pageOffset(page, pageSize),
 	}, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
@@ -83,7 +89,13 @@ func (h *ServiceAccountHandler) List(w http.ResponseWriter, r *http.Request) {
 		c := accountdom.EncodeServiceAccountCursor(accounts[len(accounts)-1])
 		nextCursor = &c
 	}
-	presenter.OK(w, r, map[string]any{"items": items, "page_size": pageSize, "next_cursor": nextCursor})
+	body := map[string]any{"items": items, "page_size": pageSize, "next_cursor": nextCursor, "total_count": total}
+	if page > 0 {
+		// Paged by number: the caller navigates by page, not by cursor.
+		body["page"] = page
+		body["next_cursor"] = nil
+	}
+	presenter.OK(w, r, body)
 }
 
 // Create handles POST /admin/service-accounts.

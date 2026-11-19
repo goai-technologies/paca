@@ -33,8 +33,8 @@ func New(repo apikeydom.Repository) *Service {
 }
 
 // List returns one page of the account's non-revoked API keys.
-func (s *Service) List(ctx context.Context, accountID uuid.UUID, cursorAfter *string, limit int) ([]*apikeydom.APIKey, bool, int, error) {
-	return s.repo.ListByAccountID(ctx, accountID, cursorAfter, limit)
+func (s *Service) List(ctx context.Context, accountID uuid.UUID, filter apikeydom.KeyFilter, cursorAfter *string, limit int) ([]*apikeydom.APIKey, bool, int, error) {
+	return s.repo.ListByAccountID(ctx, accountID, filter, cursorAfter, limit)
 }
 
 // Create generates a cryptographically random API key, stores its SHA-256

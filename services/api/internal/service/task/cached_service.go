@@ -245,6 +245,11 @@ func (c *CachedService) SumTaskField(ctx context.Context, projectID uuid.UUID, f
 	return c.svc.SumTaskField(ctx, projectID, filter, fieldKey)
 }
 
+// ListGroupColumns delegates to the underlying service without caching.
+func (c *CachedService) ListGroupColumns(ctx context.Context, projectID uuid.UUID, filter taskdom.TaskFilter, by string) ([]taskdom.GroupColumn, error) {
+	return c.svc.ListGroupColumns(ctx, projectID, filter, by)
+}
+
 // ListDistinctTags delegates to the underlying service without caching.
 func (c *CachedService) ListDistinctTags(ctx context.Context, projectID uuid.UUID) ([]string, error) {
 	return c.svc.ListDistinctTags(ctx, projectID)
@@ -263,6 +268,11 @@ func (c *CachedService) GetTask(ctx context.Context, projectID, id uuid.UUID) (*
 // GetTaskByNumber delegates directly to the underlying service (not cached).
 func (c *CachedService) GetTaskByNumber(ctx context.Context, projectID uuid.UUID, taskNumber int64) (*taskdom.Task, error) {
 	return c.svc.GetTaskByNumber(ctx, projectID, taskNumber)
+}
+
+// GetTaskByKey delegates directly to the underlying service (not cached).
+func (c *CachedService) GetTaskByKey(ctx context.Context, prefix string, taskNumber int64) (*taskdom.Task, error) {
+	return c.svc.GetTaskByKey(ctx, prefix, taskNumber)
 }
 
 // CreateTask delegates directly to the underlying service (not cached).
@@ -369,8 +379,13 @@ func (c *CachedService) DeleteCustomFieldDefinition(ctx context.Context, project
 // --- Task Links (pass-through) -----------------------------------------------
 
 // ListTaskLinks delegates directly to the underlying service (not cached).
-func (c *CachedService) ListTaskLinks(ctx context.Context, projectID, taskID uuid.UUID) ([]*taskdom.TaskLink, error) {
-	return c.svc.ListTaskLinks(ctx, projectID, taskID)
+func (c *CachedService) ListTaskLinks(ctx context.Context, projectID, taskID uuid.UUID, cursorAfter *string, limit int) ([]*taskdom.TaskLink, bool, int, error) {
+	return c.svc.ListTaskLinks(ctx, projectID, taskID, cursorAfter, limit)
+}
+
+// ListProjectTaskLinks delegates directly to the underlying service (not cached).
+func (c *CachedService) ListProjectTaskLinks(ctx context.Context, projectID uuid.UUID, linkType taskdom.LinkType, cursorAfter *string, limit int) ([]*taskdom.TaskLink, bool, error) {
+	return c.svc.ListProjectTaskLinks(ctx, projectID, linkType, cursorAfter, limit)
 }
 
 // CreateTaskLink delegates directly to the underlying service (not cached).

@@ -418,7 +418,8 @@ export type FieldType =
 	| "select"
 	| "multi_select"
 	| "boolean"
-	| "url";
+	| "url"
+	| "long_text";
 
 export interface CustomFieldOption {
 	value: string;
@@ -433,6 +434,9 @@ export interface CustomFieldDefinition {
 	field_type: FieldType;
 	options: CustomFieldOption[];
 	is_required: boolean;
+	use_in_search: boolean;
+	/** Visible lines of a long_text field's editor. */
+	rows: number;
 	created_at: string;
 	updated_at: string;
 }
@@ -464,6 +468,8 @@ export async function createCustomFieldDefinition(
 		field_type: FieldType;
 		options?: CustomFieldOption[];
 		is_required?: boolean;
+		use_in_search?: boolean;
+		rows?: number;
 	},
 ): Promise<CustomFieldDefinition> {
 	const { data } = await apiClient.instance.post<
@@ -479,6 +485,8 @@ export async function updateCustomFieldDefinition(
 		display_name?: string;
 		options?: CustomFieldOption[];
 		is_required?: boolean;
+		use_in_search?: boolean;
+		rows?: number;
 	},
 ): Promise<CustomFieldDefinition> {
 	const { data } = await apiClient.instance.patch<

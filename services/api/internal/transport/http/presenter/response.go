@@ -6,7 +6,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Paca-AI/api/internal/apierr"
 	accountdom "github.com/Paca-AI/api/internal/domain/account"
@@ -19,6 +21,8 @@ import (
 	automationdom "github.com/Paca-AI/api/internal/domain/automation"
 	docdom "github.com/Paca-AI/api/internal/domain/doc"
 	environmentdom "github.com/Paca-AI/api/internal/domain/environment"
+	gitdom "github.com/Paca-AI/api/internal/domain/git"
+	mfadom "github.com/Paca-AI/api/internal/domain/mfa"
 	notificationdom "github.com/Paca-AI/api/internal/domain/notification"
 	pluginom "github.com/Paca-AI/api/internal/domain/plugin"
 	projectdom "github.com/Paca-AI/api/internal/domain/project"
@@ -108,13 +112,43 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 
 	var details map[string]string
 	var issues []apierr.Issue
+	var locked *mfadom.LockedError
+	if errors.As(err, &locked) {
+		secs := int(locked.RetryAfter.Seconds()) + 1
+		details = map[string]string{"retry_after_seconds": strconv.Itoa(secs)}
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+	}
 	if apiErr != nil {
 		details = apiErr.Details
 		issues = apiErr.Issues
 	}
+	// A doc If-Match conflict names the version that is stored now.
+	var docConflict *docdom.VersionConflictError
+	// A conflict with no stored version (If-Match on a path that has no
+	// document) has nothing to name, so it carries no details.
+	if details == nil && errors.As(err, &docConflict) && (docConflict.CurrentHash != "" || !docConflict.UpdatedAt.IsZero()) {
+		details = map[string]string{
+			"content_hash": docConflict.CurrentHash,
+			"updated_at":   docConflict.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		}
+		if docConflict.UpdatedBy != nil {
+			details["updated_by"] = docConflict.UpdatedBy.String()
+		}
+		for k, v := range map[string]string{"note": docConflict.Note, "client": docConflict.Client, "task": docConflict.Task} {
+			if v != "" {
+				details[k] = v
+			}
+		}
+	}
 	var fieldErr *agentdom.FieldNotSupportedError
 	if details == nil && errors.As(err, &fieldErr) {
 		details = map[string]string{"fields": strings.Join(fieldErr.Fields, ",")}
+	}
+
+	// A provider's explanation of a git failure (see gitdom.DetailedError).
+	var detailed *gitdom.DetailedError
+	if details == nil && errors.As(err, &detailed) && detailed.Detail != "" {
+		details = map[string]string{"provider_message": detailed.Detail}
 	}
 
 	httpx.WriteJSON(w, status, envelope{
@@ -139,6 +173,40 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 	switch {
 	case errors.Is(err, domainauth.ErrInvalidCredentials):
 		return http.StatusUnauthorized, apierr.CodeInvalidCredentials
+	case errors.Is(err, mfadom.ErrRequired):
+		return http.StatusUnauthorized, apierr.CodeMFARequired
+	case errors.Is(err, mfadom.ErrInvalidCode):
+		return http.StatusUnauthorized, apierr.CodeMFAInvalidCode
+	case errors.Is(err, mfadom.ErrLocked):
+		return http.StatusTooManyRequests, apierr.CodeTooManyRequests
+	case errors.Is(err, mfadom.ErrSelfLockout):
+		return http.StatusBadRequest, apierr.CodeSelfLockout
+	case errors.Is(err, mfadom.ErrSetupRequired):
+		return http.StatusForbidden, apierr.CodeMFASetupRequired
+	case errors.Is(err, mfadom.ErrSetupNotRequired):
+		return http.StatusForbidden, apierr.CodeForbidden
+	case errors.Is(err, mfadom.ErrIPNotAllowed):
+		return http.StatusForbidden, apierr.CodeIPNotAllowed
+	case errors.Is(err, mfadom.ErrPasswordLoginDisabled):
+		return http.StatusForbidden, apierr.CodePasswordLoginDisabled
+	case errors.Is(err, mfadom.ErrSSOOnlyNoProvider):
+		return http.StatusBadRequest, apierr.CodeSSOOnlyNoProvider
+	case errors.Is(err, mfadom.ErrAlreadyEnabled):
+		return http.StatusConflict, apierr.CodeMFAAlreadyEnabled
+	case errors.Is(err, mfadom.ErrNotEnabled):
+		return http.StatusConflict, apierr.CodeMFANotEnabled
+	case errors.Is(err, mfadom.ErrUnavailable):
+		return http.StatusServiceUnavailable, apierr.CodeMFAUnavailable
+	case errors.Is(err, mfadom.ErrPasskeyUnavailable):
+		return http.StatusServiceUnavailable, apierr.CodeMFAUnavailable
+	case errors.Is(err, mfadom.ErrPasskeyInvalid):
+		return http.StatusBadRequest, apierr.CodePasskeyInvalid
+	case errors.Is(err, mfadom.ErrPasskeyLimit):
+		return http.StatusConflict, apierr.CodePasskeyLimit
+	case errors.Is(err, mfadom.ErrPasskeyNotFound):
+		return http.StatusNotFound, apierr.CodePasskeyNotFound
+	case errors.Is(err, mfadom.ErrInvalidCIDR):
+		return http.StatusBadRequest, apierr.CodeInvalidCIDR
 	case errors.Is(err, domainauth.ErrTokenInvalid):
 		return http.StatusUnauthorized, apierr.CodeTokenInvalid
 	case errors.Is(err, domainauth.ErrSessionInvalidated):
@@ -157,6 +225,12 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusUnprocessableEntity, apierr.CodeInvalidCurrentPassword
 	case errors.Is(err, userdom.ErrPasswordSetTokenInvalid):
 		return http.StatusUnprocessableEntity, apierr.CodePasswordSetTokenInvalid
+	case errors.Is(err, attachmentdom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, taskdom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, roledom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
 	case errors.Is(err, roledom.ErrNotFound):
 		return http.StatusNotFound, apierr.CodeRoleNotFound
 	case errors.Is(err, roledom.ErrNameTaken):
@@ -217,6 +291,8 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusNotFound, apierr.CodeProjectMemberNotFound
 	case errors.Is(err, projectdom.ErrMemberAlreadyAdded):
 		return http.StatusConflict, apierr.CodeProjectMemberAlreadyAdded
+	case errors.Is(err, taskdom.ErrVersionConflict), errors.Is(err, sprintdom.ErrVersionConflict), errors.Is(err, docdom.ErrVersionConflict):
+		return http.StatusPreconditionFailed, apierr.CodeVersionConflict
 	case errors.Is(err, taskdom.ErrTaskNotFound):
 		return http.StatusNotFound, apierr.CodeTaskNotFound
 	case errors.Is(err, taskdom.ErrTaskTitleInvalid):
@@ -358,6 +434,8 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeBadRequest
 	case errors.Is(err, agentdom.ErrInvalidCursor):
 		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, sprintdom.ErrInvalidCursor):
+		return http.StatusBadRequest, apierr.CodeBadRequest
 	case errors.Is(err, apikeydom.ErrInvalidCursor):
 		return http.StatusBadRequest, apierr.CodeBadRequest
 	case errors.Is(err, accountdom.ErrInvalidCursor):
@@ -368,10 +446,24 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeBadRequest
 	case errors.Is(err, docdom.ErrInvalidCursor):
 		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, docdom.ErrTooManyDocIDs):
+		return http.StatusBadRequest, apierr.CodeBadRequest
 	case errors.Is(err, docdom.ErrDocNotFound):
 		return http.StatusNotFound, apierr.CodeDocNotFound
 	case errors.Is(err, docdom.ErrDocTitleInvalid):
 		return http.StatusBadRequest, apierr.CodeDocTitleInvalid
+	case errors.Is(err, docdom.ErrDocLocked):
+		return http.StatusConflict, apierr.CodeDocLocked
+	case errors.Is(err, docdom.ErrDocLockNeedsSource):
+		return http.StatusBadRequest, apierr.CodeDocLockNeedsSource
+	case errors.Is(err, docdom.ErrDocPathInvalid):
+		return http.StatusBadRequest, apierr.CodeDocPathInvalid
+	case errors.Is(err, docdom.ErrDocPathIsFolder):
+		return http.StatusConflict, apierr.CodeDocPathIsFolder
+	case errors.Is(err, docdom.ErrDocPathChanged):
+		return http.StatusConflict, apierr.CodeDocPathChanged
+	case errors.Is(err, docdom.ErrDocSourceInvalid):
+		return http.StatusBadRequest, apierr.CodeDocSourceInvalid
 	case errors.Is(err, docdom.ErrFolderNotFound):
 		return http.StatusNotFound, apierr.CodeDocFolderNotFound
 	case errors.Is(err, docdom.ErrFolderNameInvalid):
@@ -429,6 +521,8 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeAgentACPProviderInvalid
 	case errors.Is(err, agentdom.ErrACPCommandRequired):
 		return http.StatusBadRequest, apierr.CodeAgentACPCommandRequired
+	case errors.Is(err, agentdom.ErrACPModelInvalid):
+		return http.StatusBadRequest, apierr.CodeAgentACPModelInvalid
 	case errors.Is(err, agentdom.ErrFieldNotSupportedForAgentType):
 		return http.StatusBadRequest, apierr.CodeAgentFieldNotSupportedForType
 	case errors.Is(err, agentdom.ErrMCPServerNotFound):
@@ -483,6 +577,37 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeAgentCLIProviderNotSupportedForGlobalAgents
 	case errors.Is(err, agentdom.ErrAgentNotProviderCLI):
 		return http.StatusBadRequest, apierr.CodeAgentNotProviderCLI
+	// --- Git integration errors ---------------------------------------------
+	case errors.Is(err, gitdom.ErrNotFound):
+		return http.StatusNotFound, apierr.CodeGitNotFound
+	case errors.Is(err, gitdom.ErrAlreadyLinked):
+		return http.StatusConflict, apierr.CodeGitAlreadyLinked
+	case errors.Is(err, gitdom.ErrDescriptionTooLong):
+		return http.StatusBadRequest, apierr.CodeGitDescriptionTooLong
+	case errors.Is(err, gitdom.ErrIdentityExists):
+		return http.StatusConflict, apierr.CodeGitIdentityExists
+	case errors.Is(err, gitdom.ErrIdentityRequired):
+		return http.StatusConflict, apierr.CodeGitIdentityRequired
+	case errors.Is(err, gitdom.ErrSetupExpired):
+		return http.StatusBadRequest, apierr.CodeGitSetupInvalid
+	case errors.Is(err, gitdom.ErrPublicURLRequired):
+		return http.StatusUnprocessableEntity, apierr.CodeGitPublicURLRequired
+	case errors.Is(err, gitdom.ErrInvalidReturnURL):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, gitdom.ErrNoIdentity):
+		return http.StatusConflict, apierr.CodeGitNoIdentity
+	case errors.Is(err, gitdom.ErrAccessNotGranted):
+		return http.StatusConflict, apierr.CodeGitAccessNotGranted
+	case errors.Is(err, gitdom.ErrNotVisible):
+		return http.StatusConflict, apierr.CodeGitRepositoryNotVisible
+	case errors.Is(err, gitdom.ErrProviderUnavailable):
+		return http.StatusServiceUnavailable, apierr.CodeGitProviderUnavailable
+	case errors.Is(err, gitdom.ErrInvalidSignature):
+		return http.StatusUnauthorized, apierr.CodeUnauthenticated
+	case errors.Is(err, gitdom.ErrInvalidInput), errors.Is(err, gitdom.ErrUnsupported):
+		return http.StatusBadRequest, apierr.CodeBadRequest
+	case errors.Is(err, gitdom.ErrRateLimited):
+		return http.StatusTooManyRequests, apierr.CodeTooManyRequests
 	// --- Environment errors -------------------------------------------------
 	case errors.Is(err, environmentdom.ErrEnvironmentNotFound):
 		return http.StatusNotFound, apierr.CodeEnvironmentNotFound
@@ -557,6 +682,8 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusBadRequest, apierr.CodeAutomationActivateNoAction
 	case errors.Is(err, automationdom.ErrWebhookTokenInvalid):
 		return http.StatusUnauthorized, apierr.CodeAutomationWebhookTokenInvalid
+	case errors.Is(err, automationdom.ErrUpdateTaskSelfParent):
+		return http.StatusBadRequest, apierr.CodeAutomationUpdateTaskSelfParent
 	case errors.Is(err, annotationdom.ErrAnnotationNotFound):
 		return http.StatusNotFound, apierr.CodeAnnotationNotFound
 	case errors.Is(err, annotationdom.ErrAnnotationBodyEmpty),
@@ -677,6 +804,7 @@ func httpStatusForCode(code apierr.Code) int {
 		apierr.CodeDocActivityNotFound:
 		return http.StatusNotFound
 	case apierr.CodeDocTitleInvalid,
+		apierr.CodeDocNoteInvalid,
 		apierr.CodeDocFolderNameInvalid,
 		apierr.CodeDocFolderNotInProject,
 		apierr.CodeDocFolderSelfParent,
@@ -744,6 +872,7 @@ func httpStatusForCode(code apierr.Code) int {
 		apierr.CodeAgentTypeInvalid,
 		apierr.CodeAgentACPProviderInvalid,
 		apierr.CodeAgentACPCommandRequired,
+		apierr.CodeAgentACPModelInvalid,
 		apierr.CodeAgentFieldNotSupportedForType,
 		apierr.CodeAgentEnvVarKeyInvalid,
 		apierr.CodeAgentEnvVarKeyReserved,
@@ -769,6 +898,18 @@ func httpStatusForCode(code apierr.Code) int {
 		return http.StatusConflict
 	case apierr.CodeProjectExportExpired:
 		return http.StatusGone
+	case apierr.CodeGitNotFound:
+		return http.StatusNotFound
+	case apierr.CodeGitAlreadyLinked, apierr.CodeGitNoIdentity, apierr.CodeGitIdentityExists, apierr.CodeGitAccessNotGranted, apierr.CodeGitRepositoryNotVisible:
+		return http.StatusConflict
+	case apierr.CodeGitSetupInvalid:
+		return http.StatusBadRequest
+	case apierr.CodeGitPublicURLRequired:
+		return http.StatusUnprocessableEntity
+	case apierr.CodeGitProviderUnavailable:
+		return http.StatusServiceUnavailable
+	case apierr.CodeGitProviderRejected:
+		return http.StatusUnprocessableEntity
 	case apierr.CodeEnvironmentNotFound,
 		apierr.CodeEnvironmentFolderNotFound,
 		apierr.CodeEnvironmentSSHKeyNotFound,

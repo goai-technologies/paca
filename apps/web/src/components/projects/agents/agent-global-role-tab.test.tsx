@@ -46,7 +46,7 @@ function renderTab({
 	const agent = agentWith(roleId ? [roleId] : []);
 	const view = renderWithQueries(
 		<AgentGlobalRoleTab agent={agent} canWrite={canWrite} />,
-		{ permissions, roles },
+		{ permissions, roles, heldRoleIds: roleId ? [[roleId]] : [] },
 	);
 	return { agent, ...view };
 }

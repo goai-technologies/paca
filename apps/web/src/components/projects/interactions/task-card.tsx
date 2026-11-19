@@ -5,13 +5,12 @@ import {
 	GripVertical,
 	Layers,
 	Link,
-	Loader2,
+	ListChecks,
 	Search,
 	User,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { getTaskTypeIconComponent } from "@/components/projects/task-types/task-type-icons";
 import { EntityAvatar } from "@/components/shared/entity-avatar";
 import {
@@ -25,6 +24,7 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import { Spinner } from "@/components/ui/spinner";
 import { useJevEnabled } from "@/hooks/use-jev-enabled";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -84,7 +84,7 @@ interface TaskCardProps {
 	onUpdate?: (taskId: string, payload: UpdatePayload) => void;
 	/** Keyboard-shortcut hooks (Mod+Backspace / Mod+Left / Mod+Right) — fire
 	 * only while this card is hovered. `onMoveLeft`/`onMoveRight` are omitted
-	 * by the caller when there's no adjacent column (e.g. Roadmap view). */
+	 * by the caller when there's no adjacent column (e.g. Gantt view). */
 	onDelete?: (taskId: string) => void;
 	onMoveLeft?: () => void;
 	onMoveRight?: () => void;
@@ -525,7 +525,10 @@ export function TaskCard({
 								</button>
 								{isEpicSearching && epicSearchLoading ? (
 									<div className="flex items-center justify-center py-4">
-										<Loader2 className="size-4 animate-spin text-muted-foreground/50" />
+										<Spinner
+											aria-hidden="true"
+											className="text-muted-foreground/50"
+										/>
 									</div>
 								) : (
 									<>
@@ -559,7 +562,7 @@ export function TaskCard({
 								)}
 								{activeEpicsPagination?.isLoadingMore && (
 									<div className="flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground/50">
-										<Loader2 className="size-3 animate-spin" />
+										<Spinner aria-hidden="true" className="size-3" />
 										{t("epicPicker.loadingMore")}
 									</div>
 								)}
@@ -719,9 +722,25 @@ export function TaskCard({
 				{task.title}
 			</span>
 
-			{fieldChips.length > 0 && (
+			{(fieldChips.length > 0 || (task.subtask_count ?? 0) > 0) && (
 				<div className="mt-2 flex flex-wrap items-center gap-1.5">
 					{fieldChips}
+					{(task.subtask_count ?? 0) > 0 && (
+						<span
+							title={t("board.subtasks.progress", {
+								done: task.subtask_done_count ?? 0,
+								n: task.subtask_count,
+							})}
+							className={cn(
+								"inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground",
+								task.subtask_done_count === task.subtask_count &&
+									"text-success",
+							)}
+						>
+							<ListChecks className="size-3" aria-hidden />
+							{task.subtask_done_count ?? 0}/{task.subtask_count}
+						</span>
+					)}
 				</div>
 			)}
 

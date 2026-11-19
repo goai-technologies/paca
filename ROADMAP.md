@@ -64,7 +64,7 @@ _Goal: a working, self-hostable core that a small team can actually use._
 ### Agent Skills
 - ✅ `/paca` Agent Skills for Claude Code, Gemini CLI, Cursor, and AGENTS.md-reading tools — served live from the running instance's own API, always in sync with the installed version
 - ✅ One-command install script that detects and installs to every supported client on the machine
-- ✅ Full command set: `/paca`, `/paca-epic`, `/paca-clarify`, `/paca-breakdown`, `/paca-sprint`, `/paca-estimate`, `/paca-prioritize`, `/paca-do`, `/paca-test`, `/paca-doc`, `/paca-setup`
+- ✅ Full command set: `/paca`, `/paca-epic`, `/paca-clarify`, `/paca-breakdown`, `/paca-sprint`, `/paca-estimate`, `/paca-prioritize`, `/paca-do`, `/paca-test`, `/paca-doc`, `/paca-review`, `/paca-triage`, `/paca-retro`, `/paca-feedback`, `/paca-board`, `/paca-team`, `/paca-automation` (replaces `/paca-workflow`), `/paca-setup`
 - ✅ Plugin-contributed skills installed alongside core skills
 
 ---
@@ -86,7 +86,7 @@ _Goal: deliver the features that make Paca meaningfully different from standard 
 
 ### Planning & Task Management
 - ✅ Task linking — link related tasks (blocked by, blocks, related, duplicate, parent/child)
-- ✅ Timeline / Roadmap view — Gantt-style view of epics by start → due date, selectable alongside Board/Table on any interaction
+- ✅ Timeline / Gantt view — epics as bars from start → due date with Day–Year zoom, `blocks` dependency arrows that flag scheduling conflicts, and drag-to-reschedule; selectable alongside Board/Table on any interaction
 - ✅ Advanced view settings — per-view column grouping, swimlanes, sort, field visibility/ordering, slicing, and field aggregation across built-in and custom fields
 - ✅ Interactions sidebar — quick nav to Timeline, Product Backlog, and Sprints, with drag-and-drop to reassign a task's sprint
 
@@ -104,6 +104,7 @@ _Goal: deliver the features that make Paca meaningfully different from standard 
 - ✅ ACP agent support — connect Claude Code, Codex, Gemini CLI, or any custom Agent Client Protocol server as a Paca agent via a local bridge (`paca-acp-bridge`), streaming over an authenticated WebSocket using your own local auth and git/`gh` credentials
 - ✅ Global agents — agents not bound to a single project, managed from Admin → Agents
 - ✅ Agent-scoped MCP API keys and identity verification for programmatic agent authentication
+- ✅ PM / business analyst agent — discusses requirements in plain or technical terms, reads the code, and drafts tasks in Refinement that only a human can approve (`paca-analyst` skill + Analyst role)
 - ✅ Unified Conversations — direct, task-triggered, and automation-triggered agent conversations, with project-scoped and global views
 
 ### AI Agent Environments
@@ -117,6 +118,7 @@ _Goal: deliver the features that make Paca meaningfully different from standard 
 - ✅ Webhook plugin (outgoing webhooks for task and sprint events, configurable per project)
 - ✅ Time logging plugin (track time spent per task, per sprint)
 - ✅ Dashboard plugin
+- 📋 Calendar plugin — a `view` extension that renders tasks on a month/week calendar by start and due date, selectable alongside Board/Table/Gantt on any interaction, with drag-to-reschedule and sprint boundaries shown
 
 ### Security & Access Control
 - ✅ Global RBAC — admin-managed global roles with granular, per-domain permission control
@@ -133,6 +135,11 @@ _Goal: deliver the features that make Paca meaningfully different from standard 
 
 _These are ideas we find compelling but have not yet committed to._
 
+- 💡 Team chat & meetings — built-in messaging and voice/video, combining Slack-style channels and threads with Discord-style voice rooms, so people can talk and handle tasks on one platform
+  - 💡 Channels, threads, direct messages, mentions, and reactions, scoped to workspaces and projects
+  - 💡 Task-aware chat — link, create, and update tasks from a conversation, with task and sprint context shown inline
+  - 💡 Voice and video rooms that people can drop into, with screen sharing
+  - 💡 Agents as first-class participants — agents can join chat conversations and meetings, respond to mentions, and take notes, summarize, and turn discussion into tasks
 - 💡 Multi-agent orchestration — agents that delegate sub-tasks to other agents
 - 💡 Hosted cloud option (opt-in, for teams that don't want to self-host)
 

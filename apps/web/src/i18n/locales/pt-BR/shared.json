@@ -1,6 +1,8 @@
 {
 	"activityPane": {
+		"resize": "Redimensionar o painel de atividades",
 		"title": "Atividade",
+		"actions": "Ações da entrada",
 		"empty": "Nenhuma atividade ainda",
 		"emptyComments": "Nenhum comentário ainda",
 		"showAllActivity": "Mostrar toda a atividade",
@@ -194,5 +196,14 @@
 		"minOne": "É necessária pelo menos uma função.",
 		"clear": "Limpar",
 		"placeholder": "Selecionar funções"
+	},
+	"askQuestion": {
+		"otherPlaceholder": "Ou digite sua própria resposta…",
+		"submit": "Enviar resposta",
+		"answered": "Você respondeu: {{answer}}"
+	},
+	"paneResize": {
+		"sidebar": "Redimensionar barra lateral",
+		"taskColumn": "Redimensionar coluna de tarefas"
 	}
 }

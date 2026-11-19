@@ -49,8 +49,11 @@ export interface PropertyFieldProps {
 
 	startDate?: string | null;
 	dueDate?: string | null;
-	onStartDateChange?: (value: string | null) => void;
-	onDueDateChange?: (value: string | null) => void;
+	/** Both ends change together, in one update. */
+	onDateRangeChange?: (range: {
+		startDate: string | null;
+		dueDate: string | null;
+	}) => void;
 
 	numberValue?: number | null;
 	onNumberChange?: (value: number) => void;
@@ -83,10 +86,12 @@ export interface PropertyFieldProps {
 		| "Checkbox"
 		| "Select"
 		| "MultiSelect"
-		| "Url";
+		| "Url"
+		| "LongText";
 	customRawValue?: unknown;
 	onCustomChange?: (value: unknown) => void;
 	customOptions?: CustomFieldOption[];
+	customRows?: number;
 
 	hidden?: boolean;
 	linkIcon?: ReactNode;

@@ -2,6 +2,8 @@ package acpbridge
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,6 +31,15 @@ type Dispatcher struct {
 	ConvRepo  *postgres.ConversationRepository
 	Publisher *messaging.Publisher
 	Log       Logger
+
+	// dispatchGen maps a conversation id to the generation of its latest
+	// dispatch (uuid.UUID -> uint64). Each watchdog only acts while its own
+	// dispatch is still the latest, so a watchdog armed by an earlier turn
+	// cannot fail a conversation the user has since resumed. In-memory, so it
+	// only covers dispatches made by this process: with several agent-runner
+	// replicas a resume handled by another replica is not seen here.
+	dispatchGen sync.Map
+	genCounter  atomic.Uint64
 }
 
 // DispatchTrigger hands trigger off to cfg's connected local ACP bridge.
@@ -53,26 +64,45 @@ func (d *Dispatcher) DispatchTrigger(ctx context.Context, trigger agent.Trigger,
 		return err
 	}
 
+	// Recorded before the publish so a watchdog from an earlier dispatch is
+	// already stale by the time the new turn can start.
+	gen := d.genCounter.Add(1)
+	d.dispatchGen.Store(trigger.ConversationID, gen)
+
 	dispatched, err := d.Registry.Dispatch(ctx, cfg.ID, map[string]any{
 		"type":            "start_turn",
 		"conversation_id": trigger.ConversationID.String(),
 		"project_id":      projectIDOrEmpty(trigger.ProjectID),
 		"message":         BuildACPMessage(trigger, cfg.ACPProvider),
-		"trigger_type":    string(trigger.TriggerType),
-		"acp_provider":    cfg.ACPProvider,
-		"acp_command":     cfg.ACPCommand,
+		// The user's own text, shown in the transcript instead of the
+		// prompt-wrapped message above. Always send the key, even when empty:
+		// the bridge reads a missing key as "older server" and falls back to
+		// the wrapped message, so never add omitempty here.
+		"display_message": trigger.Message,
+		// Persisted with the user_message event so the transcript can render
+		// attached-context badges (the prompt-wrapped message still carries
+		// the "## Attached Context" section for the agent itself).
+		"context_items": trigger.ContextItems,
+		"trigger_type":  string(trigger.TriggerType),
+		"acp_provider":  cfg.ACPProvider,
+		"acp_command":   cfg.ACPCommand,
+		"acp_model":     cfg.ACPModel,
+		"acp_effort":    cfg.ACPEffort,
 		// Task/comment/chat linkage the bridge uses to group conversations
 		// into per-task (or per-chat) sessions. Empty when the trigger has no
 		// such link (e.g. project-global chat, or an automation message with
 		// no task); an older bridge simply ignores these keys.
 		"task_id":         uuidPtrOrEmpty(trigger.TaskID),
+		"document_id":     uuidPtrOrEmpty(trigger.DocumentID),
 		"comment_id":      uuidPtrOrEmpty(trigger.CommentID),
 		"chat_session_id": uuidPtrOrEmpty(trigger.ChatSessionID),
 	})
 	if err != nil {
+		d.dispatchGen.CompareAndDelete(trigger.ConversationID, gen)
 		return err
 	}
 	if !dispatched {
+		d.dispatchGen.CompareAndDelete(trigger.ConversationID, gen)
 		// Bridge disconnected between the IsOnline check above and here
 		// (e.g. the daemon crashed mid-dispatch) — fail the same way.
 		d.Log.Info("acpbridge: bridge went offline before dispatch; failing conversation",
@@ -84,7 +114,7 @@ func (d *Dispatcher) DispatchTrigger(ctx context.Context, trigger agent.Trigger,
 	if timeoutMinutes <= 0 {
 		timeoutMinutes = 1
 	}
-	go d.watchdog(trigger.ConversationID, trigger.ProjectID, time.Duration(timeoutMinutes)*time.Minute, trigger.ActorUserID)
+	go d.watchdog(trigger.ConversationID, trigger.ProjectID, time.Duration(timeoutMinutes)*time.Minute, trigger.ActorAccountID, gen)
 	return nil
 }
 
@@ -95,7 +125,7 @@ func (d *Dispatcher) failOffline(ctx context.Context, trigger agent.Trigger) err
 	}
 	d.publishQueueStatus(ctx, trigger.ConversationID, "failed")
 	if err := d.Publisher.PublishRealtime(ctx, trigger.ProjectID, trigger.ConversationID,
-		"agent.conversation.failed", nil, trigger.ActorUserID); err != nil {
+		"agent.conversation.failed", nil, trigger.ActorAccountID); err != nil {
 		d.Log.Warn("acpbridge: failed to publish realtime status",
 			"conversation_id", trigger.ConversationID, "error", err)
 	}
@@ -108,16 +138,21 @@ func (d *Dispatcher) failOffline(ctx context.Context, trigger agent.Trigger) err
 // published while the daemon is mid-reconnect is silently dropped, leaving
 // the conversation stuck at "running" with nothing to ever move it forward.
 // This is the backstop: after timeout, fail the conversation if it hasn't
-// already reached a terminal status. Race-safe against a legitimate late
+// already reached a terminal status or been paused by the user. Race-safe against a legitimate late
 // turn_status via ConvRepo.FailIfNotTerminal's conditional UPDATE.
 //
 // Runs detached from the request that scheduled it (mirrors
 // asyncio.create_task, not tied to the caller's own context) — a long-lived
 // timer that must survive after DispatchTrigger itself has already
 // returned.
-func (d *Dispatcher) watchdog(conversationID, projectID uuid.UUID, timeout time.Duration, actorUserID *uuid.UUID) {
+func (d *Dispatcher) watchdog(conversationID, projectID uuid.UUID, timeout time.Duration, actorAccountID *uuid.UUID, gen uint64) {
 	time.Sleep(timeout)
 	ctx := context.Background()
+	// A newer dispatch (the user resumed the conversation) owns the turn now
+	// and armed its own watchdog; leave it alone.
+	if !d.dispatchGen.CompareAndDelete(conversationID, gen) {
+		return
+	}
 	failed, err := d.ConvRepo.FailIfNotTerminal(ctx, conversationID, timeoutMessage)
 	if err != nil {
 		d.Log.Warn("acpbridge: watchdog failed to check/update conversation status",
@@ -131,7 +166,7 @@ func (d *Dispatcher) watchdog(conversationID, projectID uuid.UUID, timeout time.
 		"conversation_id", conversationID, "timeout", timeout)
 	d.publishQueueStatus(ctx, conversationID, "failed")
 	if err := d.Publisher.PublishRealtime(ctx, projectID, conversationID,
-		"agent.conversation.failed", nil, actorUserID); err != nil {
+		"agent.conversation.failed", nil, actorAccountID); err != nil {
 		d.Log.Warn("acpbridge: failed to publish realtime status",
 			"conversation_id", conversationID, "error", err)
 	}

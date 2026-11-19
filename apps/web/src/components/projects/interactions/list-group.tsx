@@ -1,13 +1,18 @@
 import { ChevronDown, ChevronRight, Play, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { Sprint, Task } from "@/lib/interaction-api";
-import type {
-	CustomFieldDefinition,
-	ProjectMember,
-	TaskStatus,
-	TaskType,
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useStableCallback } from "@/hooks/use-stable-callback";
+import { useStableValue } from "@/hooks/use-stable-value";
+
+import type { ChildTaskFilters, Sprint, Task } from "@/lib/interaction-api";
+import {
+	type CustomFieldDefinition,
+	findEpicType,
+	type ProjectMember,
+	type TaskStatus,
+	type TaskType,
 } from "@/lib/project-api";
 import { cn } from "@/lib/utils";
 
@@ -15,15 +20,31 @@ import { AddTaskRow } from "./add-task-row";
 import type { SprintFormPayload } from "./sprint-form-modal";
 import { SprintStatusBadge } from "./sprint-status-badge";
 import { StartSprintModal } from "./start-sprint-modal";
+import { SubtaskRows } from "./subtask-rows";
 import { TaskContextMenu } from "./task-context-menu";
 import { getRowColConfig, TaskRow } from "./task-row";
 import {
 	buildColumnDropUpdate,
 	type ColumnGroupDef,
+	defaultCreateStatusId,
 	type EpicsPagination,
 	getTaskSwimlaneKey,
 	type TaskFieldUpdate,
 } from "./view-utils";
+
+const EMPTY_EPICS: Task[] = [];
+
+// The copy of an Epic shown without its subtask counts, kept per source task so
+// the row it feeds stays memoized between renders.
+const countlessEpics = new WeakMap<Task, Task>();
+function withoutSubtaskCounts(task: Task): Task {
+	let copy = countlessEpics.get(task);
+	if (!copy) {
+		copy = { ...task, subtask_count: 0, subtask_done_count: 0 };
+		countlessEpics.set(task, copy);
+	}
+	return copy;
+}
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +111,122 @@ export interface ListGroupProps {
 	totalCount?: number;
 	/** Field sum from the API, used in place of the front-end computed sum in the header badge */
 	apiFieldSum?: number;
+	/** Set when the view nests subtasks under their parents. */
+	nesting?: SubtaskNesting;
 }
+
+export interface SubtaskNesting {
+	isExpanded: (taskId: string) => boolean;
+	onToggle: (taskId: string) => void;
+	/** The view's filters/sort, applied to each parent's children. */
+	filters: ChildTaskFilters;
+	filtersActive: boolean;
+}
+
+interface ListRowContentProps {
+	task: Task;
+	taskIdPrefix: string;
+	statuses: TaskStatus[];
+	taskTypes: TaskType[];
+	epics: Task[];
+	epicsPagination: EpicsPagination | undefined;
+	customFields: CustomFieldDefinition[];
+	visibleFields: string[];
+	canEdit: boolean;
+	showDragHandle: boolean;
+	isDragging: boolean;
+	projectId: string;
+	columnDefs: ColumnGroupDef[] | undefined;
+	prevGroupDef: ColumnGroupDef | undefined;
+	nextGroupDef: ColumnGroupDef | undefined;
+	nested: boolean;
+	expanded: boolean;
+	onOpen: (task: Task) => void;
+	onUpdateTaskField:
+		| ((taskId: string, update: TaskFieldUpdate) => void)
+		| undefined;
+	onDelete: ((taskId: string) => void) | undefined;
+	onMoveToGroupDef: (task: Task, target: ColumnGroupDef) => void;
+	onToggleSubtasks: (taskId: string) => void;
+}
+
+/** A table row and its context menu. Memoized with stable props, so opening a
+ *  task or loading more rows re-renders only the rows that changed instead of
+ *  every row in the table. */
+const ListRowContent = memo(function ListRowContent({
+	task,
+	taskIdPrefix,
+	statuses,
+	taskTypes,
+	epics,
+	epicsPagination,
+	customFields,
+	visibleFields,
+	canEdit,
+	showDragHandle,
+	isDragging,
+	projectId,
+	columnDefs,
+	prevGroupDef,
+	nextGroupDef,
+	nested,
+	expanded,
+	onOpen,
+	onUpdateTaskField,
+	onDelete,
+	onMoveToGroupDef,
+	onToggleSubtasks,
+}: ListRowContentProps) {
+	return (
+		<TaskContextMenu
+			task={task}
+			statuses={statuses}
+			taskTypes={taskTypes}
+			epics={epics}
+			epicsPagination={epicsPagination}
+			canEdit={canEdit}
+			onOpen={() => onOpen(task)}
+			onUpdate={onUpdateTaskField}
+			onDelete={canEdit ? onDelete : undefined}
+			columnDefs={columnDefs}
+			onMoveToColumnDef={onMoveToGroupDef}
+			taskIdPrefix={taskIdPrefix}
+			projectId={projectId}
+		>
+			<TaskRow
+				task={task}
+				taskIdPrefix={taskIdPrefix}
+				statuses={statuses}
+				taskTypes={taskTypes}
+				epics={epics}
+				epicsPagination={epicsPagination}
+				customFields={customFields}
+				visibleFields={visibleFields}
+				onClick={() => onOpen(task)}
+				showDragHandle={showDragHandle}
+				isDragging={isDragging}
+				canEdit={canEdit}
+				onUpdateTaskField={onUpdateTaskField}
+				onDelete={canEdit ? onDelete : undefined}
+				onMoveLeft={
+					canEdit && prevGroupDef
+						? () => onMoveToGroupDef(task, prevGroupDef)
+						: undefined
+				}
+				onMoveRight={
+					canEdit && nextGroupDef
+						? () => onMoveToGroupDef(task, nextGroupDef)
+						: undefined
+				}
+				subtasks={
+					nested
+						? { expanded, onToggle: () => onToggleSubtasks(task.id) }
+						: undefined
+				}
+			/>
+		</TaskContextMenu>
+	);
+});
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -102,7 +238,7 @@ export function ListGroup({
 	members,
 	reporters,
 	customFields,
-	epics = [],
+	epics = EMPTY_EPICS,
 	epicsPagination,
 	canCreate,
 	defaultCollapsed,
@@ -134,8 +270,10 @@ export function ListGroup({
 	groupPagination,
 	totalCount,
 	apiFieldSum,
+	nesting,
 }: ListGroupProps) {
 	const { t } = useTranslation("projects");
+	const isMobile = useIsMobile();
 	const [collapsed, setCollapsed] = useState(defaultCollapsed ?? false);
 	const [draggingId, setDraggingId] = useState<string | null>(null);
 	const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -169,15 +307,34 @@ export function ListGroup({
 			onUpdateTaskField?.(task.id, colUpdate);
 	};
 
+	// Stable handles for the memoized rows (see ListRowContent): a row only
+	// re-renders when something it shows changes, not on every render of the
+	// group — which a task opening or a page of tasks loading triggers.
+	const stableTaskClick = useStableCallback((task: Task) => onTaskClick(task));
+	const stableUpdateField = useStableCallback(
+		(taskId: string, update: TaskFieldUpdate) =>
+			onUpdateTaskField?.(taskId, update),
+	);
+	const stableDelete = useStableCallback((taskId: string) =>
+		onDeleteTask?.(taskId),
+	);
+	const stableMoveToGroupDef = useStableCallback(
+		(task: Task, target: ColumnGroupDef) => moveTaskToGroupDef(task, target),
+	);
+	const stableToggleSubtasks = useStableCallback((taskId: string) =>
+		nesting?.onToggle(taskId),
+	);
+	const stablePrevGroupDef = useStableValue(prevGroupDef);
+	const stableNextGroupDef = useStableValue(nextGroupDef);
+	const stableAllGroupDefs = useStableValue(allGroupDefs);
+
 	// Builds onCreateTask arguments for either grouping mode
 	const handleAdd = (title: string, typeId: string | null) => {
 		if (isStatusGrouping) {
 			return onCreateTask(groupDef.key as string, title, typeId);
 		}
-		const defaultStatus =
-			statuses.find((s) => s.category !== "done") ?? statuses[0];
 		return onCreateTask(
-			defaultStatus?.id ?? "",
+			defaultCreateStatusId(statuses),
 			title,
 			typeId,
 			extraCreateFields,
@@ -281,9 +438,9 @@ export function ListGroup({
 	// ── Column-header row ─────────────────────────────────────────────────────
 
 	const columnHeaders = (
-		<div className="flex items-center gap-3 px-4 py-1.5 bg-muted/20 border-b border-border/25">
-			{isDraggable && <div className="w-3 shrink-0" />}
-			<div className="w-20 shrink-0 text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground/60">
+		<div className="flex items-center gap-2 px-4 py-1.5 bg-muted/20 border-b border-border/25 sm:gap-3">
+			{isDraggable && !isMobile && <div className="w-3 shrink-0" />}
+			<div className="w-14 shrink-0 sm:w-20 text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground/60">
 				{t("board.listGroup.columnHeaders.id")}
 			</div>
 			<div className="flex-1 text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground/60">
@@ -309,7 +466,7 @@ export function ListGroup({
 
 	// ── Task row renderer ─────────────────────────────────────────────────────
 
-	const renderTaskRow = (
+	const renderTaskRowInner = (
 		task: Task,
 		index: number,
 		groupKey: string,
@@ -427,50 +584,79 @@ export function ListGroup({
 					: (e) => handleIntraGroupDrop(e, task, index)
 			}
 		>
-			<TaskContextMenu
+			<ListRowContent
 				task={task}
+				taskIdPrefix={taskIdPrefix}
 				statuses={statuses}
 				taskTypes={taskTypes}
 				epics={epics}
 				epicsPagination={epicsPagination}
+				customFields={customFields}
+				visibleFields={visibleFields}
 				canEdit={!!canEdit}
-				onOpen={() => onTaskClick(task)}
-				onUpdate={onUpdateTaskField}
-				onDelete={canEdit ? onDeleteTask : undefined}
-				columnDefs={allGroupDefs}
-				onMoveToColumnDef={moveTaskToGroupDef}
-				taskIdPrefix={taskIdPrefix}
+				showDragHandle={isDraggable && !isMobile}
+				isDragging={draggingId === task.id}
 				projectId={projectId}
-			>
-				<TaskRow
-					task={task}
-					taskIdPrefix={taskIdPrefix}
-					statuses={statuses}
-					taskTypes={taskTypes}
-					epics={epics}
-					epicsPagination={epicsPagination}
-					customFields={customFields}
-					visibleFields={visibleFields}
-					onClick={() => onTaskClick(task)}
-					showDragHandle={isDraggable}
-					isDragging={draggingId === task.id}
-					canEdit={canEdit}
-					onUpdateTaskField={onUpdateTaskField}
-					onDelete={canEdit ? onDeleteTask : undefined}
-					onMoveLeft={
-						canEdit && prevGroupDef
-							? () => moveTaskToGroupDef(task, prevGroupDef)
-							: undefined
-					}
-					onMoveRight={
-						canEdit && nextGroupDef
-							? () => moveTaskToGroupDef(task, nextGroupDef)
-							: undefined
-					}
-				/>
-			</TaskContextMenu>
+				columnDefs={stableAllGroupDefs}
+				prevGroupDef={stablePrevGroupDef}
+				nextGroupDef={stableNextGroupDef}
+				nested={!!nesting}
+				expanded={!!nesting?.isExpanded(task.id)}
+				onOpen={stableTaskClick}
+				onUpdateTaskField={onUpdateTaskField ? stableUpdateField : undefined}
+				onDelete={onDeleteTask ? stableDelete : undefined}
+				onMoveToGroupDef={stableMoveToGroupDef}
+				onToggleSubtasks={stableToggleSubtasks}
+			/>
 		</div>
 	);
+
+	const epicTypeId = findEpicType(taskTypes)?.id;
+	const renderTaskRow = (
+		listed: Task,
+		index: number,
+		groupKey: string,
+		swimKey?: string,
+	) => {
+		// An Epic's children are also listed flat here, so the Table doesn't
+		// nest them (only the Timeline does).
+		const task =
+			epicTypeId && listed.task_type_id === epicTypeId
+				? withoutSubtaskCounts(listed)
+				: listed;
+		return (
+			<Fragment key={task.id}>
+				{renderTaskRowInner(task, index, groupKey, swimKey)}
+				{nesting?.isExpanded(task.id) && (task.subtask_count ?? 0) > 0 && (
+					<SubtaskRows
+						projectId={projectId}
+						parent={task}
+						depth={1}
+						filters={nesting.filters}
+						filtersActive={nesting.filtersActive}
+						rowProps={{
+							taskIdPrefix,
+							statuses,
+							taskTypes,
+							epics,
+							epicsPagination,
+							customFields,
+							visibleFields,
+							canEdit,
+							onUpdateTaskField,
+							onDelete: canEdit ? onDeleteTask : undefined,
+						}}
+						statuses={statuses}
+						creatableTypes={taskTypes}
+						canCreate={canCreate}
+						isExpanded={nesting.isExpanded}
+						onToggle={nesting.onToggle}
+						onTaskClick={onTaskClick}
+					/>
+				)}
+			</Fragment>
+		);
+	};
 
 	const showAddTask =
 		canCreate &&
@@ -552,7 +738,7 @@ export function ListGroup({
 							setStartSprintError(null);
 							setStartSprintOpen(true);
 						}}
-						className="flex items-center gap-1.5 rounded-md bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600 active:scale-95 transition-all duration-150 shrink-0"
+						className="flex items-center gap-1.5 rounded-md bg-success px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-success active:scale-95 transition-all duration-150 shrink-0"
 					>
 						<Play className="size-3 fill-white" />
 						{t("board.listGroup.startSprint")}

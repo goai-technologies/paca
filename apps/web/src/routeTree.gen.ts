@@ -10,16 +10,22 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SetPasswordRouteImport } from './routes/set-password'
+import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ChangePasswordRouteImport } from './routes/change-password'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LoginMfaRouteImport } from './routes/login/mfa'
 import { Route as AuthenticatedConversationsRouteImport } from './routes/_authenticated/conversations'
-import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
+import { Route as AuthenticatedTaskKeyRouteImport } from './routes/_authenticated/$taskKey'
+import { Route as AuthenticatedAccountRouteRouteImport } from './routes/_authenticated/account/route'
 import { Route as AuthenticatedHomeIndexRouteImport } from './routes/_authenticated/home/index'
 import { Route as AuthenticatedConversationsIndexRouteImport } from './routes/_authenticated/conversations/index'
+import { Route as AuthenticatedAccountIndexRouteImport } from './routes/_authenticated/account/index'
 import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated/projects/$projectId'
-import { Route as AuthenticatedProfileApiKeysRouteImport } from './routes/_authenticated/profile/api-keys'
 import { Route as AuthenticatedConversationsConversationIdRouteImport } from './routes/_authenticated/conversations/$conversationId'
+import { Route as AuthenticatedAccountSecurityRouteImport } from './routes/_authenticated/account/security'
+import { Route as AuthenticatedAccountPreferencesRouteImport } from './routes/_authenticated/account/preferences'
+import { Route as AuthenticatedAccountApiKeysRouteImport } from './routes/_authenticated/account/api-keys'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated/projects/$projectId/index'
 import { Route as AuthenticatedAdminUsersIndexRouteImport } from './routes/_authenticated/admin/users/index'
 import { Route as AuthenticatedAdminSettingsIndexRouteImport } from './routes/_authenticated/admin/settings/index'
@@ -29,6 +35,8 @@ import { Route as AuthenticatedAdminGlobalRolesIndexRouteImport } from './routes
 import { Route as AuthenticatedAdminChangelogIndexRouteImport } from './routes/_authenticated/admin/changelog/index'
 import { Route as AuthenticatedAdminAgentsIndexRouteImport } from './routes/_authenticated/admin/agents/index'
 import { Route as AuthenticatedProjectsProjectIdConversationsRouteImport } from './routes/_authenticated/projects/$projectId/conversations'
+import { Route as AuthenticatedPluginPagesPluginIdSlugRouteImport } from './routes/_authenticated/plugin-pages/$pluginId/$slug'
+import { Route as AuthenticatedGitSetupCallbackRouteImport } from './routes/_authenticated/git/setup/callback'
 import { Route as AuthenticatedProjectsProjectIdTeamIndexRouteImport } from './routes/_authenticated/projects/$projectId/team/index'
 import { Route as AuthenticatedProjectsProjectIdSettingsIndexRouteImport } from './routes/_authenticated/projects/$projectId/settings/index'
 import { Route as AuthenticatedProjectsProjectIdEnvironmentsIndexRouteImport } from './routes/_authenticated/projects/$projectId/environments/index'
@@ -60,6 +68,11 @@ const SetPasswordRoute = SetPasswordRouteImport.update({
   path: '/set-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ChangePasswordRoute = ChangePasswordRouteImport.update({
   id: '/change-password',
   path: '/change-password',
@@ -74,16 +87,26 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginMfaRoute = LoginMfaRouteImport.update({
+  id: '/login/mfa',
+  path: '/login/mfa',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedConversationsRoute =
   AuthenticatedConversationsRouteImport.update({
     id: '/conversations',
     path: '/conversations',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedProfileIndexRoute =
-  AuthenticatedProfileIndexRouteImport.update({
-    id: '/profile/',
-    path: '/profile/',
+const AuthenticatedTaskKeyRoute = AuthenticatedTaskKeyRouteImport.update({
+  id: '/$taskKey',
+  path: '/$taskKey',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedAccountRouteRoute =
+  AuthenticatedAccountRouteRouteImport.update({
+    id: '/account',
+    path: '/account',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedHomeIndexRoute = AuthenticatedHomeIndexRouteImport.update({
@@ -97,16 +120,16 @@ const AuthenticatedConversationsIndexRoute =
     path: '/',
     getParentRoute: () => AuthenticatedConversationsRoute,
   } as any)
+const AuthenticatedAccountIndexRoute =
+  AuthenticatedAccountIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedAccountRouteRoute,
+  } as any)
 const AuthenticatedProjectsProjectIdRoute =
   AuthenticatedProjectsProjectIdRouteImport.update({
     id: '/projects/$projectId',
     path: '/projects/$projectId',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedProfileApiKeysRoute =
-  AuthenticatedProfileApiKeysRouteImport.update({
-    id: '/profile/api-keys',
-    path: '/profile/api-keys',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedConversationsConversationIdRoute =
@@ -114,6 +137,24 @@ const AuthenticatedConversationsConversationIdRoute =
     id: '/$conversationId',
     path: '/$conversationId',
     getParentRoute: () => AuthenticatedConversationsRoute,
+  } as any)
+const AuthenticatedAccountSecurityRoute =
+  AuthenticatedAccountSecurityRouteImport.update({
+    id: '/security',
+    path: '/security',
+    getParentRoute: () => AuthenticatedAccountRouteRoute,
+  } as any)
+const AuthenticatedAccountPreferencesRoute =
+  AuthenticatedAccountPreferencesRouteImport.update({
+    id: '/preferences',
+    path: '/preferences',
+    getParentRoute: () => AuthenticatedAccountRouteRoute,
+  } as any)
+const AuthenticatedAccountApiKeysRoute =
+  AuthenticatedAccountApiKeysRouteImport.update({
+    id: '/api-keys',
+    path: '/api-keys',
+    getParentRoute: () => AuthenticatedAccountRouteRoute,
   } as any)
 const AuthenticatedProjectsProjectIdIndexRoute =
   AuthenticatedProjectsProjectIdIndexRouteImport.update({
@@ -168,6 +209,18 @@ const AuthenticatedProjectsProjectIdConversationsRoute =
     id: '/conversations',
     path: '/conversations',
     getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedPluginPagesPluginIdSlugRoute =
+  AuthenticatedPluginPagesPluginIdSlugRouteImport.update({
+    id: '/plugin-pages/$pluginId/$slug',
+    path: '/plugin-pages/$pluginId/$slug',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedGitSetupCallbackRoute =
+  AuthenticatedGitSetupCallbackRouteImport.update({
+    id: '/git/setup/callback',
+    path: '/git/setup/callback',
+    getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedProjectsProjectIdTeamIndexRoute =
   AuthenticatedProjectsProjectIdTeamIndexRouteImport.update({
@@ -333,14 +386,22 @@ const AuthenticatedProjectsProjectIdEnvironmentsEnvironmentIdPortForwardsPortFor
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/change-password': typeof ChangePasswordRoute
+  '/profile': typeof ProfileRoute
   '/set-password': typeof SetPasswordRoute
+  '/account': typeof AuthenticatedAccountRouteRouteWithChildren
+  '/$taskKey': typeof AuthenticatedTaskKeyRoute
   '/conversations': typeof AuthenticatedConversationsRouteWithChildren
+  '/login/mfa': typeof LoginMfaRoute
+  '/account/api-keys': typeof AuthenticatedAccountApiKeysRoute
+  '/account/preferences': typeof AuthenticatedAccountPreferencesRoute
+  '/account/security': typeof AuthenticatedAccountSecurityRoute
   '/conversations/$conversationId': typeof AuthenticatedConversationsConversationIdRoute
-  '/profile/api-keys': typeof AuthenticatedProfileApiKeysRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
+  '/account/': typeof AuthenticatedAccountIndexRoute
   '/conversations/': typeof AuthenticatedConversationsIndexRoute
   '/home/': typeof AuthenticatedHomeIndexRoute
-  '/profile/': typeof AuthenticatedProfileIndexRoute
+  '/git/setup/callback': typeof AuthenticatedGitSetupCallbackRoute
+  '/plugin-pages/$pluginId/$slug': typeof AuthenticatedPluginPagesPluginIdSlugRoute
   '/projects/$projectId/conversations': typeof AuthenticatedProjectsProjectIdConversationsRouteWithChildren
   '/admin/agents/': typeof AuthenticatedAdminAgentsIndexRoute
   '/admin/changelog/': typeof AuthenticatedAdminChangelogIndexRoute
@@ -379,12 +440,19 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/change-password': typeof ChangePasswordRoute
+  '/profile': typeof ProfileRoute
   '/set-password': typeof SetPasswordRoute
+  '/$taskKey': typeof AuthenticatedTaskKeyRoute
+  '/login/mfa': typeof LoginMfaRoute
+  '/account/api-keys': typeof AuthenticatedAccountApiKeysRoute
+  '/account/preferences': typeof AuthenticatedAccountPreferencesRoute
+  '/account/security': typeof AuthenticatedAccountSecurityRoute
   '/conversations/$conversationId': typeof AuthenticatedConversationsConversationIdRoute
-  '/profile/api-keys': typeof AuthenticatedProfileApiKeysRoute
+  '/account': typeof AuthenticatedAccountIndexRoute
   '/conversations': typeof AuthenticatedConversationsIndexRoute
   '/home': typeof AuthenticatedHomeIndexRoute
-  '/profile': typeof AuthenticatedProfileIndexRoute
+  '/git/setup/callback': typeof AuthenticatedGitSetupCallbackRoute
+  '/plugin-pages/$pluginId/$slug': typeof AuthenticatedPluginPagesPluginIdSlugRoute
   '/admin/agents': typeof AuthenticatedAdminAgentsIndexRoute
   '/admin/changelog': typeof AuthenticatedAdminChangelogIndexRoute
   '/admin/global-roles': typeof AuthenticatedAdminGlobalRolesIndexRoute
@@ -424,14 +492,22 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/change-password': typeof ChangePasswordRoute
+  '/profile': typeof ProfileRoute
   '/set-password': typeof SetPasswordRoute
+  '/_authenticated/account': typeof AuthenticatedAccountRouteRouteWithChildren
+  '/_authenticated/$taskKey': typeof AuthenticatedTaskKeyRoute
   '/_authenticated/conversations': typeof AuthenticatedConversationsRouteWithChildren
+  '/login/mfa': typeof LoginMfaRoute
+  '/_authenticated/account/api-keys': typeof AuthenticatedAccountApiKeysRoute
+  '/_authenticated/account/preferences': typeof AuthenticatedAccountPreferencesRoute
+  '/_authenticated/account/security': typeof AuthenticatedAccountSecurityRoute
   '/_authenticated/conversations/$conversationId': typeof AuthenticatedConversationsConversationIdRoute
-  '/_authenticated/profile/api-keys': typeof AuthenticatedProfileApiKeysRoute
   '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
+  '/_authenticated/account/': typeof AuthenticatedAccountIndexRoute
   '/_authenticated/conversations/': typeof AuthenticatedConversationsIndexRoute
   '/_authenticated/home/': typeof AuthenticatedHomeIndexRoute
-  '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
+  '/_authenticated/git/setup/callback': typeof AuthenticatedGitSetupCallbackRoute
+  '/_authenticated/plugin-pages/$pluginId/$slug': typeof AuthenticatedPluginPagesPluginIdSlugRoute
   '/_authenticated/projects/$projectId/conversations': typeof AuthenticatedProjectsProjectIdConversationsRouteWithChildren
   '/_authenticated/admin/agents/': typeof AuthenticatedAdminAgentsIndexRoute
   '/_authenticated/admin/changelog/': typeof AuthenticatedAdminChangelogIndexRoute
@@ -472,14 +548,22 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/change-password'
+    | '/profile'
     | '/set-password'
+    | '/account'
+    | '/$taskKey'
     | '/conversations'
+    | '/login/mfa'
+    | '/account/api-keys'
+    | '/account/preferences'
+    | '/account/security'
     | '/conversations/$conversationId'
-    | '/profile/api-keys'
     | '/projects/$projectId'
+    | '/account/'
     | '/conversations/'
     | '/home/'
-    | '/profile/'
+    | '/git/setup/callback'
+    | '/plugin-pages/$pluginId/$slug'
     | '/projects/$projectId/conversations'
     | '/admin/agents/'
     | '/admin/changelog/'
@@ -518,12 +602,19 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/change-password'
+    | '/profile'
     | '/set-password'
+    | '/$taskKey'
+    | '/login/mfa'
+    | '/account/api-keys'
+    | '/account/preferences'
+    | '/account/security'
     | '/conversations/$conversationId'
-    | '/profile/api-keys'
+    | '/account'
     | '/conversations'
     | '/home'
-    | '/profile'
+    | '/git/setup/callback'
+    | '/plugin-pages/$pluginId/$slug'
     | '/admin/agents'
     | '/admin/changelog'
     | '/admin/global-roles'
@@ -562,14 +653,22 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/change-password'
+    | '/profile'
     | '/set-password'
+    | '/_authenticated/account'
+    | '/_authenticated/$taskKey'
     | '/_authenticated/conversations'
+    | '/login/mfa'
+    | '/_authenticated/account/api-keys'
+    | '/_authenticated/account/preferences'
+    | '/_authenticated/account/security'
     | '/_authenticated/conversations/$conversationId'
-    | '/_authenticated/profile/api-keys'
     | '/_authenticated/projects/$projectId'
+    | '/_authenticated/account/'
     | '/_authenticated/conversations/'
     | '/_authenticated/home/'
-    | '/_authenticated/profile/'
+    | '/_authenticated/git/setup/callback'
+    | '/_authenticated/plugin-pages/$pluginId/$slug'
     | '/_authenticated/projects/$projectId/conversations'
     | '/_authenticated/admin/agents/'
     | '/_authenticated/admin/changelog/'
@@ -610,7 +709,9 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   ChangePasswordRoute: typeof ChangePasswordRoute
+  ProfileRoute: typeof ProfileRoute
   SetPasswordRoute: typeof SetPasswordRoute
+  LoginMfaRoute: typeof LoginMfaRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -620,6 +721,13 @@ declare module '@tanstack/react-router' {
       path: '/set-password'
       fullPath: '/set-password'
       preLoaderRoute: typeof SetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/change-password': {
@@ -643,6 +751,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login/mfa': {
+      id: '/login/mfa'
+      path: '/login/mfa'
+      fullPath: '/login/mfa'
+      preLoaderRoute: typeof LoginMfaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/conversations': {
       id: '/_authenticated/conversations'
       path: '/conversations'
@@ -650,11 +765,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedConversationsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/profile/': {
-      id: '/_authenticated/profile/'
-      path: '/profile'
-      fullPath: '/profile/'
-      preLoaderRoute: typeof AuthenticatedProfileIndexRouteImport
+    '/_authenticated/$taskKey': {
+      id: '/_authenticated/$taskKey'
+      path: '/$taskKey'
+      fullPath: '/$taskKey'
+      preLoaderRoute: typeof AuthenticatedTaskKeyRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/account': {
+      id: '/_authenticated/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AuthenticatedAccountRouteRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/home/': {
@@ -671,18 +793,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedConversationsIndexRouteImport
       parentRoute: typeof AuthenticatedConversationsRoute
     }
+    '/_authenticated/account/': {
+      id: '/_authenticated/account/'
+      path: '/'
+      fullPath: '/account/'
+      preLoaderRoute: typeof AuthenticatedAccountIndexRouteImport
+      parentRoute: typeof AuthenticatedAccountRouteRoute
+    }
     '/_authenticated/projects/$projectId': {
       id: '/_authenticated/projects/$projectId'
       path: '/projects/$projectId'
       fullPath: '/projects/$projectId'
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/profile/api-keys': {
-      id: '/_authenticated/profile/api-keys'
-      path: '/profile/api-keys'
-      fullPath: '/profile/api-keys'
-      preLoaderRoute: typeof AuthenticatedProfileApiKeysRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/conversations/$conversationId': {
@@ -691,6 +813,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/conversations/$conversationId'
       preLoaderRoute: typeof AuthenticatedConversationsConversationIdRouteImport
       parentRoute: typeof AuthenticatedConversationsRoute
+    }
+    '/_authenticated/account/security': {
+      id: '/_authenticated/account/security'
+      path: '/security'
+      fullPath: '/account/security'
+      preLoaderRoute: typeof AuthenticatedAccountSecurityRouteImport
+      parentRoute: typeof AuthenticatedAccountRouteRoute
+    }
+    '/_authenticated/account/preferences': {
+      id: '/_authenticated/account/preferences'
+      path: '/preferences'
+      fullPath: '/account/preferences'
+      preLoaderRoute: typeof AuthenticatedAccountPreferencesRouteImport
+      parentRoute: typeof AuthenticatedAccountRouteRoute
+    }
+    '/_authenticated/account/api-keys': {
+      id: '/_authenticated/account/api-keys'
+      path: '/api-keys'
+      fullPath: '/account/api-keys'
+      preLoaderRoute: typeof AuthenticatedAccountApiKeysRouteImport
+      parentRoute: typeof AuthenticatedAccountRouteRoute
     }
     '/_authenticated/projects/$projectId/': {
       id: '/_authenticated/projects/$projectId/'
@@ -754,6 +897,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/projects/$projectId/conversations'
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdConversationsRouteImport
       parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/plugin-pages/$pluginId/$slug': {
+      id: '/_authenticated/plugin-pages/$pluginId/$slug'
+      path: '/plugin-pages/$pluginId/$slug'
+      fullPath: '/plugin-pages/$pluginId/$slug'
+      preLoaderRoute: typeof AuthenticatedPluginPagesPluginIdSlugRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/git/setup/callback': {
+      id: '/_authenticated/git/setup/callback'
+      path: '/git/setup/callback'
+      fullPath: '/git/setup/callback'
+      preLoaderRoute: typeof AuthenticatedGitSetupCallbackRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/projects/$projectId/team/': {
       id: '/_authenticated/projects/$projectId/team/'
@@ -933,6 +1090,26 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedAccountRouteRouteChildren {
+  AuthenticatedAccountApiKeysRoute: typeof AuthenticatedAccountApiKeysRoute
+  AuthenticatedAccountPreferencesRoute: typeof AuthenticatedAccountPreferencesRoute
+  AuthenticatedAccountSecurityRoute: typeof AuthenticatedAccountSecurityRoute
+  AuthenticatedAccountIndexRoute: typeof AuthenticatedAccountIndexRoute
+}
+
+const AuthenticatedAccountRouteRouteChildren: AuthenticatedAccountRouteRouteChildren =
+  {
+    AuthenticatedAccountApiKeysRoute: AuthenticatedAccountApiKeysRoute,
+    AuthenticatedAccountPreferencesRoute: AuthenticatedAccountPreferencesRoute,
+    AuthenticatedAccountSecurityRoute: AuthenticatedAccountSecurityRoute,
+    AuthenticatedAccountIndexRoute: AuthenticatedAccountIndexRoute,
+  }
+
+const AuthenticatedAccountRouteRouteWithChildren =
+  AuthenticatedAccountRouteRoute._addFileChildren(
+    AuthenticatedAccountRouteRouteChildren,
+  )
+
 interface AuthenticatedConversationsRouteChildren {
   AuthenticatedConversationsConversationIdRoute: typeof AuthenticatedConversationsConversationIdRoute
   AuthenticatedConversationsIndexRoute: typeof AuthenticatedConversationsIndexRoute
@@ -1047,11 +1224,13 @@ const AuthenticatedProjectsProjectIdRouteWithChildren =
   )
 
 interface AuthenticatedRouteChildren {
+  AuthenticatedAccountRouteRoute: typeof AuthenticatedAccountRouteRouteWithChildren
+  AuthenticatedTaskKeyRoute: typeof AuthenticatedTaskKeyRoute
   AuthenticatedConversationsRoute: typeof AuthenticatedConversationsRouteWithChildren
-  AuthenticatedProfileApiKeysRoute: typeof AuthenticatedProfileApiKeysRoute
   AuthenticatedProjectsProjectIdRoute: typeof AuthenticatedProjectsProjectIdRouteWithChildren
   AuthenticatedHomeIndexRoute: typeof AuthenticatedHomeIndexRoute
-  AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
+  AuthenticatedGitSetupCallbackRoute: typeof AuthenticatedGitSetupCallbackRoute
+  AuthenticatedPluginPagesPluginIdSlugRoute: typeof AuthenticatedPluginPagesPluginIdSlugRoute
   AuthenticatedAdminAgentsIndexRoute: typeof AuthenticatedAdminAgentsIndexRoute
   AuthenticatedAdminChangelogIndexRoute: typeof AuthenticatedAdminChangelogIndexRoute
   AuthenticatedAdminGlobalRolesIndexRoute: typeof AuthenticatedAdminGlobalRolesIndexRoute
@@ -1065,12 +1244,15 @@ interface AuthenticatedRouteChildren {
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedAccountRouteRoute: AuthenticatedAccountRouteRouteWithChildren,
+  AuthenticatedTaskKeyRoute: AuthenticatedTaskKeyRoute,
   AuthenticatedConversationsRoute: AuthenticatedConversationsRouteWithChildren,
-  AuthenticatedProfileApiKeysRoute: AuthenticatedProfileApiKeysRoute,
   AuthenticatedProjectsProjectIdRoute:
     AuthenticatedProjectsProjectIdRouteWithChildren,
   AuthenticatedHomeIndexRoute: AuthenticatedHomeIndexRoute,
-  AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
+  AuthenticatedGitSetupCallbackRoute: AuthenticatedGitSetupCallbackRoute,
+  AuthenticatedPluginPagesPluginIdSlugRoute:
+    AuthenticatedPluginPagesPluginIdSlugRoute,
   AuthenticatedAdminAgentsIndexRoute: AuthenticatedAdminAgentsIndexRoute,
   AuthenticatedAdminChangelogIndexRoute: AuthenticatedAdminChangelogIndexRoute,
   AuthenticatedAdminGlobalRolesIndexRoute:
@@ -1096,7 +1278,9 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   ChangePasswordRoute: ChangePasswordRoute,
+  ProfileRoute: ProfileRoute,
   SetPasswordRoute: SetPasswordRoute,
+  LoginMfaRoute: LoginMfaRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

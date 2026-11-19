@@ -10,7 +10,6 @@ import (
 	"github.com/Paca-AI/api/internal/apierr"
 	exportdom "github.com/Paca-AI/api/internal/domain/export"
 	"github.com/Paca-AI/api/internal/transport/http/dto"
-	"github.com/Paca-AI/api/internal/transport/http/middleware"
 	"github.com/Paca-AI/api/internal/transport/http/presenter"
 )
 
@@ -35,18 +34,12 @@ func (h *ProjectExportHandler) RequestExport(w http.ResponseWriter, r *http.Requ
 		presenter.Error(w, r, err)
 		return
 	}
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "authentication required"))
-		return
-	}
-	userID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+	accountID, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
-	e, err := h.svc.RequestExport(r.Context(), projectID, userID)
+	e, err := h.svc.RequestExport(r.Context(), projectID, accountID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -54,14 +47,25 @@ func (h *ProjectExportHandler) RequestExport(w http.ResponseWriter, r *http.Requ
 	presenter.Accepted(w, r, dto.ProjectExportFromEntity(e, time.Now()))
 }
 
-// ListExports handles GET /projects/:projectId/exports.
+// ListExports handles GET /projects/:projectId/exports — one numbered page
+// (page, default 1; page_size, default 20, max 100), newest first.
 func (h *ProjectExportHandler) ListExports(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	items, err := h.svc.List(r.Context(), projectID)
+	pageSize, err := parsePageSize(r, 20, 100)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	page, err := parsePage(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	items, total, err := h.svc.List(r.Context(), projectID, page, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -71,7 +75,7 @@ func (h *ProjectExportHandler) ListExports(w http.ResponseWriter, r *http.Reques
 	for _, e := range items {
 		resp = append(resp, dto.ProjectExportFromEntity(e, now))
 	}
-	presenter.OK(w, r, map[string]any{"items": resp})
+	presenter.OK(w, r, map[string]any{"items": resp, "page": page, "page_size": pageSize, "total_count": total})
 }
 
 // GetExport handles GET /projects/:projectId/exports/:exportId.

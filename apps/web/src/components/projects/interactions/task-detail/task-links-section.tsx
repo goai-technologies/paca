@@ -1,16 +1,23 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	useInfiniteQuery,
+	useMutation,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { ExternalLink, Link2, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
 import {
 	createTaskLink,
 	type DisplayLinkType,
 	deleteTaskLink,
 	LINK_TYPE_LABELS,
+	projectTaskLinksKey,
 	type TaskLink,
 	taskLinksQueryOptions,
 } from "@/lib/interaction-api";
+import { notifyError } from "@/lib/notify";
 import {
 	AddTaskLinkModal,
 	type AddTaskLinkPayload,
@@ -55,13 +62,12 @@ export function TaskLinksSection({
 	const { t } = useTranslation("projects");
 	const qc = useQueryClient();
 	const [modalOpen, setModalOpen] = useState(false);
-	const [linkActionError, setLinkActionError] = useState<string | null>(null);
 
-	const { data: links = [] } = useQuery(
-		taskLinksQueryOptions(projectId, taskId),
-	);
+	const linksQuery = useInfiniteQuery(taskLinksQueryOptions(projectId, taskId));
+	const links = linksQuery.data?.pages.flatMap((p) => p.items) ?? [];
 
 	const createMutation = useMutation({
+		meta: { success: "added", subject: "taskLink" },
 		mutationFn: ({
 			sourceTaskId,
 			targetTaskId,
@@ -72,39 +78,43 @@ export function TaskLinksSection({
 				link_type: linkType,
 			}),
 		onSuccess: () => {
-			setLinkActionError(null);
 			qc.invalidateQueries({
 				queryKey: taskLinksQueryOptions(projectId, taskId).queryKey,
 			});
+			// The Gantt view draws its dependency arrows from these.
+			qc.invalidateQueries({ queryKey: projectTaskLinksKey(projectId) });
 		},
 		onError: (err: unknown) => {
 			const code = getApiErrorCode(err);
 			if (code === ApiErrorCode.TaskLinkAlreadyExists) {
-				setLinkActionError(t("taskDetail.links.errors.alreadyExists"));
+				notifyError(err, t("taskDetail.links.errors.alreadyExists"));
 				return;
 			}
 			if (code === ApiErrorCode.TaskLinkSelf) {
-				setLinkActionError(t("taskDetail.links.errors.cannotLinkSelf"));
+				notifyError(err, t("taskDetail.links.errors.cannotLinkSelf"));
 				return;
 			}
 			if (code === ApiErrorCode.TaskLinkCrossProject) {
-				setLinkActionError(t("taskDetail.links.errors.crossProject"));
+				notifyError(err, t("taskDetail.links.errors.crossProject"));
 				return;
 			}
-			setLinkActionError(t("taskDetail.links.errors.createFailed"));
+			notifyError(err, t("taskDetail.links.errors.createFailed"));
 		},
 	});
 
 	const deleteMutation = useMutation({
+		meta: { success: "removed", subject: "taskLink" },
 		mutationFn: (linkId: string) => deleteTaskLink(projectId, taskId, linkId),
 		onSuccess: () => {
-			setLinkActionError(null);
 			qc.invalidateQueries({
 				queryKey: taskLinksQueryOptions(projectId, taskId).queryKey,
 			});
+			// The Gantt view draws its dependency arrows from these.
+			qc.invalidateQueries({ queryKey: projectTaskLinksKey(projectId) });
 		},
 		onError: (err: unknown) => {
-			setLinkActionError(
+			notifyError(
+				err,
 				getApiErrorCode(err) === ApiErrorCode.TaskLinkNotFound
 					? t("taskDetail.links.errors.notFound")
 					: t("taskDetail.links.errors.deleteFailed"),
@@ -131,7 +141,6 @@ export function TaskLinksSection({
 					<button
 						type="button"
 						onClick={() => {
-							setLinkActionError(null);
 							setModalOpen(true);
 						}}
 						className="flex items-center gap-1.5 rounded-lg bg-primary/8 text-primary/80 hover:bg-primary/15 hover:text-primary px-2.5 py-1.5 text-xs font-semibold transition-all duration-150"
@@ -141,12 +150,6 @@ export function TaskLinksSection({
 					</button>
 				)}
 			</div>
-
-			{linkActionError && (
-				<p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
-					{linkActionError}
-				</p>
-			)}
 
 			{orderedKeys.length > 0 && (
 				<div className="space-y-3">
@@ -219,6 +222,13 @@ export function TaskLinksSection({
 					))}
 				</div>
 			)}
+
+			<LoadMoreSentinel
+				hasMore={!!linksQuery.hasNextPage}
+				isLoadingMore={linksQuery.isFetchingNextPage}
+				isError={linksQuery.isFetchNextPageError}
+				onLoadMore={() => void linksQuery.fetchNextPage()}
+			/>
 
 			{orderedKeys.length === 0 && (
 				<div className="flex items-center gap-3 px-1 py-3 text-muted-foreground/45">

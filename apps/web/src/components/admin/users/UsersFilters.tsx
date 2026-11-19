@@ -1,26 +1,20 @@
-import { Loader2, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-
+import { SearchableList } from "@/components/projects/interactions/task-detail/property-field/searchable-list";
+import { RemoteSelect } from "@/components/shared/remote-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
+import { useRoleSearch } from "@/hooks/use-role-search";
 
 export const USERS_SEARCH_DEBOUNCE_MS = 300;
 
-// Select needs a non-empty value for its "no filter" item.
-const ALL_ROLES = "__all__";
-
 interface UsersFiltersProps {
-	/** Global role names to offer in the role menu. Empty hides the menu. */
-	roles: string[];
+	/** Whether to offer the role menu (the viewer may read roles). Its options
+	 *  are searched and paged on the server. */
+	canFilterByRole: boolean;
 	selectedRole: string;
 	/** A request is in flight — shows a spinner in the search box. */
 	isFetching: boolean;
@@ -34,7 +28,7 @@ interface UsersFiltersProps {
 }
 
 export function UsersFilters({
-	roles,
+	canFilterByRole,
 	selectedRole,
 	isFetching,
 	resultCount,
@@ -80,9 +74,9 @@ export function UsersFilters({
 					/>
 					<div className="absolute right-2 top-1/2 -translate-y-1/2">
 						{isFetching ? (
-							<Loader2
-								className="size-3.5 animate-spin text-muted-foreground"
-								aria-hidden
+							<Spinner
+								aria-hidden="true"
+								className="size-3.5 text-muted-foreground"
 							/>
 						) : value ? (
 							<button
@@ -96,34 +90,11 @@ export function UsersFilters({
 						) : null}
 					</div>
 				</div>
-				{roles.length > 0 ? (
-					<Select
-						value={selectedRole || ALL_ROLES}
-						onValueChange={(v) => {
-							if (v != null) onRoleChange(v === ALL_ROLES ? "" : v);
-						}}
-						items={[
-							{ value: ALL_ROLES, label: t("users.filters.allRoles") },
-							...roles.map((name) => ({ value: name, label: name })),
-						]}
-					>
-						<SelectTrigger
-							className="w-full sm:w-48"
-							aria-label={t("users.filters.roleLabel")}
-						>
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value={ALL_ROLES}>
-								{t("users.filters.allRoles")}
-							</SelectItem>
-							{roles.map((name) => (
-								<SelectItem key={name} value={name}>
-									{name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+				{canFilterByRole ? (
+					<RoleFilterSelect
+						selectedRole={selectedRole}
+						onChange={onRoleChange}
+					/>
 				) : null}
 			</div>
 			{isFiltering ? (
@@ -145,5 +116,61 @@ export function UsersFilters({
 				</div>
 			) : null}
 		</div>
+	);
+}
+
+/** Role menu of the filter bar. The filter is by role name, so the selected
+ *  value needs no lookup; the options are searched and paged as the menu opens. */
+function RoleFilterSelect({
+	selectedRole,
+	onChange,
+}: {
+	selectedRole: string;
+	onChange: (role: string) => void;
+}) {
+	const { t } = useTranslation("admin");
+	const [open, setOpen] = useState(false);
+	const search = useRoleSearch(undefined, open);
+	return (
+		<RemoteSelect
+			open={open}
+			onOpenChange={setOpen}
+			label={selectedRole || t("users.filters.allRoles")}
+			className="w-full sm:w-48"
+			contentClassName="w-64"
+		>
+			<SearchableList
+				remote={{
+					query: search.query,
+					onQueryChange: search.onQueryChange,
+					hasMore: search.hasMore,
+					isLoadingMore: search.isLoadingMore,
+					isError: search.isLoadMoreError,
+					onLoadMore: search.onLoadMore,
+				}}
+				pinned={
+					<button
+						type="button"
+						className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm hover:bg-muted/60 transition-colors duration-100"
+						onClick={() => {
+							onChange("");
+							setOpen(false);
+						}}
+					>
+						{t("users.filters.allRoles")}
+					</button>
+				}
+				items={search.roles.map((r) => ({
+					key: r.id,
+					label: r.name,
+					selected: r.name === selectedRole,
+					onSelect: () => {
+						onChange(r.name);
+						setOpen(false);
+					},
+					content: <span className="flex-1 truncate text-left">{r.name}</span>,
+				}))}
+			/>
+		</RemoteSelect>
 	);
 }

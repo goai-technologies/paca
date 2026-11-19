@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	pathpkg "path"
 	"regexp"
 	"strings"
 	"time"
@@ -56,8 +57,8 @@ const aiAgentHTTPTimeout = 30 * time.Second
 // create (ExecuteCreate), plain start (ExecuteStart), and restart-ports
 // (restartEnvironmentPorts, reached both from ExecuteStart's
 // PortsPendingRestart branch and from RestartEnvironment). The kubernetes
-// backend's own documented worst case for that work is podReadyTimeout
-// (60s) + readyTimeout (120s) + dindReadyTimeout (90s, DockerEnabled
+// backend's own documented worst case for that work is the default Pod-IP wait
+// (300s) + readyTimeout (120s) + dindReadyTimeout (90s, DockerEnabled
 // only) — see internal/sandbox/k8s/manager.go, sandbox/sandbox.go, and
 // internal/sandbox/k8s/dind.go — well past aiAgentHTTPTimeout's budget,
 // which is sized for this service's other, fast calls (stop/delete/
@@ -76,7 +77,7 @@ const aiAgentHTTPTimeout = 30 * time.Second
 // environment already running) agent-runner's own
 // RestartEnvironmentPorts never touches the Pod and returns almost
 // immediately — this ceiling only matters as a worst-case bound.
-const aiAgentProvisionHTTPTimeout = 5 * time.Minute
+const aiAgentProvisionHTTPTimeout = 10 * time.Minute
 
 // maxSlugAttempts bounds the collision-retry loop below so a pathological
 // run of collisions can't spin forever.
@@ -206,9 +207,12 @@ func (s *Service) publishStatusChanged(ctx context.Context, projectID, environme
 	if errMsg != nil {
 		payload["error_message"] = *errMsg
 	}
-	_ = s.publisher.Publish(ctx, events.ChannelRealtime, map[string]any{
-		"type":    events.TopicEnvironmentStatusChanged,
-		"payload": payload,
+	events.PublishRealtime(ctx, s.publisher, events.Event{
+		Topic:      events.TopicEnvironmentStatusChanged,
+		Payload:    payload,
+		ProjectID:  projectID,
+		EntityType: events.EntityEnvironment,
+		EntityID:   &environmentID,
 	})
 }
 
@@ -978,6 +982,11 @@ func (s *Service) ListFolders(ctx context.Context, projectID, environmentID uuid
 	return s.repo.ListFolders(ctx, env.ID, filter, cursorAfter, limit)
 }
 
+// environmentHomeRoot is the one directory that survives a container/Pod
+// recreation — the mounted workspace volume every environment folder must
+// live under. Same value agent-runner uses for its own Browse/mkdir guards.
+const environmentHomeRoot = "/home/paca/workspaces"
+
 // AddFolder creates the folder row and asks agent-runner to mkdir it into
 // place inside the environment's container. Folders are path-only — no
 // name/repo-clone/branch fields (dropped before ever shipping; see
@@ -988,8 +997,16 @@ func (s *Service) AddFolder(ctx context.Context, projectID, environmentID uuid.U
 		return nil, err
 	}
 
-	path := strings.TrimSpace(in.Path)
-	if !strings.HasPrefix(path, "/") {
+	path := pathpkg.Clean(strings.TrimSpace(in.Path))
+	// Every folder must live under the mounted workspace volume. A path
+	// outside it is accepted by the mkdir below but written to the
+	// container's own writable layer, so it disappears on the next
+	// Pod/container recreation and every later attach fails with ACP
+	// "session/new: Invalid params: invalid directory path".
+	// Mirrors agent-runner's environmentHomeRoot
+	// (internal/acpbridge/environment_handlers.go), which scopes Browse and
+	// the mkdir/delete guards to the same root.
+	if path != environmentHomeRoot && !strings.HasPrefix(path, environmentHomeRoot+"/") {
 		return nil, environmentdom.ErrFolderPathInvalid
 	}
 

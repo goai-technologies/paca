@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	utilexec "k8s.io/client-go/util/exec"
+
+	"github.com/Paca-AI/agent-runner/internal/sandbox"
 )
 
 // Unlike ../sandbox_test.go's Docker-backed Manager, Start/Stop/
@@ -27,6 +31,27 @@ import (
 // coverage needs a real cluster, same as the Docker backend needs a real
 // daemon.
 
+func TestLiveConversationIDsIncludesOnlyNonFailedSandboxJobs(t *testing.T) {
+	clientset := fake.NewClientset(
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "live", Namespace: "paca-sandbox", Labels: map[string]string{labelManaged: managedValue, labelConvID: "conversation-live"}}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "failed", Namespace: "paca-sandbox", Labels: map[string]string{labelManaged: managedValue, labelConvID: "conversation-failed"}}, Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue}}}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "completed", Namespace: "paca-sandbox", Labels: map[string]string{labelManaged: managedValue, labelConvID: "conversation-completed"}}, Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "environment", Namespace: "paca-sandbox", Labels: map[string]string{labelManaged: managedValue, "paca.ai/environment": "paca-env-id"}}},
+	)
+	mgr := &Manager{clientset: clientset, namespace: "paca-sandbox"}
+
+	got, err := mgr.LiveConversationIDs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("LiveConversationIDs() = %v, want only the live conversation", got)
+	}
+	if _, ok := got["conversation-live"]; !ok {
+		t.Errorf("LiveConversationIDs() = %v, missing live conversation", got)
+	}
+}
+
 func TestJobName_IsDeterministicAndPrefixed(t *testing.T) {
 	const convID = "11111111-2222-3333-4444-555555555555"
 	got := jobName(convID)
@@ -36,6 +61,66 @@ func TestJobName_IsDeterministicAndPrefixed(t *testing.T) {
 	}
 	if got2 := jobName(convID); got2 != got {
 		t.Errorf("jobName is not deterministic: got %q then %q for the same input", got, got2)
+	}
+}
+
+// TestDockerInSandboxDisabled_RefusesBeforeSubmittingAnything covers the
+// deployment-level gate: a namespace that cannot admit a privileged DinD
+// sidecar must refuse a docker_enabled sandbox up front, rather than submit
+// a Job/Pod that Pod Security Admission rejects.
+func TestDockerInSandboxDisabled_RefusesBeforeSubmittingAnything(t *testing.T) {
+	m := managerWithPods("paca-sandbox")
+	m.dockerInSandbox = false
+	// A refused call must not fall through to a readiness wait: the guard runs
+	// before any write, so these timeouts are never reached by a passing run —
+	// they only turn a regressed guard into a fast, legible failure.
+	m.podReadyTimeout = time.Millisecond
+
+	for name, call := range map[string]func() error{
+		"Start": func() error {
+			_, err := m.Start(context.Background(), sandbox.Config{
+				ConversationID: "11111111-2222-3333-4444-555555555555",
+				DockerEnabled:  true,
+			})
+			return err
+		},
+		"CreateEnvironment": func() error {
+			_, err := m.CreateEnvironment(context.Background(), sandbox.EnvironmentConfig{
+				EnvironmentID: "11111111-2222-3333-4444-555555555555",
+				DockerEnabled: true,
+			})
+			return err
+		},
+		"StartEnvironment": func() error {
+			_, err := m.StartEnvironment(context.Background(), "paca-env-11111111", sandbox.EnvironmentConfig{
+				EnvironmentID: "11111111-2222-3333-4444-555555555555",
+				DockerEnabled: true,
+			})
+			return err
+		},
+	} {
+		err := call()
+		if err == nil {
+			t.Fatalf("%s with DockerEnabled accepted on a deployment with docker-in-sandbox disabled", name)
+		}
+		if !strings.Contains(err.Error(), "docker-in-sandbox is disabled") {
+			t.Errorf("%s error = %v, want the docker-in-sandbox refusal (not a readiness failure)", name, err)
+		}
+	}
+
+	jobs, err := m.clientset.BatchV1().Jobs("paca-sandbox").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs.Items) != 0 {
+		t.Errorf("jobs created = %d, want 0 (the refusal must precede any API write)", len(jobs.Items))
+	}
+	deployments, err := m.clientset.AppsV1().Deployments("paca-sandbox").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list deployments: %v", err)
+	}
+	if len(deployments.Items) != 0 {
+		t.Errorf("deployments created = %d, want 0 (the refusal must precede any API write)", len(deployments.Items))
 	}
 }
 
@@ -64,6 +149,82 @@ func podFixture(name, jobLabel string, phase corev1.PodPhase, ip string) *corev1
 			Labels: map[string]string{"job-name": jobLabel},
 		},
 		Status: corev1.PodStatus{Phase: phase, PodIP: ip},
+	}
+}
+
+// Virtual time reproduces a node arriving after the former 60-second deadline
+// without slowing CI. Jobs and static environments share this wait.
+func TestWaitForPodIP_ProvisioningBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name                             string
+		timeout, readyAfter, wantElapsed time.Duration
+		wantErr                          string
+	}{
+		{"default allows cold node", 0, 65 * time.Second, 65 * time.Second, ""},
+		{"legacy override expires", time.Minute, 65 * time.Second, time.Minute, "after 1m0s"},
+		{"longer override works", 7 * time.Minute, 6 * time.Minute, 6 * time.Minute, ""},
+		{"custom timeout reported", 2 * time.Minute, 0, 2 * time.Minute, "after 2m0s"},
+		{"default stays bounded", 0, 0, 5 * time.Minute, "after 5m0s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const job = "paca-sbx-cold-node"
+				pod := podFixture("paca-sbx-cold-node-1", job, corev1.PodPending, "")
+				m := managerWithPods("paca", pod)
+				m.podReadyTimeout = tc.timeout
+				done := make(chan struct{})
+				defer close(done)
+				if tc.readyAfter > 0 {
+					go func() {
+						select {
+						case <-time.After(tc.readyAfter):
+						case <-done:
+							return
+						}
+						ready := pod.DeepCopy()
+						ready.Status.PodIP = "10.0.0.5"
+						ready.Status.Phase = corev1.PodRunning
+						if _, err := m.clientset.CoreV1().Pods("paca").UpdateStatus(context.Background(), ready, metav1.UpdateOptions{}); err != nil {
+							t.Error(err)
+						}
+					}()
+				}
+				started := time.Now()
+				name, ip, err := m.waitForPodIP(context.Background(), "job-name="+job)
+				elapsed := time.Since(started)
+				if tc.wantErr != "" {
+					if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+						t.Fatalf("error = %v, want %q", err, tc.wantErr)
+					}
+				} else if err != nil || name != pod.Name || ip != "10.0.0.5" {
+					t.Fatalf("result = (%q, %q, %v), want assigned Pod", name, ip, err)
+				}
+				if elapsed < tc.wantElapsed || elapsed > tc.wantElapsed+podReadyPollEvery {
+					t.Fatalf("elapsed = %s, want %s (within one poll)", elapsed, tc.wantElapsed)
+				}
+			})
+		})
+	}
+}
+
+func TestWaitForPodIP_EarlierCallerDeadlineWins(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := managerWithPods("paca")
+		m.podReadyTimeout = 5 * time.Minute
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		started := time.Now()
+		_, _, err := m.waitForPodIP(ctx, "job-name=paca-sbx-cancelled")
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) != 10*time.Second {
+			t.Fatalf("error = %v after %s, want caller deadline at 10s", err, time.Since(started))
+		}
+	})
+}
+
+func TestNewManager_RejectsNegativePodReadyTimeout(t *testing.T) {
+	_, err := NewManager(Options{Namespace: "paca", PodReadyTimeout: -time.Second})
+	if err == nil || !strings.Contains(err.Error(), "PodReadyTimeout") {
+		t.Fatalf("NewManager() error = %v, want timeout validation error", err)
 	}
 }
 

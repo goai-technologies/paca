@@ -892,3 +892,43 @@ func TestE2ETaskFilters_ValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Search — custom fields flagged use_in_search (issue #576)
+// ---------------------------------------------------------------------------
+
+func TestE2ETaskSearch_CustomFieldUseInSearch(t *testing.T) {
+	t.Parallel()
+	env := newE2EEnv(t)
+	seedTaskMemberUser(t, env, "cf-search-user", "cfsearchpass1")
+	client, token := taskMemberLogin(t, env, "cf-search-user", "cfsearchpass1")
+	projID := createProjectForTasksViaAPI(t, env, client, token)
+
+	createCustomFieldViaAPI(t, env, client, token, projID, map[string]any{
+		"field_key": "tracking", "display_name": "Tracking", "field_type": "text", "use_in_search": true,
+	})
+	createCustomFieldViaAPI(t, env, client, token, projID, map[string]any{
+		"field_key": "secret", "display_name": "Secret", "field_type": "text",
+	})
+
+	match := createTaskViaAPIWithBody(t, env, client, token, projID, map[string]any{
+		"title": "Parcel", "custom_fields": map[string]any{"tracking": "ZX-99812-AB"},
+	})
+	createTaskViaAPIWithBody(t, env, client, token, projID, map[string]any{
+		"title": "Other", "custom_fields": map[string]any{"secret": "ONLY-IN-SECRET"},
+	})
+
+	t.Run("matches_searchable_field_case_insensitive", func(t *testing.T) {
+		data := listTasksPage(t, env, client, token, projID, url.Values{"search": {"zx-99812"}})
+		if got := itemIDs(data); !idsEqualSet(got, []string{idOf(match)}) {
+			t.Fatalf("expected only the tracking task, got %v", got)
+		}
+	})
+
+	t.Run("ignores_non_searchable_field", func(t *testing.T) {
+		data := listTasksPage(t, env, client, token, projID, url.Values{"search": {"only-in-secret"}})
+		if got := itemIDs(data); len(got) != 0 {
+			t.Fatalf("expected no matches, got %v", got)
+		}
+	})
+}

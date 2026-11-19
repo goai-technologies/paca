@@ -59,6 +59,13 @@ type ViewConfigDTO struct {
 	// InitialPageSize is the saved number of tasks to fetch on the first load
 	// of this view, independent of PageSize.
 	InitialPageSize int `json:"initial_page_size,omitempty"`
+	// SubtaskMode is "collapsed", "expanded" or "hidden"; empty means "collapsed".
+	SubtaskMode string `json:"subtask_mode,omitempty"`
+	// GanttZoom is "day", "week", "month", "quarter" or "year"; empty means
+	// the client's default.
+	GanttZoom string `json:"gantt_zoom,omitempty"`
+	// GanttDependencies is "shown" or "hidden"; empty means "shown".
+	GanttDependencies string `json:"gantt_dependencies,omitempty"`
 	// PluginManifestID is the reverse-DNS plugin manifest identifier
 	// (for example "com.paca.bdd").
 	PluginManifestID string `json:"plugin_manifest_id,omitempty"`
@@ -72,10 +79,12 @@ type ViewResponse struct {
 	ProjectID uuid.UUID          `json:"project_id"`
 	Name      string             `json:"name"`
 	ViewType  sprintdom.ViewType `json:"view_type"`
-	Config    ViewConfigDTO      `json:"config"`
-	Position  float64            `json:"position"`
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
+	// Context is the interaction the view belongs to: "sprint", "backlog" or "timeline".
+	Context   sprintdom.ViewContext `json:"context"`
+	Config    ViewConfigDTO         `json:"config"`
+	Position  float64               `json:"position"`
+	CreatedAt time.Time             `json:"created_at"`
+	UpdatedAt time.Time             `json:"updated_at"`
 	// IsPersonalized is true when Config reflects the caller's own personal
 	// override rather than the shared default everyone else sees. No
 	// omitempty: the frontend needs an explicit false, not an absent key.
@@ -89,18 +98,21 @@ type ViewResponse struct {
 // viewConfigToDTO maps a domain ViewConfig to its wire representation.
 func viewConfigToDTO(cfg sprintdom.ViewConfig) ViewConfigDTO {
 	return ViewConfigDTO{
-		Fields:           cfg.Fields,
-		ColumnBy:         cfg.ColumnBy,
-		Swimlanes:        cfg.Swimlanes,
-		SortBy:           cfg.SortBy,
-		FieldSum:         cfg.FieldSum,
-		SliceBy:          cfg.SliceBy,
-		Filters:          cfg.Filters,
-		CollapsedColumns: cfg.CollapsedColumns,
-		PageSize:         cfg.PageSize,
-		InitialPageSize:  cfg.InitialPageSize,
-		PluginManifestID: cfg.PluginID,
-		PluginComponent:  cfg.PluginComponent,
+		Fields:            cfg.Fields,
+		ColumnBy:          cfg.ColumnBy,
+		Swimlanes:         cfg.Swimlanes,
+		SortBy:            cfg.SortBy,
+		FieldSum:          cfg.FieldSum,
+		SliceBy:           cfg.SliceBy,
+		Filters:           cfg.Filters,
+		CollapsedColumns:  cfg.CollapsedColumns,
+		PageSize:          cfg.PageSize,
+		InitialPageSize:   cfg.InitialPageSize,
+		SubtaskMode:       cfg.SubtaskMode,
+		GanttZoom:         cfg.GanttZoom,
+		GanttDependencies: cfg.GanttDependencies,
+		PluginManifestID:  cfg.PluginID,
+		PluginComponent:   cfg.PluginComponent,
 	}
 }
 
@@ -119,6 +131,7 @@ func ViewFromEntity(v *sprintdom.SprintView) ViewResponse {
 		ProjectID:      v.ProjectID,
 		Name:           v.Name,
 		ViewType:       v.ViewType,
+		Context:        v.ViewContext,
 		IsPersonalized: v.HasPersonalConfig,
 		Config:         viewConfigToDTO(v.Config),
 		SharedConfig:   viewConfigToDTO(sharedConfig),
@@ -134,18 +147,21 @@ func toViewConfig(d *ViewConfigDTO) sprintdom.ViewConfig {
 		return sprintdom.ViewConfig{}
 	}
 	return sprintdom.ViewConfig{
-		Fields:           d.Fields,
-		ColumnBy:         d.ColumnBy,
-		Swimlanes:        d.Swimlanes,
-		SortBy:           d.SortBy,
-		FieldSum:         d.FieldSum,
-		SliceBy:          d.SliceBy,
-		Filters:          d.Filters,
-		CollapsedColumns: d.CollapsedColumns,
-		PageSize:         d.PageSize,
-		InitialPageSize:  d.InitialPageSize,
-		PluginID:         d.PluginManifestID,
-		PluginComponent:  d.PluginComponent,
+		Fields:            d.Fields,
+		ColumnBy:          d.ColumnBy,
+		Swimlanes:         d.Swimlanes,
+		SortBy:            d.SortBy,
+		FieldSum:          d.FieldSum,
+		SliceBy:           d.SliceBy,
+		Filters:           d.Filters,
+		CollapsedColumns:  d.CollapsedColumns,
+		PageSize:          d.PageSize,
+		InitialPageSize:   d.InitialPageSize,
+		SubtaskMode:       d.SubtaskMode,
+		GanttZoom:         d.GanttZoom,
+		GanttDependencies: d.GanttDependencies,
+		PluginID:          d.PluginManifestID,
+		PluginComponent:   d.PluginComponent,
 	}
 }
 

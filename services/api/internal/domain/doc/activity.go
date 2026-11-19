@@ -74,12 +74,12 @@ type ActivityService interface {
 	// projectID is used to verify the comment's document belongs to the
 	// expected project, in addition to resolving the actor to a project
 	// member. Returns ErrActivityForbidden when actorID != comment's author.
-	UpdateComment(ctx context.Context, id uuid.UUID, projectID uuid.UUID, actorID uuid.UUID, agentID *uuid.UUID, content json.RawMessage) (*Activity, error)
+	UpdateComment(ctx context.Context, id uuid.UUID, projectID uuid.UUID, actorID uuid.UUID, content json.RawMessage) (*Activity, error)
 	// DeleteComment soft-deletes a comment.
 	// projectID is used to verify the comment's document belongs to the
 	// expected project, in addition to resolving the actor to a project
 	// member. Returns ErrActivityForbidden when actorID != comment's author.
-	DeleteComment(ctx context.Context, id uuid.UUID, projectID uuid.UUID, actorID uuid.UUID, agentID *uuid.UUID) error
+	DeleteComment(ctx context.Context, id uuid.UUID, projectID uuid.UUID, actorID uuid.UUID) error
 }
 
 // ActivityRecorder is the minimal interface used to persist system-generated
@@ -96,7 +96,6 @@ type RecordActivityInput struct {
 	DocumentID   uuid.UUID
 	ProjectID    uuid.UUID  // used by the consumer to resolve ActorID → member ID
 	ActorID      *uuid.UUID // nil is allowed for system events
-	ActorAgentID *uuid.UUID // agent UUID when the actor is an agent (takes priority over ActorID for resolution)
 	ActivityType ActivityType
 	Content      json.RawMessage
 }
@@ -105,7 +104,6 @@ type RecordActivityInput struct {
 type AddCommentInput struct {
 	DocumentID uuid.UUID
 	ProjectID  uuid.UUID
-	ActorID    uuid.UUID  // authenticated user UUID (resolved to project member)
-	AgentID    *uuid.UUID // agent UUID set when the request comes from an agent
+	ActorID    uuid.UUID // authenticated user UUID (resolved to project member)
 	Content    json.RawMessage
 }

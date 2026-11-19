@@ -13,6 +13,7 @@ import (
 
 	accountdom "github.com/Paca-AI/api/internal/domain/account"
 	attachmentdom "github.com/Paca-AI/api/internal/domain/attachment"
+	"github.com/Paca-AI/api/internal/events"
 )
 
 // ErrAvatarServiceRequired indicates a missing AvatarService dependency when
@@ -23,6 +24,9 @@ var ErrAvatarServiceRequired = errors.New("service account svc: avatar service r
 type Service struct {
 	repo      accountdom.ServiceAccountRepository
 	avatarSvc attachmentdom.AvatarService
+	// grants is told when an account's access is revoked. Nil: nothing is
+	// announced.
+	grants events.PolicyInvalidator
 }
 
 // New returns a Service over repo.
@@ -33,6 +37,13 @@ func New(repo accountdom.ServiceAccountRepository) *Service {
 // WithAvatarService configures avatar upload support.
 func (s *Service) WithAvatarService(svc attachmentdom.AvatarService) *Service {
 	s.avatarSvc = svc
+	return s
+}
+
+// WithGrantsNotifier wires in the policy cache invalidation called after a
+// service account is deleted (its attachments and memberships go with it).
+func (s *Service) WithGrantsNotifier(inv events.PolicyInvalidator) *Service {
+	s.grants = inv
 	return s
 }
 
@@ -80,7 +91,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (*accountdom.Account, e
 }
 
 // List implements accountdom.ServiceAccountService.
-func (s *Service) List(ctx context.Context, filter accountdom.ServiceAccountFilter, cursorAfter *string, limit int) ([]*accountdom.Account, bool, error) {
+func (s *Service) List(ctx context.Context, filter accountdom.ServiceAccountFilter, cursorAfter *string, limit int) ([]*accountdom.Account, bool, int, error) {
 	return s.repo.List(ctx, filter, cursorAfter, limit)
 }
 
@@ -115,6 +126,9 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
+	}
+	if s.grants != nil {
+		s.grants.Invalidate()
 	}
 	if s.avatarSvc != nil {
 		s.avatarSvc.DeleteAvatarObjects(ctx, a.AvatarKey, a.AvatarThumbKey)

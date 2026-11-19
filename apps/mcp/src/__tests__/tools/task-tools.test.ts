@@ -19,6 +19,8 @@ const task = {
 	updated_at: "2024-01-01T00:00:00Z",
 };
 
+const EMPTY_PAGE = { items: [], nextCursor: null };
+
 function makeApiClient(overrides: Record<string, any> = {}) {
 	return {
 		listTasks: vi.fn().mockResolvedValue({ items: [task], nextCursor: null }),
@@ -28,7 +30,7 @@ function makeApiClient(overrides: Record<string, any> = {}) {
 		updateTask: vi.fn().mockResolvedValue({ ...task, title: "Updated" }),
 		deleteTask: vi.fn().mockResolvedValue(undefined),
 		getProject: vi.fn().mockResolvedValue({ id: "p1", name: "P" }),
-		listSprints: vi.fn().mockResolvedValue([]),
+		getSprint: vi.fn().mockResolvedValue(undefined),
 		...overrides,
 	} as any;
 }
@@ -37,17 +39,17 @@ function makeExtendedClient(overrides: Record<string, any> = {}) {
 	return {
 		listTaskStatuses: vi.fn().mockResolvedValue([]),
 		listTaskTypes: vi.fn().mockResolvedValue([]),
-		listProjectMembers: vi.fn().mockResolvedValue([]),
-		listSubtasks: vi.fn().mockResolvedValue([]),
-		listTaskActivities: vi.fn().mockResolvedValue([]),
-		listTaskLinks: vi.fn().mockResolvedValue([]),
+		listProjectMembers: vi.fn().mockResolvedValue(EMPTY_PAGE),
+		listSubtasks: vi.fn().mockResolvedValue(EMPTY_PAGE),
+		listTaskActivities: vi.fn().mockResolvedValue(EMPTY_PAGE),
+		listTaskLinks: vi.fn().mockResolvedValue(EMPTY_PAGE),
 		...overrides,
 	} as any;
 }
 
 function makeViewsClient(overrides: Record<string, any> = {}) {
 	return {
-		listTaskAttachments: vi.fn().mockResolvedValue([]),
+		listTaskAttachments: vi.fn().mockResolvedValue(EMPTY_PAGE),
 		listCustomFieldDefinitions: vi.fn().mockResolvedValue([]),
 		...overrides,
 	} as any;
@@ -203,7 +205,50 @@ describe("handleTaskTool – get_task", () => {
 		);
 		expect(extClient.listTaskStatuses).toHaveBeenCalledWith("p1");
 		expect(extClient.listTaskTypes).toHaveBeenCalledWith("p1");
-		expect(viewClient.listTaskAttachments).toHaveBeenCalledWith("p1", "t1");
+		expect(viewClient.listTaskAttachments).toHaveBeenCalledWith("p1", "t1", {
+			pageSize: 20,
+		});
+	});
+
+	it("loads only the people the task names, by id, not the whole team", async () => {
+		const extClient = makeExtendedClient();
+		const client = makeApiClient({
+			getTask: vi.fn().mockResolvedValue({
+				...task,
+				assignee_ids: ["m1"],
+				reporter_id: "m2",
+			}),
+		});
+		await handleTaskTool(
+			"get_task",
+			{ projectId: "p1", taskId: "t1" },
+			client,
+			extClient,
+			makeViewsClient(),
+		);
+		expect(extClient.listProjectMembers).toHaveBeenCalledTimes(1);
+		expect(extClient.listProjectMembers).toHaveBeenCalledWith("p1", {
+			ids: ["m1", "m2"],
+		});
+	});
+
+	it("says how to read the rest of a section that has more pages", async () => {
+		const extClient = makeExtendedClient({
+			listSubtasks: vi
+				.fn()
+				.mockResolvedValue({ items: [], nextCursor: "c2", total: 45 }),
+		});
+		const result = await handleTaskTool(
+			"get_task",
+			{ projectId: "p1", taskId: "t1" },
+			makeApiClient(),
+			extClient,
+			makeViewsClient(),
+		);
+		const text = result.content[0].text;
+		expect(text).toContain("Subtasks");
+		expect(text).toContain('cursor="c2"');
+		expect(extClient.listSubtasks).toHaveBeenCalledTimes(1);
 	});
 
 	it("returns task-detail formatted text", async () => {
@@ -356,6 +401,44 @@ describe("handleTaskTool – update_task", () => {
 			start_date: undefined,
 			due_date: undefined,
 		});
+	});
+
+	it("passes sprintId null through to move the task to the backlog", async () => {
+		const client = makeApiClient();
+		await handleTaskTool(
+			"update_task",
+			{ projectId: "p1", taskId: "t1", sprintId: null },
+			client,
+		);
+		expect(client.updateTask).toHaveBeenCalledWith(
+			"p1",
+			"t1",
+			expect.objectContaining({ sprint_id: null }),
+		);
+	});
+
+	it("passes null through for assigneeId, startDate and dueDate so they can be cleared", async () => {
+		const client = makeApiClient();
+		await handleTaskTool(
+			"update_task",
+			{
+				projectId: "p1",
+				taskId: "t1",
+				assigneeId: null,
+				startDate: null,
+				dueDate: null,
+			},
+			client,
+		);
+		expect(client.updateTask).toHaveBeenCalledWith(
+			"p1",
+			"t1",
+			expect.objectContaining({
+				assignee_id: null,
+				start_date: null,
+				due_date: null,
+			}),
+		);
 	});
 
 	it("includes 'updated successfully' in response", async () => {

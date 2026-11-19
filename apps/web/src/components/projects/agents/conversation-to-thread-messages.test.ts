@@ -271,6 +271,7 @@ function agentThoughtChunk(text: string): AgentConversationEvent {
 function acpToolCall(opts: {
 	toolCallId: string;
 	title: string;
+	rawInput?: unknown;
 }): AgentConversationEvent {
 	return {
 		id: `evt-${nextIndex}`,
@@ -281,6 +282,7 @@ function acpToolCall(opts: {
 		payload: {
 			toolCallId: opts.toolCallId,
 			title: opts.title,
+			...(opts.rawInput !== undefined ? { rawInput: opts.rawInput } : {}),
 			sessionUpdate: "tool_call",
 		},
 		created_at: "2026-01-01T00:00:08.000Z",
@@ -481,7 +483,7 @@ describe("eventsToThreadMessages", () => {
 
 		const messages = eventsToThreadMessages(events, true);
 
-		expect(messages[1].status).toEqual({ type: "running" });
+		expect(messages[1].status).toBe("running");
 	});
 
 	it("marks a completed trailing assistant message as complete", () => {
@@ -489,7 +491,7 @@ describe("eventsToThreadMessages", () => {
 
 		const messages = eventsToThreadMessages(events, false);
 
-		expect(messages[1].status).toEqual({ type: "complete", reason: "stop" });
+		expect(messages[1].status).toBe("complete");
 	});
 
 	it("resolves an open tool-call with an error when the tool fails (AgentErrorEvent)", () => {
@@ -986,6 +988,25 @@ describe("eventsToThreadMessages", () => {
 			expect(parts[0]).not.toHaveProperty("isError");
 		});
 
+		it("exposes the tool call's rawInput as argsText", () => {
+			const messages = eventsToThreadMessages(
+				[
+					acpToolCall({
+						toolCallId: "tc-raw",
+						title: "Terminal",
+						rawInput: { command: "ls -la" },
+					}),
+				],
+				false,
+			);
+			const parts = messages[0].content as unknown as Array<
+				Record<string, unknown>
+			>;
+			expect(JSON.parse(parts[0].argsText as string)).toEqual({
+				command: "ls -la",
+			});
+		});
+
 		it("marks a tool_call_update with status=failed as an error", () => {
 			const events = [
 				acpToolCall({ toolCallId: "tc-2", title: "Running rm" }),
@@ -1228,6 +1249,37 @@ describe("eventsToThreadMessages", () => {
 				},
 				{ type: "doc", id: "doc-1", title: "Runbook" },
 			]);
+		});
+
+		it("keeps a user_message with blank text when it carries context_items", () => {
+			const events: AgentConversationEvent[] = [
+				{
+					id: "evt-ctx-2",
+					conversation_id: "conv-1",
+					event_index: 0,
+					event_type: "user_message",
+					event_source: "user",
+					payload: {
+						content: { type: "text", text: "" },
+						context_items: [{ type: "doc", id: "doc-1", title: "Runbook" }],
+					},
+					created_at: "2026-01-01T00:00:00.000Z",
+				},
+			];
+
+			const messages = eventsToThreadMessages(events, false);
+
+			expect(messages).toHaveLength(1);
+			expect(messages[0]?.metadata?.custom?.contextItems).toEqual([
+				{ type: "doc", id: "doc-1", title: "Runbook" },
+			]);
+			expect(messages[0]?.content).toEqual([]);
+		});
+
+		it("drops a user_message with blank text and no context_items", () => {
+			const events = [acpUserMessage("")];
+
+			expect(eventsToThreadMessages(events, false)).toHaveLength(0);
 		});
 
 		it("adds no metadata.custom when a user_message event carries no context_items", () => {

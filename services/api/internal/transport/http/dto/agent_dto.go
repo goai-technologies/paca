@@ -41,6 +41,8 @@ type AgentResponse struct {
 	LLMBaseURL        string   `json:"llm_base_url"`
 	ACPProvider       *string  `json:"acp_provider,omitempty"`
 	ACPCommand        []string `json:"acp_command,omitempty"`
+	ACPModel          string   `json:"acp_model,omitempty"`
+	ACPEffort         string   `json:"acp_effort,omitempty"`
 	HasACPBridgeToken bool     `json:"has_acp_bridge_token"`
 	HasMCPAPIKey      bool     `json:"has_mcp_api_key"`
 	// CLIProvider/CLIModel/CLIAuthMode/HasCLIAPIKey/CLILoginVerifiedAt are
@@ -96,6 +98,8 @@ type CreateAgentRequest struct {
 	LLMBaseURL  string   `json:"llm_base_url"`
 	ACPProvider string   `json:"acp_provider"`
 	ACPCommand  []string `json:"acp_command"`
+	ACPModel    string   `json:"acp_model"`
+	ACPEffort   string   `json:"acp_effort"`
 	// CLIProvider/CLIModel/CLIAuthMode/CLIAPIKey are required (and the
 	// fields above meaningless) when agent_type is "provider_cli" — see
 	// agentdom.Agent.CLIProvider's doc comment. CLIAuthMode defaults to
@@ -140,6 +144,8 @@ type UpdateAgentRequest struct {
 	LLMBaseURL  *string  `json:"llm_base_url"`
 	ACPProvider *string  `json:"acp_provider"`
 	ACPCommand  []string `json:"acp_command"`
+	ACPModel    *string  `json:"acp_model"`
+	ACPEffort   *string  `json:"acp_effort"`
 	// CLIProvider/CLIModel/CLIAuthMode/CLIAPIKey: nil means "unchanged",
 	// same convention as every other pointer field here — only meaningful
 	// for an existing provider_cli agent.
@@ -183,6 +189,8 @@ type CreateGlobalAgentRequest struct {
 	LLMBaseURL        string   `json:"llm_base_url"`
 	ACPProvider       string   `json:"acp_provider"`
 	ACPCommand        []string `json:"acp_command"`
+	ACPModel          string   `json:"acp_model"`
+	ACPEffort         string   `json:"acp_effort"`
 	SystemPrompt      string   `json:"system_prompt"`
 	MaxIterations     int      `json:"max_iterations"`
 	TimeoutMinutes    int      `json:"timeout_minutes"`
@@ -242,6 +250,8 @@ func AgentFromEntity(a *agentdom.Agent) AgentResponse {
 		LLMBaseURL:           a.LLMBaseURL,
 		ACPProvider:          a.ACPProvider,
 		ACPCommand:           a.ACPCommand,
+		ACPModel:             a.ACPModel,
+		ACPEffort:            a.ACPEffort,
 		HasACPBridgeToken:    a.HasACPBridgeToken,
 		HasMCPAPIKey:         a.HasMCPAPIKey,
 		CLIProvider:          a.CLIProvider,
@@ -471,7 +481,7 @@ type WriteWithAIRequest struct {
 // =========================================================================
 
 // AgentConversationResponse is the public view of a conversation. ProjectID
-// is nil for a global-chat conversation, which carries ActorUserID instead
+// is nil for a global-chat conversation, which carries ActorAccountID instead
 // of TriggeredByMemberID.
 type AgentConversationResponse struct {
 	ID                  uuid.UUID  `json:"id"`
@@ -481,7 +491,7 @@ type AgentConversationResponse struct {
 	TaskID              *uuid.UUID `json:"task_id,omitempty"`
 	ChatSessionID       *uuid.UUID `json:"chat_session_id,omitempty"`
 	TriggeredByMemberID *uuid.UUID `json:"triggered_by_member_id,omitempty"`
-	ActorUserID         *uuid.UUID `json:"actor_user_id,omitempty"`
+	ActorAccountID      *uuid.UUID `json:"actor_account_id,omitempty"`
 	Status              string     `json:"status"`
 	IterationCount      int        `json:"iteration_count"`
 	InputTokens         int64      `json:"input_tokens"`
@@ -560,7 +570,7 @@ func ConversationFromEntity(c *agentdom.AgentConversation) AgentConversationResp
 		TaskID:              c.TaskID,
 		ChatSessionID:       c.ChatSessionID,
 		TriggeredByMemberID: c.TriggeredByMemberID,
-		ActorUserID:         c.ActorUserID,
+		ActorAccountID:      c.ActorAccountID,
 		Status:              c.Status,
 		IterationCount:      c.IterationCount,
 		InputTokens:         c.InputTokens,
@@ -641,16 +651,16 @@ func ConversationEventFromEntity(e *agentdom.AgentConversationEvent) AgentConver
 
 // AgentChatSessionResponse is the public view of a chat session. ProjectID
 // and MemberID are nil for a global chat session, which carries
-// ActorUserID instead.
+// ActorAccountID instead.
 type AgentChatSessionResponse struct {
-	ID            uuid.UUID  `json:"id"`
-	AgentID       uuid.UUID  `json:"agent_id"`
-	ProjectID     *uuid.UUID `json:"project_id,omitempty"`
-	MemberID      *uuid.UUID `json:"member_id,omitempty"`
-	ActorUserID   *uuid.UUID `json:"actor_user_id,omitempty"`
-	Title         *string    `json:"title,omitempty"`
-	LastMessageAt *time.Time `json:"last_message_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID             uuid.UUID  `json:"id"`
+	AgentID        uuid.UUID  `json:"agent_id"`
+	ProjectID      *uuid.UUID `json:"project_id,omitempty"`
+	MemberID       *uuid.UUID `json:"member_id,omitempty"`
+	ActorAccountID *uuid.UUID `json:"actor_account_id,omitempty"`
+	Title          *string    `json:"title,omitempty"`
+	LastMessageAt  *time.Time `json:"last_message_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // StartChatSessionRequest is the body for POST /agents/:agentId/chat.
@@ -705,12 +715,12 @@ type SendChatMessageRequest struct {
 // ChatSessionFromEntity maps an AgentChatSession entity to its DTO.
 func ChatSessionFromEntity(s *agentdom.AgentChatSession) AgentChatSessionResponse {
 	resp := AgentChatSessionResponse{
-		ID:            s.ID,
-		AgentID:       s.AgentID,
-		ActorUserID:   s.ActorUserID,
-		Title:         s.Title,
-		LastMessageAt: s.LastMessageAt,
-		CreatedAt:     s.CreatedAt,
+		ID:             s.ID,
+		AgentID:        s.AgentID,
+		ActorAccountID: s.ActorAccountID,
+		Title:          s.Title,
+		LastMessageAt:  s.LastMessageAt,
+		CreatedAt:      s.CreatedAt,
 	}
 	if s.ProjectID != uuid.Nil {
 		id := s.ProjectID

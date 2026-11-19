@@ -394,11 +394,11 @@ func (r *AnnotationRepository) MarkScreenshotFileUploaded(ctx context.Context, f
 }
 
 // ResolvePortForward looks up which project/environment/port-forward
-// currently owns hostPort, scoped to projects userID is a member of (see
+// currently owns hostPort, scoped to projects accountID is a member of (see
 // annotationdom.Repository.ResolvePortForward's doc comment for why —
 // this must never confirm or deny a forward's existence in a project the
 // caller isn't a member of).
-func (r *AnnotationRepository) ResolvePortForward(ctx context.Context, userID uuid.UUID, hostPort int) (*annotationdom.PortForwardMatch, error) {
+func (r *AnnotationRepository) ResolvePortForward(ctx context.Context, accountID uuid.UUID, hostPort int) (*annotationdom.PortForwardMatch, error) {
 	var row struct {
 		ProjectID     string `db:"project_id"`
 		EnvironmentID string `db:"environment_id"`
@@ -411,7 +411,7 @@ func (r *AnnotationRepository) ResolvePortForward(ctx context.Context, userID uu
 		JOIN environments e ON e.id = epf.environment_id AND e.deleted_at IS NULL
 		JOIN project_members pm ON pm.project_id = e.project_id AND pm.account_id = $1 AND pm.deleted_at IS NULL
 		WHERE epf.host_port = $2
-		LIMIT 1`, userID.String(), hostPort)
+		LIMIT 1`, accountID.String(), hostPort)
 	if err != nil {
 		return nil, annotationdom.ErrPortForwardNotFound
 	}

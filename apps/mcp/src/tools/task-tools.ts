@@ -5,6 +5,7 @@ import type {
 	PacaAPITaskExtendedClient,
 	PacaAPIViewsClient,
 } from "../api/index.js";
+import { moreNotice } from "../api/paginate.js";
 import type { Task } from "../types/index.js";
 import { formatList, formatTask, formatTaskDetail } from "../utils/index.js";
 
@@ -52,14 +53,14 @@ const UpdateTaskSchema = z.object({
 	description: z.string().optional(),
 	statusId: z.string().optional(),
 	typeId: z.string().optional(),
-	sprintId: z.string().optional(),
-	assigneeId: z.string().optional(),
+	sprintId: z.string().nullable().optional(),
+	assigneeId: z.string().nullable().optional(),
 	parentTaskId: z.string().nullable().optional(),
 	importance: z.number().optional(),
 	storyPoints: z.number().int().min(0).nullable().optional(),
 	tags: z.array(z.string()).optional(),
-	startDate: z.string().optional(),
-	dueDate: z.string().optional(),
+	startDate: z.string().nullable().optional(),
+	dueDate: z.string().nullable().optional(),
 });
 
 const DeleteTaskSchema = z.object({
@@ -269,14 +270,14 @@ export function getTaskTools(): Tool[] {
 							"The technical UUID of the task type (e.g., '550e8400-e29b-41d4-a716-446655440000'). Use list_task_types to get the type ID.",
 					},
 					sprintId: {
-						type: "string",
+						type: ["string", "null"],
 						description:
-							"The technical UUID of the sprint (e.g., '550e8400-e29b-41d4-a716-446655440000'). Use list_sprints to get the sprint ID.",
+							"The technical UUID of the sprint (e.g., '550e8400-e29b-41d4-a716-446655440000'). Use list_sprints to get the sprint ID. Set to null to move the task out of its sprint and back to the backlog.",
 					},
 					assigneeId: {
-						type: "string",
+						type: ["string", "null"],
 						description:
-							"The technical UUID of the project MEMBER to assign the task to (e.g., '550e8400-e29b-41d4-a716-446655440000') — NOT the user ID; a member has both, and they differ. Use list_project_members and read the 'Member ID' field (works for both human and agent members). Never assume or reuse an ID seen elsewhere for a named person without confirming it there first.",
+							"The technical UUID of the project MEMBER to assign the task to (e.g., '550e8400-e29b-41d4-a716-446655440000') — NOT the user ID; a member has both, and they differ. Use list_project_members and read the 'Member ID' field (works for both human and agent members). Never assume or reuse an ID seen elsewhere for a named person without confirming it there first. Set to null to unassign the task. Any assignee change made here also switches the task to manual assignment mode.",
 					},
 					parentTaskId: {
 						type: ["string", "null"],
@@ -298,12 +299,14 @@ export function getTaskTools(): Tool[] {
 						description: "Tags for the task",
 					},
 					startDate: {
-						type: "string",
-						description: "The start date (ISO 8601 format)",
+						type: ["string", "null"],
+						description:
+							"The start date as an RFC 3339 timestamp, e.g. 2026-10-31T00:00:00Z (a date-only value is rejected). Set to null to clear it.",
 					},
 					dueDate: {
-						type: "string",
-						description: "The due date (ISO 8601 format)",
+						type: ["string", "null"],
+						description:
+							"The due date as an RFC 3339 timestamp, e.g. 2026-10-31T00:00:00Z (a date-only value is rejected). Set to null to clear it.",
 					},
 				},
 				required: ["projectId", "taskId"],
@@ -505,6 +508,9 @@ export async function handleTaskTool(
 	}
 }
 
+/** Items per section the task detail loads; the rest is one tool call away. */
+const DETAIL_PAGE_SIZE = 20;
+
 async function getTaskDetail(
 	projectId: string,
 	taskId: string,
@@ -514,41 +520,63 @@ async function getTaskDetail(
 ): Promise<any> {
 	const task = await client.getTask(projectId, taskId);
 
+	// Only the people this task names are looked up (by id); the long lists
+	// below load their first page and point at the tool for the rest.
+	const memberIds = [
+		...new Set([
+			...(task.assignee_ids ?? []),
+			...(task.reporter_id ? [task.reporter_id] : []),
+		]),
+	];
+	const emptyPage = { items: [], nextCursor: null };
 	const [
 		project,
 		statuses,
 		taskTypes,
-		sprints,
-		members,
-		subtasks,
-		attachments,
-		activities,
+		sprint,
+		membersPage,
+		subtasksPage,
+		attachmentsPage,
+		activitiesPage,
 		customFields,
-		links,
+		linksPage,
 	] = await Promise.all([
 		client.getProject(projectId).catch(() => undefined),
 		extendedClient?.listTaskStatuses(projectId)?.catch(() => []) ||
 			Promise.resolve([]),
 		extendedClient?.listTaskTypes(projectId)?.catch(() => []) ||
 			Promise.resolve([]),
-		client.listSprints(projectId).catch(() => []),
-		extendedClient?.listProjectMembers(projectId)?.catch(() => []) ||
-			Promise.resolve([]),
-		extendedClient?.listSubtasks(projectId, taskId)?.catch(() => []) ||
-			Promise.resolve([]),
-		viewsClient?.listTaskAttachments(projectId, taskId)?.catch(() => []) ||
-			Promise.resolve([]),
-		extendedClient?.listTaskActivities(projectId, taskId)?.catch(() => []) ||
-			Promise.resolve([]),
+		task.sprint_id
+			? client.getSprint(projectId, task.sprint_id).catch(() => undefined)
+			: Promise.resolve(undefined),
+		memberIds.length > 0
+			? extendedClient
+					?.listProjectMembers(projectId, { ids: memberIds })
+					?.catch(() => emptyPage) || Promise.resolve(emptyPage)
+			: Promise.resolve(emptyPage),
+		extendedClient
+			?.listSubtasks(projectId, taskId, { pageSize: DETAIL_PAGE_SIZE })
+			?.catch(() => emptyPage) || Promise.resolve(emptyPage),
+		viewsClient
+			?.listTaskAttachments(projectId, taskId, { pageSize: DETAIL_PAGE_SIZE })
+			?.catch(() => emptyPage) || Promise.resolve(emptyPage),
+		extendedClient
+			?.listTaskActivities(projectId, taskId, { pageSize: DETAIL_PAGE_SIZE })
+			?.catch(() => emptyPage) || Promise.resolve(emptyPage),
 		viewsClient?.listCustomFieldDefinitions(projectId)?.catch(() => []) ||
 			Promise.resolve([]),
-		extendedClient?.listTaskLinks(projectId, taskId)?.catch(() => []) ||
-			Promise.resolve([]),
+		extendedClient
+			?.listTaskLinks(projectId, taskId, { pageSize: DETAIL_PAGE_SIZE })
+			?.catch(() => emptyPage) || Promise.resolve(emptyPage),
 	]);
+	const members: any[] = membersPage.items;
+	const subtasks: any[] = subtasksPage.items;
+	const attachments: any[] = attachmentsPage.items;
+	const activities: any[] = activitiesPage.items;
+	const links: any[] = linksPage.items;
 
 	const status = statuses.find((s: any) => s.id === task.status_id);
 	const taskType = taskTypes.find((t: any) => t.id === task.task_type_id);
-	const sprint = sprints.find((s: any) => s.id === task.sprint_id);
 	const assignees = members.filter((m: any) =>
 		task.assignee_ids?.includes(m.id),
 	);
@@ -578,11 +606,26 @@ async function getTaskDetail(
 		links,
 	);
 
+	// A section that got only its first page says how to read the rest.
+	const more = [
+		["Subtasks", subtasksPage, `list_tasks (with parentTaskId=${taskId})`],
+		["Attachments", attachmentsPage, "list_task_attachments"],
+		["Activities", activitiesPage, "list_task_activities"],
+		["Links", linksPage, "list_task_links"],
+	]
+		.map(([label, page, tool]) => {
+			const notice = moreNotice(page as any, tool as string);
+			return notice
+				? `\n_${label}: ${notice.trim().replace(/^_|_$/g, "")}_`
+				: "";
+		})
+		.join("");
+
 	return {
 		content: [
 			{
 				type: "text",
-				text: formatted,
+				text: `${formatted}${more}`,
 			},
 		],
 	};

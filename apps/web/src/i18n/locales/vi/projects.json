@@ -10,6 +10,7 @@
 				"taskStatuses": "Trạng thái nhiệm vụ",
 				"taskTypes": "Loại nhiệm vụ",
 				"customFields": "Trường tùy chỉnh",
+				"git": "Git",
 				"jev": "Jev AI",
 				"dangerZone": "Khu vực nguy hiểm",
 				"plugins": "Plugin",
@@ -20,6 +21,195 @@
 					"title": "Bạn không có quyền xem tab này",
 					"description": "Hãy yêu cầu chủ sở hữu hoặc quản trị viên dự án cấp cho bạn quyền truy cập vào {{pluginName}}."
 				}
+			}
+		},
+		"git": {
+			"title": "Repository Git",
+			"description": "Các kho mà agent của dự án này có thể làm việc, truy cập qua các kết nối bên dưới.",
+			"empty": {
+				"title": "Chưa liên kết kho mã nào",
+				"description": "Liên kết một kho mã để tác nhân của dự án đọc mã, mở pull request và phản hồi các lượt nhắc.",
+				"readOnly": "Bạn cần quyền ghi Git trong dự án này để liên kết kho mã.",
+				"noConnection": "Hãy thêm một kết nối trước, sau đó liên kết kho thông qua kết nối đó."
+			},
+			"noProviders": "Chưa cài nhà cung cấp Git nào. Hãy nhờ quản trị viên cài đặt.",
+			"link": {
+				"platform": "Nền tảng",
+				"repository": "Repository",
+				"placeholder": "chủ-sở-hữu/tên hoặc URL repository",
+				"button": "Liên kết",
+				"open": "Liên kết kho mã",
+				"cancel": "Hủy",
+				"help": "Dán URL kho mã hoặc nhập chủ sở hữu/tên.",
+				"noConnection": "Hãy thêm kết nối {{provider}} ở trên trước khi liên kết kho.",
+				"connection": "Kết nối",
+				"anyConnection": "Bất kỳ kết nối nào thấy được kho",
+				"connectionHelp": "Hãy chọn một kết nối khi có nhiều kết nối cùng thấy kho, ví dụ hai tổ chức.",
+				"description": "Mô tả (không bắt buộc)",
+				"descriptionPlaceholder": "ví dụ: Ứng dụng web của sản phẩm",
+				"descriptionHelp": "Cho các tác nhân biết kho mã này dùng để làm gì để chọn đúng kho. Tối đa 1000 ký tự.",
+				"title": "Liên kết kho mã",
+				"dialogDescription": "Chọn nền tảng và kho mã mà các tác nhân của dự án này sẽ làm việc cùng."
+			},
+			"picker": {
+				"browse": "Duyệt kho mã",
+				"unsupported": "Kết nối này không liệt kê được kho mã. Hãy đóng cửa sổ này và nhập đường dẫn hoặc URL.",
+				"error": "Không tải được danh sách. Hãy đóng cửa sổ này và nhập đường dẫn hoặc URL.",
+				"empty": "Không tìm thấy kho mã.",
+				"linked": "Đã liên kết",
+				"private": "Riêng tư",
+				"title": "Duyệt kho mã",
+				"description": "Cuộn qua mọi kho mà kết nối này nhìn thấy, rồi chọn một kho để điền vào ô kho mã."
+			},
+			"unlink": {
+				"button": "Hủy liên kết",
+				"confirm": "Xác nhận hủy",
+				"cancel": "Hủy"
+			},
+			"resumed": "Chào mừng trở lại. Hãy liên kết {{repository}} ngay.",
+			"access": {
+				"title": "Kết nối này không thấy được kho này",
+				"description": "Ứng dụng {{provider}} chỉ thấy các kho của tài khoản mà nó được cài đặt. Hãy cài vào {{owner}} (bạn sẽ sang nền tảng rồi quay lại đây), sau đó liên kết lại.",
+				"descriptionNoOwner": "Ứng dụng {{provider}} chỉ thấy các kho của tài khoản mà nó được cài đặt. Hãy chọn nơi cài đặt (bạn sẽ sang nền tảng rồi quay lại đây), sau đó liên kết lại.",
+				"button": "Cài đặt trên {{owner}}",
+				"buttonNoOwner": "Chọn nơi cài đặt",
+				"connection": "Kết nối cần cài đặt",
+				"choose": "Chọn một kết nối"
+			},
+			"errors": {
+				"generic": "Đã xảy ra lỗi. Vui lòng thử lại.",
+				"setupInvalid": "Liên kết này không hợp lệ, đã hết hạn hoặc đã được dùng. Hãy bắt đầu lại.",
+				"identityExists": "Đã có một danh tính ở đây.",
+				"publicUrlRequired": "URL công khai của hệ thống (PUBLIC_URL) chưa được cấu hình.",
+				"providerUnavailable": "Plugin nhà cung cấp Git không khả dụng.",
+				"providerRejected": "Nền tảng đã từ chối yêu cầu.",
+				"providerDetail": "Chi tiết từ nền tảng: {{message}}",
+				"notFound": "Không tìm thấy.",
+				"accessNotGranted": "Kết nối không thấy được kho này.",
+				"noIdentity": "Chưa có kết nối nào cho nền tảng này. Hãy thêm một kết nối trong mục Kết nối.",
+				"alreadyLinked": "Repository này đã được liên kết với dự án.",
+				"identityRequired": "Có nhiều kết nối thấy được kho này. Hãy chọn kết nối muốn dùng.",
+				"notVisible": "Không kết nối nào của dự án thấy được kho này. Hãy thêm một kết nối có quyền truy cập kho (trên GitLab là token của dự án hoặc nhóm đó), rồi thử lại.",
+				"descriptionTooLong": "Mô tả quá dài (tối đa 1000 ký tự)."
+			},
+			"triggerKinds": {
+				"mention": {
+					"label": "Được nhắc",
+					"description": "Ai đó nhắc đến bot trong bình luận, review hoặc mô tả."
+				},
+				"own_cr_feedback": {
+					"label": "Phản hồi về pull request của nó",
+					"description": "Có review hoặc bình luận trên pull request do tác nhân này mở."
+				},
+				"ci_failure": {
+					"label": "CI lỗi trên pull request của nó",
+					"description": "Một kiểm tra thất bại ở commit mới nhất của pull request do tác nhân này mở (tối đa vài lần thử)."
+				},
+				"review_request": {
+					"label": "Được yêu cầu review",
+					"description": "Bot được yêu cầu làm người review, khi nền tảng cho phép."
+				},
+				"assignment": {
+					"label": "Được giao việc",
+					"description": "Bot được giao một issue hoặc pull request, khi nền tảng cho phép."
+				},
+				"label": {
+					"label": "Nhãn",
+					"description": "Nhãn \"paca\" (hoặc \"paca:<handle của tác nhân>\") được thêm vào issue hoặc pull request."
+				},
+				"auto_review": {
+					"label": "Review mọi pull request",
+					"description": "Tự động review mỗi pull request mới. Tắt cho đến khi bạn bật; bỏ qua bản nháp và pull request do chính tác nhân mở."
+				}
+			},
+			"repositories": {
+				"title": "Kho mã",
+				"description": "Tác nhân của dự án này có thể làm việc trên các kho mã sau.",
+				"mention": "Nhắc trong bình luận:",
+				"noDescription": "Chưa có mô tả",
+				"addDescription": "Thêm mô tả",
+				"editDescription": "Sửa mô tả",
+				"saveDescription": "Lưu",
+				"cancelDescription": "Hủy",
+				"descriptionLabel": "Mô tả kho mã"
+			},
+			"automation": {
+				"title": "Tự động hóa",
+				"description": "Quyết định cách hoạt động trên Git khởi động tác nhân của bạn.",
+				"locked": "Hãy liên kết một kho mã trước. Các cài đặt này áp dụng cho các kho mã đã liên kết với dự án.",
+				"responder": {
+					"label": "Tác nhân phản hồi mặc định",
+					"none": "Không có tác nhân mặc định",
+					"help": "Phản hồi các lượt nhắc, nhãn và yêu cầu đánh giá không chỉ định tác nhân. Thêm \"agent:<handle>\" vào lượt nhắc để chọn tác nhân khác.",
+					"warning": "Nếu không có tác nhân mặc định, các lượt nhắc không chỉ định tác nhân sẽ bị bỏ qua."
+				},
+				"minPermission": {
+					"label": "Quyền tối thiểu để khởi động tác nhân",
+					"help": "Người có quyền thấp hơn trên kho mã vẫn bình luận được, nhưng tác nhân sẽ không chạy."
+				},
+				"permission": {
+					"read": "Đọc",
+					"triage": "Phân loại",
+					"write": "Ghi",
+					"maintain": "Bảo trì",
+					"admin": "Quản trị"
+				},
+				"paused": {
+					"label": "Tạm dừng tự động hóa",
+					"help": "Khi tạm dừng, không hoạt động Git nào khởi động tác nhân. Các lượt chạy đang diễn ra vẫn hoàn tất."
+				},
+				"save": "Lưu",
+				"saved": "Đã lưu.",
+				"advanced": "Nâng cao"
+			},
+			"usage": {
+				"title": "Cách sử dụng",
+				"description": "Ba cách khởi động tác nhân từ nền tảng Git của bạn.",
+				"mention": {
+					"title": "Nhắc đến bot",
+					"description": "Bình luận trong issue hoặc pull request. Tác nhân mặc định sẽ trả lời."
+				},
+				"pick": {
+					"title": "Chọn tác nhân",
+					"description": "Thêm agent:<handle> vào lượt nhắc để chọn tác nhân trả lời."
+				},
+				"label": {
+					"title": "Thêm nhãn",
+					"description": "Thêm nhãn \"paca\" vào issue hoặc pull request."
+				},
+				"automatic": "Tác nhân cũng có thể tự khởi động, ví dụ để theo dõi pull request của mình hoặc đánh giá mọi pull request mới. Bật trong thẻ Git của từng tác nhân."
+			},
+			"connections": {
+				"title": "Kết nối",
+				"description": "Các GitHub App và access token mà Paca dùng để truy cập kho của bạn. Một dự án có thể có nhiều kết nối từ các tổ chức khác nhau; mỗi kết nối hoặc được mọi dự án dùng chung, hoặc chỉ giới hạn ở dự án này.",
+				"add": "Thêm {{provider}}",
+				"empty": {
+					"title": "Chưa có kết nối",
+					"description": "Thêm một kết nối để Paca truy cập được kho của bạn. Dùng một ứng dụng, hoặc dán access token nếu nền tảng của bạn không có ứng dụng.",
+					"noPermission": "Hãy nhờ người có quyền quản lý kết nối Git thêm một kết nối."
+				},
+				"scope": {
+					"shared": "Tất cả dự án",
+					"project": "Dự án này"
+				},
+				"expires": "Hết hạn {{date}}",
+				"expired": "Đã hết hạn",
+				"remove": "Gỡ"
+			},
+			"webhook": {
+				"title": "Sự kiện từ kho này chưa đến được Paca",
+				"description": "Paca không thể đăng ký webhook trên kho này qua kết nối này.",
+				"permissionHint": "Nguyên nhân thường gặp nhất là token thiếu quyền quản lý webhook (vai trò Maintainer trên GitLab, quyền Webhooks trên GitHub). Hãy cấp quyền đó cho token (trên GitLab, tạo token mới với vai trò Maintainer và thêm làm kết nối), rồi thử lại.",
+				"retry": "Thử lại",
+				"descriptionNotTried": "Paca chưa đăng ký webhook trên kho này (ví dụ: kho được chuyển từ phiên bản plugin trước đó). Hãy đăng ký để bắt đầu nhận sự kiện.",
+				"register": "Đăng ký webhook",
+				"failed": "Vẫn chưa đăng ký được webhook."
+			},
+			"reconnect": {
+				"title": "Kho này không có kết nối",
+				"description": "Kết nối của kho đã bị xóa nên không thể dùng được. Hãy kết nối lại qua một kết nối thấy được kho này.",
+				"noConnection": "Kết nối của kho đã bị xóa. Hãy thêm một kết nối thấy được kho này trước, rồi kết nối lại.",
+				"button": "Kết nối lại"
 			}
 		}
 	},
@@ -61,6 +251,7 @@
 			"acpProviderCodex": "Codex",
 			"acpProviderGeminiCli": "Gemini CLI",
 			"acpProviderGoose": "Goose",
+			"acpProviderOpenCode": "OpenCode",
 			"acpProviderCustom": "Tùy chỉnh…",
 			"acpCommandLabel": "Lệnh",
 			"acpCommandPlaceholder": "npx -y my-acp-server",
@@ -154,6 +345,7 @@
 			"stepSkillMcpDescription": "Tạo khóa MCP riêng của agent này một lần, sau đó chạy cả hai lệnh bên dưới — để các lệnh gọi công cụ được ghi nhận là hoạt động của agent, không phải của bạn.",
 			"stepSkillMcpSkillLabel": "Cài đặt skill:",
 			"stepSkillMcpConnectLabel": "Kết nối máy chủ MCP:",
+			"stepSkillMcpConnectLabelConfig": "Thêm đoạn này vào {{file}} (gộp vào mục \"{{section}}\" nếu đã có):",
 			"step3NotAvailable": "Cài đặt tự động khả dụng cho Claude Code, Gemini CLI và Codex. {{provider}} chưa có trình cài đặt prompt tùy chỉnh nào được biết đến — các công cụ MCP của Paca bên dưới vẫn hoạt động mà không cần nó.",
 			"step3ViewContent": "Xem hướng dẫn skill",
 			"step4NoKeyYet": "Tạo một khóa để hiển thị các lệnh thiết lập.",
@@ -173,7 +365,8 @@
 				"skills": "Skill",
 				"envVars": "Môi trường",
 				"globalRole": "Vai trò toàn cục",
-				"activity": "Hoạt động"
+				"activity": "Hoạt động",
+				"git": "Git"
 			},
 			"globalRole": {
 				"title": "Vai trò toàn cục",
@@ -244,6 +437,7 @@
 				"acpProviderCodex": "Codex",
 				"acpProviderGeminiCli": "Gemini CLI",
 				"acpProviderGoose": "Goose",
+				"acpProviderOpenCode": "OpenCode",
 				"acpProviderCustom": "Tùy chỉnh…",
 				"acpCommandLabel": "Lệnh",
 				"acpCommandHint": "Lệnh cách nhau bằng dấu cách, dùng để khởi chạy máy chủ ACP của bạn.",
@@ -373,6 +567,69 @@
 			},
 			"system": {
 				"badge": "Hệ thống"
+			},
+			"git": {
+				"title": "Danh tính Git",
+				"description": "Mặc định agent này hoạt động qua danh tính Git dùng chung của workspace. Hãy cấp cho nó danh tính riêng để commit, pull request và bình luận của nó hiển thị dưới một bot khác, rồi cài đặt danh tính đó trên các tài khoản và tổ chức có repository mà nó làm việc.",
+				"providersUnavailable": "Không thể tải nhà cung cấp Git của dự án này.",
+				"noProviders": {
+					"title": "Chưa có nền tảng Git",
+					"description": "Hãy nhờ quản trị viên cài plugin nhà cung cấp Git và kết nối. Sau đó tác nhân có thể làm việc trên kho mã."
+				},
+				"ownIdentity": "Danh tính riêng",
+				"usesShared": "Dùng danh tính chung",
+				"singleIdentity": "Nền tảng này chỉ có một danh tính cho mỗi host nên dùng danh tính chung.",
+				"remove": "Gỡ bỏ",
+				"create": {
+					"title": "Tạo danh tính riêng cho tác nhân này",
+					"description": "Commit, pull request và bình luận của nó sẽ hiển thị dưới một bot riêng và mọi người có thể nhắc theo tên. Bạn phê duyệt trên nền tảng rồi cài đặt ngay.",
+					"button": "Tạo danh tính"
+				},
+				"askAdmin": "Hãy nhờ quản trị viên workspace tạo.",
+				"install": {
+					"label": "Cài đặt trên tài khoản hoặc tổ chức khác",
+					"placeholder": "tài khoản hoặc tổ chức (tùy chọn)",
+					"button": "Cài đặt",
+					"help": "Mở trang cài đặt của nền tảng. Để trống tên để chọn tài khoản tại đó.",
+					"title": "Cài đặt cho tài khoản hoặc tổ chức khác"
+				},
+				"triggers": {
+					"title": "Trình kích hoạt Git",
+					"description": "Sự kiện Git nào khởi động tác nhân này. Chỉ hiện các sự kiện mà nhà cung cấp Git đã cài có thể phát.",
+					"filters": {
+						"branches": "Chỉ các nhánh đích này",
+						"authors": "Chỉ các tác giả này",
+						"help": "Cách nhau bằng dấu phẩy. Để trống để áp dụng tất cả. Tác giả là bot phải có trong danh sách mới được review.",
+						"save": "Lưu bộ lọc"
+					},
+					"unsupported": "Các nền tảng Git đã kết nối không hỗ trợ.",
+					"groups": {
+						"requests": {
+							"title": "Phản hồi yêu cầu",
+							"description": "Khởi động khi ai đó gọi tác nhân này."
+						},
+						"followUp": {
+							"title": "Theo dõi pull request của chính nó",
+							"description": "Khởi động khi có sự kiện trên pull request do tác nhân này mở."
+						},
+						"proactive": {
+							"title": "Tự chủ hành động",
+							"description": "Khởi động mà không cần ai yêu cầu. Mặc định tắt."
+						}
+					}
+				},
+				"identity": {
+					"title": "Danh tính",
+					"description": "Tài khoản mà tác nhân này dùng trên từng nền tảng Git."
+				},
+				"own": {
+					"description": "Tác nhân này có bot riêng nên commit, pull request và bình luận của nó hiển thị dưới một tên riêng.",
+					"mention": "Nhắc bằng:"
+				},
+				"shared": {
+					"description": "Tác nhân này hoạt động qua bot dùng chung của workspace, giống các tác nhân khác."
+				},
+				"permissions": "Những gì tác nhân này làm được trên Git phụ thuộc vào vai trò trong dự án: quyền đọc và ghi lấy từ quyền Git của vai trò. Duyệt và hợp nhất pull request không được cấp theo mặc định."
 			}
 		},
 		"conversationView": {
@@ -465,8 +722,24 @@
 				"contextTypeAutomation": "Tự động hóa",
 				"contextTypeAnnotation": "Bình luận",
 				"noContextResults": "Không tìm thấy kết quả",
-				"contextSearchMinChars": "Nhập ít nhất 2 ký tự để tìm kiếm"
+				"contextSearchMinChars": "Nhập ít nhất 2 ký tự để tìm kiếm",
+				"dialogDescription": "Tìm và chọn các mục để chia sẻ với tác tử. Chúng sẽ được gửi cùng tin nhắn tiếp theo của bạn.",
+				"done": "Xong",
+				"attachedCount": "Đã đính kèm {{count}}"
 			}
+		},
+		"acpModelEffort": {
+			"modelLabel": "Mô hình",
+			"modelPlaceholder": "vd: claude-sonnet-4-5",
+			"modelHint": "Tên mô hình tùy chọn, được gửi đến nhà cung cấp đúng như bạn nhập. Để trống để dùng mặc định của nhà cung cấp.",
+			"effortLabel": "Mức độ suy luận",
+			"effortDefault": "Mặc định của nhà cung cấp",
+			"effort_low": "Thấp",
+			"effort_medium": "Trung bình",
+			"effort_high": "Cao",
+			"effort_xhigh": "Rất cao",
+			"effort_max": "Tối đa",
+			"effortHint": "Tùy chọn. Chỉ áp dụng nếu nhà cung cấp hỗ trợ mức đã chọn."
 		}
 	},
 	"environments": {
@@ -730,6 +1003,15 @@
 			"deleted": "đã xóa tài liệu",
 			"moved": "đã di chuyển tài liệu",
 			"contentChangeDiff": "Thay đổi nội dung"
+		},
+		"managedCopy": {
+			"copyOf": "Bản sao của {{path}} trong {{repository}}",
+			"copyOfAtCommit": "Bản sao của {{path}} trong {{repository}} tại {{commit}}",
+			"locked": "Đã khóa: hãy sửa tệp trong kho mã rồi push lên.",
+			"unlocked": "Các chỉnh sửa ở đây sẽ bị ghi đè ở lần push tiếp theo, trừ khi được đưa vào tệp.",
+			"lock": "Khóa",
+			"unlock": "Mở khóa",
+			"editNotSaved": "Chỉnh sửa gần nhất của bạn chưa được lưu."
 		}
 	},
 	"roles": {
@@ -893,6 +1175,26 @@
 			"projectExport": {
 				"label": "Xuất dữ liệu dự án",
 				"description": "Xuất công việc (kèm bình luận và hoạt động) và tài liệu của dự án này"
+			},
+			"gitRead": {
+				"label": "Xem Git",
+				"description": "Xem các kho mã được liên kết với dự án"
+			},
+			"gitWrite": {
+				"label": "Quản lý Git",
+				"description": "Liên kết và hủy liên kết kho mã, cấp quyền truy cập kho mã và cho phép tác nhân đẩy thay đổi"
+			},
+			"gitApprove": {
+				"label": "Phê duyệt yêu cầu thay đổi",
+				"description": "Phê duyệt pull request và merge request, có thể đáp ứng yêu cầu review bắt buộc. Bình luận và yêu cầu thay đổi chỉ cần quyền Quản lý Git."
+			},
+			"gitMerge": {
+				"label": "Hợp nhất yêu cầu thay đổi",
+				"description": "Hợp nhất pull request và merge request vào nhánh đích. Bảo vệ nhánh trên nền tảng vẫn được áp dụng."
+			},
+			"gitConnectionsManage": {
+				"label": "Quản lý kết nối Git",
+				"description": "Thêm và gỡ các GitHub App và access token chỉ dự án này dùng. Liên kết kho vẫn cần quyền ghi Git."
 			}
 		},
 		"permissionGroups": {
@@ -908,7 +1210,8 @@
 			"environments": "Môi trường",
 			"annotations": "Annotations",
 			"workflows": "Tự động hóa",
-			"plugins": "Plugin"
+			"plugins": "Plugin",
+			"git": "Git"
 		}
 	},
 	"settings": {
@@ -1032,7 +1335,8 @@
 				"displayName": "Tên hiển thị",
 				"fieldKey": "Khóa trường",
 				"type": "Loại",
-				"required": "Bắt buộc"
+				"required": "Bắt buộc",
+				"useInSearch": "Dùng trong tìm kiếm"
 			},
 			"yes": "Có",
 			"no": "Không",
@@ -1054,6 +1358,8 @@
 			"noColor": "Không màu",
 			"requiredLabel": "Bắt buộc",
 			"requiredHint": "Người dùng phải điền trường này khi tạo hoặc chỉnh sửa nhiệm vụ.",
+			"useInSearchLabel": "Dùng trong tìm kiếm",
+			"useInSearchHint": "Tìm kiếm công việc cũng khớp với giá trị của trường này.",
 			"fieldTypes": {
 				"text": "Văn bản",
 				"number": "Số",
@@ -1061,7 +1367,8 @@
 				"checkbox": "Checkbox",
 				"select": "Chọn",
 				"multiSelect": "Chọn nhiều",
-				"url": "URL"
+				"url": "URL",
+				"longText": "Văn bản dài"
 			},
 			"createDialog": {
 				"title": "Tạo trường tùy chỉnh",
@@ -1092,7 +1399,9 @@
 			"noPermission": {
 				"title": "You don't have permission to view custom fields",
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
-			}
+			},
+			"rowsLabel": "Số dòng hiển thị",
+			"rowsHint": "Số dòng hiển thị khi chỉnh sửa ({{min}}–{{max}})."
 		},
 		"jev": {
 			"title": "Jev AI",
@@ -1376,7 +1685,8 @@
 		"common": {
 			"empty": "Trống",
 			"dash": "—",
-			"unassigned": "Chưa giao"
+			"unassigned": "Chưa giao",
+			"none": "Không có"
 		},
 		"notFound": {
 			"title": "Không tìm thấy nhiệm vụ",
@@ -1504,7 +1814,8 @@
 				"checkbox": "Checkbox",
 				"select": "Chọn",
 				"multiSelect": "Chọn nhiều",
-				"url": "URL"
+				"url": "URL",
+				"longText": "Văn bản dài"
 			}
 		},
 		"addTaskLinkModal": {
@@ -1538,7 +1849,8 @@
 				"datePlaceholder": "Ngày",
 				"clearDate": "Xóa ngày",
 				"startDate": "Ngày bắt đầu",
-				"dueDate": "Ngày đến hạn"
+				"dueDate": "Ngày đến hạn",
+				"clearDates": "Xóa ngày"
 			},
 			"storyPointsEditor": {
 				"decrease": "Giảm story points",
@@ -1641,6 +1953,66 @@
 			"projectClear": "Bỏ chọn dự án",
 			"projectEmpty": "Không có dự án nào để chọn",
 			"projectUnknown": "Dự án không xác định"
+		},
+		"git": {
+			"branches": "Nhánh",
+			"pullRequests": "Pull request",
+			"linkBranch": "Liên kết nhánh",
+			"newBranch": "Nhánh mới",
+			"linkPullRequest": "Liên kết pull request",
+			"noBranches": "Chưa có nhánh nào được liên kết.",
+			"noPullRequests": "Chưa có pull request nào được liên kết.",
+			"by": "bởi {{author}}",
+			"unlink": "Hủy liên kết",
+			"unlinkPullRequest": "Hủy liên kết pull request {{name}}",
+			"unlinkBranch": "Hủy liên kết nhánh {{name}}",
+			"copyCheckout": "Sao chép lệnh checkout",
+			"copy": "Sao chép",
+			"copied": "Đã sao chép",
+			"state": {
+				"open": "Đang mở",
+				"draft": "Bản nháp",
+				"merged": "Đã hợp nhất",
+				"closed": "Đã đóng"
+			},
+			"ci": {
+				"passing": "CI đạt",
+				"failing": "CI lỗi",
+				"pending": "CI đang chạy",
+				"failingNames": "Lỗi: {{names}}",
+				"counts": "{{passed}}/{{total}} kiểm tra đạt"
+			},
+			"forms": {
+				"selectRepository": "Chọn một kho mã…",
+				"cancel": "Hủy",
+				"pullRequest": "Pull request",
+				"pullRequestHint": "Dán liên kết pull request hoặc nhập số của nó.",
+				"willLink": "Sẽ liên kết {{what}} từ {{repository}}",
+				"repository": "Kho mã",
+				"linkPullRequest": "Liên kết pull request",
+				"existingBranch": "Nhánh có sẵn",
+				"branchHint": "Nhập tên nhánh hoặc dán liên kết đến nhánh.",
+				"linkBranch": "Liên kết nhánh",
+				"branchType": "Loại",
+				"branchName": "Tên nhánh",
+				"branchFrom": "Tạo từ",
+				"branchFromHint": "Tùy chọn — mặc định là nhánh mặc định của kho mã.",
+				"createBranch": "Tạo nhánh",
+				"orLocally": "Hoặc tạo cục bộ"
+			},
+			"errors": {
+				"notFound": "Không tìm thấy trong kho mã đó.",
+				"rejected": "Nền tảng Git đã từ chối yêu cầu cho kho mã này.",
+				"unavailable": "Nhà cung cấp Git tạm thời không khả dụng. Hãy thử lại.",
+				"noIdentity": "Không có danh tính Git nào có thể hoạt động trên kho mã này.",
+				"forbidden": "Bạn không có quyền thực hiện việc đó.",
+				"generic": "Đã xảy ra lỗi. Hãy thử lại.",
+				"repoNotLinked": "\"{{repository}}\" chưa được liên kết với dự án này.",
+				"selectRepository": "Chọn một kho mã.",
+				"invalidNumber": "Nhập một số hoặc dán liên kết.",
+				"branchRequired": "Nhập tên nhánh hoặc dán liên kết.",
+				"createRefused": "Nền tảng không thể tạo nhánh đó (tên có thể đã tồn tại hoặc không hợp lệ)."
+			}
 		}
 	},
 	"portForwardDetail": {
@@ -1812,6 +2184,19 @@
 		"backlog": {
 			"title": "Product Backlog",
 			"description": "Tất cả công việc chưa được gán vào sprint nào."
+		},
+		"subtasks": {
+			"expand": "Mở rộng {{n}} công việc con",
+			"collapse": "Thu gọn {{n}} công việc con",
+			"progress": "Hoàn thành {{done}}/{{n}} công việc con",
+			"loading": "Đang tải công việc con",
+			"loadError": "Không thể tải công việc con.",
+			"retry": "Thử lại",
+			"matching": "{{n}}/{{total}} công việc con khớp với bộ lọc hiện tại",
+			"noMatch": "Không có công việc con nào khớp với bộ lọc hiện tại",
+			"loadMore": "Tải thêm công việc con",
+			"add": "Thêm công việc con",
+			"addPlaceholder": "Tiêu đề công việc con"
 		}
 	},
 	"conversationsPage": {
@@ -1881,6 +2266,7 @@
 			"deleteView": "Xóa chế độ xem",
 			"searchTasksPlaceholder": "Tìm kiếm nhiệm vụ…",
 			"pluginNotAvailable": "Plugin không khả dụng",
+			"columnsTruncated": "Chỉ hiển thị {{max}} cột đầu tiên; một số tác vụ không nằm trong cột nào. Hãy thu hẹp chế độ xem bằng bộ lọc để xem phần còn lại.",
 			"viewErrors": {
 				"isLastView": "Đây là chế độ xem cuối cùng và không thể xóa.",
 				"deleteFailed": "Không thể xóa chế độ xem. Vui lòng thử lại.",
@@ -1954,9 +2340,21 @@
 			"tagsFilter": {
 				"addTag": "Thêm thẻ",
 				"addTagPlaceholder": "Thêm thẻ..."
-			}
+			},
+			"subtasksLabel": "Công việc con",
+			"subtasksCollapsed": "Lồng nhau, thu gọn",
+			"subtasksExpanded": "Lồng nhau, mở rộng",
+			"subtasksHidden": "Ẩn (danh sách phẳng)",
+			"ganttDependenciesLabel": "Mũi tên phụ thuộc",
+			"ganttDependenciesShown": "Hiện",
+			"ganttDependenciesHidden": "Ẩn",
+			"unsavedBadge": "Thay đổi chưa lưu",
+			"unsavedTitle": "Hủy các thay đổi chưa lưu?",
+			"unsavedDescription": "Bạn đã thay đổi cài đặt của chế độ xem này nhưng chưa lưu. Hãy lưu, hoặc hủy để quay lại cài đặt đã lưu gần nhất.",
+			"keepEditing": "Tiếp tục chỉnh sửa",
+			"discard": "Hủy bỏ"
 		},
-		"roadmap": {
+		"gantt": {
 			"taskColumnLabel": "Nhiệm vụ",
 			"noTasksToDisplay": "Không có nhiệm vụ để hiển thị",
 			"noDatesSet": "Chưa đặt ngày",
@@ -1964,7 +2362,24 @@
 			"startDateTooltip": "Bắt đầu: {{date}}",
 			"dueDateTooltip": "Đến hạn: {{date}}",
 			"loading": "Đang tải…",
-			"viewMore": "Xem thêm"
+			"viewMore": "Xem thêm",
+			"zoomLabel": "Thu phóng",
+			"zoom": {
+				"day": "Ngày",
+				"week": "Tuần",
+				"month": "Tháng",
+				"quarter": "Quý",
+				"year": "Năm"
+			},
+			"today": "Hôm nay",
+			"jumpToToday": "Đi tới hôm nay",
+			"quarterLabel": "Q{{n}}",
+			"startsBeforeBlocker": "Bắt đầu trước khi “{{title}}” kết thúc",
+			"resizeStart": "Kéo để đổi ngày bắt đầu",
+			"resizeEnd": "Kéo để đổi ngày đến hạn",
+			"rescheduled": "Đã đổi lịch “{{title}}”",
+			"undo": "Hoàn tác",
+			"rescheduleFailed": "Không thể đổi lịch nhiệm vụ"
 		},
 		"newViewPopover": {
 			"addView": "Thêm chế độ xem",
@@ -1978,7 +2393,7 @@
 			"layouts": {
 				"board": "Bảng",
 				"table": "Bảng dữ liệu",
-				"roadmap": "Lộ trình",
+				"gantt": "Gantt",
 				"plugin": "Plugin"
 			}
 		},
@@ -2004,7 +2419,7 @@
 		},
 		"timeline": {
 			"title": "Dòng thời gian",
-			"description": "Epic và kế hoạch dài hạn trên một lộ trình."
+			"description": "Epic và kế hoạch dài hạn trên biểu đồ Gantt."
 		},
 		"sprintDetail": {
 			"notFound": "Không tìm thấy sprint hoặc bạn không có quyền truy cập.",
@@ -2080,7 +2495,8 @@
 			"assignee": "Người được giao",
 			"importance": "Mức độ quan trọng",
 			"type": "Loại",
-			"reporter": "Người báo cáo"
+			"reporter": "Người báo cáo",
+			"tags": "Thẻ"
 		},
 		"sortBy": {
 			"manual": "Thủ công",
@@ -2171,7 +2587,14 @@
 			"triggerGroups": {
 				"taskEvents": "Sự kiện công việc",
 				"sprintEvents": "Sự kiện sprint",
-				"scheduleWebhook": "Lịch và webhook"
+				"scheduleWebhook": "Lịch và webhook",
+				"taskActivity": "Hoạt động & công việc con"
+			},
+			"git": "Git",
+			"actionGroups": {
+				"taskActions": "Công việc",
+				"flowActions": "Luồng & tích hợp",
+				"sprintActions": "Sprint"
 			}
 		},
 		"nodeKind": {
@@ -2196,7 +2619,12 @@
 			"sprint_created": "Sprint được tạo",
 			"sprint_started": "Sprint bắt đầu",
 			"sprint_completed": "Sprint hoàn thành",
-			"sprint_deleted": "Sprint bị xóa"
+			"sprint_deleted": "Sprint bị xóa",
+			"field_changed": "Trường thay đổi",
+			"comment_added": "Đã thêm bình luận",
+			"link_added": "Đã thêm liên kết",
+			"attachment_added": "Đã thêm tệp đính kèm",
+			"child_changed": "Công việc con thay đổi"
 		},
 		"actionTypes": {
 			"update_task": "Cập nhật công việc",
@@ -2204,7 +2632,11 @@
 			"call_api": "Gọi API",
 			"wait": "Chờ",
 			"update_sprint": "Cập nhật sprint",
-			"complete_sprint": "Hoàn thành sprint"
+			"complete_sprint": "Hoàn thành sprint",
+			"create_task": "Tạo công việc con",
+			"link_task": "Liên kết công việc",
+			"add_comment": "Thêm bình luận",
+			"notify": "Gửi thông báo"
 		},
 		"nodeConfig": {
 			"save": "Lưu",
@@ -2245,7 +2677,24 @@
 				"tokenShownOnceWarning": "Hãy sao chép token này ngay — nó sẽ không hiển thị lại nữa.",
 				"copy": "Sao chép",
 				"copied": "Đã sao chép",
-				"noTokenYet": "Chưa có token nào được tạo"
+				"noTokenYet": "Chưa có token nào được tạo",
+				"fieldLabel": "Trường theo dõi",
+				"fieldPlaceholder": "Chọn một trường…",
+				"fieldChangedHint": "Chạy khi trường này được chỉnh sửa trên một công việc.",
+				"childChangedHint": "Chạy trên công việc cha khi một công việc con được tạo hoặc đổi trạng thái. Thêm điều kiện về các công việc con để chỉ thực hiện khi, chẳng hạn, tất cả đã hoàn thành.",
+				"childStatusLabel": "Khi công việc con chuyển sang",
+				"changedFields": {
+					"sprint": "Sprint",
+					"due_date": "Hạn chót",
+					"start_date": "Ngày bắt đầu",
+					"title": "Tiêu đề",
+					"story_points": "Điểm story",
+					"reporter": "Người báo cáo",
+					"task_type": "Loại công việc",
+					"parent_task": "Công việc cha",
+					"description": "Mô tả",
+					"custom_fields": "Trường tùy chỉnh"
+				}
 			},
 			"condition": {
 				"branchesTitle": "Nhánh",
@@ -2280,8 +2729,14 @@
 					"sprint_status": "Trạng thái sprint",
 					"sprint_goal": "Mục tiêu sprint",
 					"sprint_start_date": "Ngày bắt đầu sprint",
-					"sprint_end_date": "Ngày kết thúc sprint"
-				}
+					"sprint_end_date": "Ngày kết thúc sprint",
+					"child_count": "Số công việc con"
+				},
+				"dateMode": {
+					"fixed": "Ngày cụ thể",
+					"relative": "Tương đối so với hôm nay"
+				},
+				"relativeHint": "Số ngày từ hôm nay: 0 = bây giờ, 3 = sau 3 ngày, -1 = hôm qua. Dùng \"trước\" với 0 để chỉ quá hạn."
 			},
 			"action": {
 				"memberLabel": "Người được giao",
@@ -2336,7 +2791,58 @@
 				"pluginConditionLabel": "Điều kiện plugin",
 				"pluginConditionHint": "Giao việc khớp của nhánh này cho một điều kiện do plugin cung cấp thay vì so sánh trường công việc.",
 				"selectPluginPlaceholder": "Chọn điều kiện plugin…",
-				"addCustomField": "Thêm trường tùy chỉnh…"
+				"addCustomField": "Thêm trường tùy chỉnh…",
+				"createTaskHint": "Tạo một công việc mới là con của công việc được chọn bên dưới. Thêm các trường bạn muốn: mỗi trường có thể là giá trị cố định hoặc sao chép từ công việc kích hoạt hay công việc cha của nó. Nếu công việc cha đã có công việc con với đúng tiêu đề này thì sẽ không tạo thêm.",
+				"createTitlePlaceholder": "{{task.title}} - Review",
+				"descriptionLabel": "Mô tả",
+				"ops": {
+					"set": "Đặt thành",
+					"replace": "Thay bằng",
+					"add": "Thêm",
+					"remove": "Xóa",
+					"clear": "Xóa trống",
+					"task": "Sao chép từ công việc này",
+					"parent": "Sao chép từ công việc cha",
+					"now": "Hôm nay"
+				},
+				"clearHint": "Làm trống trường này.",
+				"dynamicFieldLabel": "Sao chép trường",
+				"offsetDaysLabel": "Dịch chuyển (ngày)",
+				"offsetDaysHint": "Dương = muộn hơn, âm = sớm hơn.",
+				"dynamicHint": {
+					"task": "Được sao chép từ công việc đã kích hoạt tự động hóa khi chạy. Nếu không có giá trị, trường giữ nguyên.",
+					"parent": "Được sao chép từ công việc cha của công việc kích hoạt. Nếu không có cha hoặc giá trị, trường giữ nguyên.",
+					"now": "Ngày hôm nay khi chạy, dịch theo số ngày ở trên."
+				},
+				"addMember": "Thêm thành viên…",
+				"removeMember": "Xóa thành viên",
+				"commentHint": "Đăng một bình luận lên công việc, do tự động hóa viết.",
+				"commentTextLabel": "Bình luận",
+				"commentPlaceholder": "vd: Tất cả công việc con đã hoàn thành.",
+				"notifyHint": "Gửi thông báo trong ứng dụng về công việc đến những người dưới đây.",
+				"notifyRecipientsLabel": "Thông báo cho",
+				"notifyRecipients": {
+					"assignees": "Người được giao",
+					"reporter": "Người báo cáo",
+					"parent_assignees": "Người được giao của công việc cha"
+				},
+				"notifyMembersLabel": "Thông báo thêm cho",
+				"notifyMessageLabel": "Nội dung",
+				"notifyMessagePlaceholder": "vd: Sẵn sàng để xem xét.",
+				"linkHint": "Liên kết công việc với công việc khác. Chiều liên kết đọc từ phía công việc này.",
+				"linkTypeLabel": "Loại liên kết",
+				"linkTypes": {
+					"blocks": "Chặn",
+					"is_blocked_by": "Bị chặn bởi",
+					"relates_to": "Liên quan đến",
+					"duplicates": "Trùng với",
+					"is_duplicated_by": "Bị trùng bởi"
+				},
+				"linkToLabel": "Liên kết với",
+				"createLinkLabel": "Liên kết với công việc cha",
+				"createLinkNone": "Không liên kết",
+				"createLinkHint": "Có thể liên kết công việc mới với công việc cha, đọc từ phía công việc mới (vd: \"Chặn\" = công việc con chặn công việc cha).",
+				"opsLabel": "Cách áp dụng trường này"
 			},
 			"target": {
 				"label": "Áp dụng cho",
@@ -2344,6 +2850,7 @@
 					"self": "Công việc này",
 					"parent": "Công việc cha",
 					"children": "Công việc con",
+					"siblings": "Công việc cùng cấp (các công việc con khác của cha)",
 					"blocks": "Chặn",
 					"is_blocked_by": "Bị chặn bởi",
 					"relates_to": "Công việc liên quan",
@@ -2371,7 +2878,12 @@
 				"cronSchedule": "Chạy {{expression}}",
 				"webhookReady": "Đã cấu hình webhook",
 				"callApiSummary": "{{method}} {{host}}",
-				"jevNoulTrue": "Có"
+				"jevNoulTrue": "Có",
+				"pluginField": "{{field}}: {{value}}",
+				"waitMinutes": "Chờ {{minutes}} phút",
+				"createTaskSummary": "Tạo: {{title}}",
+				"commentSummary": "Bình luận: {{text}}",
+				"notifySummary": "Thông báo: {{message}}"
 			},
 			"jev": {
 				"answerTypeLabel": "Loại câu trả lời",
@@ -2397,7 +2909,8 @@
 				"confidenceThresholdLabel": "Ngưỡng độ tin cậy",
 				"trueThresholdLabel": "Ngưỡng \"đúng\"",
 				"thresholdHint": "Dưới ngưỡng này, quy trình sẽ đi theo nhánh Else thay vì tin tưởng câu trả lời."
-			}
+			},
+			"noConfigNeeded": "Nút này không cần cấu hình — nó tự thực hiện ngay khi tự động hóa chạy đến."
 		},
 		"runHistory": {
 			"title": "Lịch sử chạy",

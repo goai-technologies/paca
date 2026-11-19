@@ -62,8 +62,11 @@
 		"errors": {
 			"titleInvalid": "该标题无效。",
 			"folderNameInvalid": "该文件夹名称无效。",
-			"renameFailed": "重命名失败，请重试。"
-		}
+			"renameFailed": "重命名失败，请重试。",
+			"moveIntoSelf": "无法将文件夹移动到其自身或其子文件夹中。",
+			"moveFailed": "无法移动该项目，请重试。"
+		},
+		"moveToTop": "移到顶层"
 	},
 	"notifications": {
 		"title": "通知",
@@ -74,14 +77,21 @@
 		"unmuteSound": "取消静音通知提示音",
 		"text": {
 			"assigned": "{{actor}} 将任务 #{{taskNumber}} — {{taskTitle}} 分配给了您",
-			"mentioned": "{{actor}} 在 #{{taskNumber}} — {{taskTitle}} 中提到了您"
-		}
+			"mentioned": "{{actor}} 在 #{{taskNumber}} — {{taskTitle}} 中提到了您",
+			"question": "{{actor}} 在 {{title}} 中向你提问",
+			"mentionedInDoc": "{{actor}} 在文档 {{title}} 中提到了你",
+			"automation": "自动化：{{message}} (#{{taskNumber}} — {{taskTitle}})"
+		},
+		"untitledConversation": "未命名对话",
+		"globalChat": "全局聊天",
+		"untitledDocument": "未命名文档"
 	},
 	"userMenu": {
 		"signIn": "登录",
-		"myProfile": "个人资料",
+		"myProfile": "账户",
 		"apiKeys": "API 密钥",
 		"logOut": "退出登录",
-		"loggingOut": "正在退出登录…"
+		"loggingOut": "正在退出登录…",
+		"sendFeedback": "发送反馈"
 	}
 }

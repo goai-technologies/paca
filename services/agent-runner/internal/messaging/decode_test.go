@@ -49,16 +49,16 @@ func TestDecodeTrigger_TaskAssignedByAutomation(t *testing.T) {
 
 // TestDecodeTrigger_GlobalChatHasNoProjectID mirrors
 // publishGlobalChatTrigger's payload: no project_id key at all, and
-// actor_user_id instead of actor_member_id.
+// actor_account_id instead of actor_member_id.
 func TestDecodeTrigger_GlobalChatHasNoProjectID(t *testing.T) {
 	convID, agentID, sessionID, userID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	values := map[string]interface{}{
-		"conversation_id": convID.String(),
-		"agent_id":        agentID.String(),
-		"chat_session_id": sessionID.String(),
-		"actor_user_id":   userID.String(),
-		"trigger_type":    "chat_message",
-		"message":         "hi",
+		"conversation_id":  convID.String(),
+		"agent_id":         agentID.String(),
+		"chat_session_id":  sessionID.String(),
+		"actor_account_id": userID.String(),
+		"trigger_type":     "chat_message",
+		"message":          "hi",
 	}
 
 	trigger, err := decodeTrigger(values)
@@ -69,8 +69,8 @@ func TestDecodeTrigger_GlobalChatHasNoProjectID(t *testing.T) {
 	if trigger.ProjectID != uuid.Nil {
 		t.Errorf("ProjectID = %s, want uuid.Nil for a global-chat trigger", trigger.ProjectID)
 	}
-	if trigger.ActorUserID == nil || *trigger.ActorUserID != userID {
-		t.Errorf("ActorUserID = %v, want %s", trigger.ActorUserID, userID)
+	if trigger.ActorAccountID == nil || *trigger.ActorAccountID != userID {
+		t.Errorf("ActorAccountID = %v, want %s", trigger.ActorAccountID, userID)
 	}
 	if trigger.ActorMemberID != nil {
 		t.Errorf("ActorMemberID = %v, want nil", trigger.ActorMemberID)
@@ -154,5 +154,24 @@ func TestDecodeTrigger_EmptyRepoPluginIDsStaysNil(t *testing.T) {
 	}
 	if trigger.RepoPluginIDs != nil {
 		t.Errorf("RepoPluginIDs = %v, want nil", trigger.RepoPluginIDs)
+	}
+}
+
+// A comment mention on a document carries document_id and no task_id.
+func TestDecodeTrigger_DocCommentMention(t *testing.T) {
+	docID := uuid.New()
+	trigger, err := decodeTrigger(map[string]interface{}{
+		"conversation_id": uuid.New().String(),
+		"project_id":      uuid.New().String(),
+		"agent_id":        uuid.New().String(),
+		"document_id":     docID.String(),
+		"comment_id":      uuid.New().String(),
+		"trigger_type":    "comment_mention",
+	})
+	if err != nil {
+		t.Fatalf("decodeTrigger: %v", err)
+	}
+	if trigger.TaskID != nil || trigger.DocumentID == nil || *trigger.DocumentID != docID {
+		t.Errorf("TaskID = %v, DocumentID = %v, want nil / %s", trigger.TaskID, trigger.DocumentID, docID)
 	}
 }

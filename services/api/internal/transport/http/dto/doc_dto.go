@@ -2,10 +2,13 @@ package dto
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
+	"github.com/Paca-AI/api/internal/apierr"
 	docdom "github.com/Paca-AI/api/internal/domain/doc"
 )
 
@@ -59,6 +62,54 @@ type CreateDocumentRequest struct {
 	Title    string          `json:"title"`
 	FolderID *uuid.UUID      `json:"folder_id"`
 	Content  json.RawMessage `json:"content"`
+	WriteNote
+}
+
+// Limits on a write's note, client label and task reference, in characters.
+const (
+	MaxWriteNoteLen   = 500
+	MaxWriteClientLen = 200
+	MaxWriteTaskLen   = 50
+)
+
+// WriteNote is the optional plain text a document write carries: why it was
+// made (Note), what made it (Client, an opaque label such as
+// "claude-code/<session>", never used for authorization) and the task it
+// belongs to (Task, free text such as "PACA-88"). It is stored with the
+// write's activity entry.
+type WriteNote struct {
+	Note   string `json:"note"`
+	Client string `json:"client"`
+	Task   string `json:"task"`
+}
+
+// Validate checks the length limits.
+func (n WriteNote) Validate() error {
+	for _, f := range []struct {
+		name, value string
+		max         int
+	}{{"note", n.Note, MaxWriteNoteLen}, {"client", n.Client, MaxWriteClientLen}, {"task", n.Task, MaxWriteTaskLen}} {
+		if utf8.RuneCountInString(f.value) > f.max {
+			return apierr.New(apierr.CodeDocNoteInvalid, fmt.Sprintf("%s: at most %d characters", f.name, f.max))
+		}
+	}
+	return nil
+}
+
+// Fields returns the non-empty values keyed by their JSON names, for an
+// activity entry's content.
+func (n WriteNote) Fields() map[string]string {
+	out := map[string]string{}
+	if n.Note != "" {
+		out["note"] = n.Note
+	}
+	if n.Client != "" {
+		out["client"] = n.Client
+	}
+	if n.Task != "" {
+		out["task"] = n.Task
+	}
+	return out
 }
 
 // UpdateDocumentRequest is the body for PATCH /projects/:projectId/docs/:docId.
@@ -67,6 +118,45 @@ type UpdateDocumentRequest struct {
 	Content  OptionalJSON `json:"content"`
 	FolderID OptionalUUID `json:"folder_id"`
 	Position *int         `json:"position"`
+	// SourceLocked locks (true) or unlocks (false) a managed copy. The source
+	// itself is set only by a push to the document's path.
+	SourceLocked *bool `json:"source_locked"`
+	WriteNote
+}
+
+// PutDocumentByPathRequest is the body for PUT /projects/:projectId/docs/by-path.
+type PutDocumentByPathRequest struct {
+	// Path is "Folder/Sub folder/Title": segments are trimmed, empty ones
+	// dropped, the last is the title. Missing folders are created.
+	Path    string          `json:"path"`
+	Content json.RawMessage `json:"content"`
+	// Source names the repository file this document is a managed copy of.
+	Source *DocSourceRequest `json:"source"`
+	// Lock sets source_locked; locking needs Source.
+	Lock *bool `json:"lock"`
+	WriteNote
+}
+
+// DocSourceRequest is the source a by-path write sets.
+type DocSourceRequest struct {
+	Repository string `json:"repository"`
+	Path       string `json:"path"`
+	Commit     string `json:"commit"`
+}
+
+// Entity maps the request source to the domain type (nil stays nil).
+func (s *DocSourceRequest) Entity() *docdom.DocSource {
+	if s == nil {
+		return nil
+	}
+	return &docdom.DocSource{Repository: s.Repository, Path: s.Path, Commit: s.Commit}
+}
+
+// DocumentWriteResponse is a document written by path, plus whether the write
+// changed what a reader sees.
+type DocumentWriteResponse struct {
+	DocumentResponse
+	Changed bool `json:"changed"`
 }
 
 // DocumentResponse is the full public representation of a document (including content).
@@ -76,11 +166,33 @@ type DocumentResponse struct {
 	FolderID  *uuid.UUID      `json:"folder_id,omitempty"`
 	Title     string          `json:"title"`
 	Content   json.RawMessage `json:"content"`
-	Position  int             `json:"position"`
-	CreatedBy *uuid.UUID      `json:"created_by,omitempty"`
-	UpdatedBy *uuid.UUID      `json:"updated_by,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	// ContentHash identifies the content version: the same blocks give the
+	// same hash whatever their block ids. It is the If-Match token for writes
+	// and the first part of the ETag.
+	ContentHash string     `json:"content_hash"`
+	Position    int        `json:"position"`
+	CreatedBy   *uuid.UUID `json:"created_by,omitempty"`
+	UpdatedBy   *uuid.UUID `json:"updated_by,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	// Source names the repository file a managed copy is pushed from; absent
+	// for a document created in Paca.
+	Source       *DocSourceResponse `json:"source,omitempty"`
+	SourceLocked bool               `json:"source_locked"`
+}
+
+// DocSourceResponse is the repository file a managed document copy comes from.
+type DocSourceResponse struct {
+	Repository string `json:"repository"`
+	Path       string `json:"path"`
+	Commit     string `json:"commit,omitempty"`
+}
+
+func docSourceResponse(src *docdom.DocSource) *DocSourceResponse {
+	if src == nil {
+		return nil
+	}
+	return &DocSourceResponse{Repository: src.Repository, Path: src.Path, Commit: src.Commit}
 }
 
 // DocumentListItemResponse is a lightweight representation used in list responses
@@ -95,21 +207,28 @@ type DocumentListItemResponse struct {
 	UpdatedBy *uuid.UUID `json:"updated_by,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+	// Source and SourceLocked let the tree mark managed copies.
+	Source       *DocSourceResponse `json:"source,omitempty"`
+	SourceLocked bool               `json:"source_locked"`
 }
 
 // DocumentFromEntity maps a domain Document to a DocumentResponse DTO.
 func DocumentFromEntity(d *docdom.Document) DocumentResponse {
 	return DocumentResponse{
-		ID:        d.ID,
-		ProjectID: d.ProjectID,
-		FolderID:  d.FolderID,
-		Title:     d.Title,
-		Content:   d.Content,
-		Position:  d.Position,
-		CreatedBy: d.CreatedBy,
-		UpdatedBy: d.UpdatedBy,
-		CreatedAt: d.CreatedAt,
-		UpdatedAt: d.UpdatedAt,
+		ID:          d.ID,
+		ProjectID:   d.ProjectID,
+		FolderID:    d.FolderID,
+		Title:       d.Title,
+		Content:     d.Content,
+		ContentHash: d.Hash(),
+		Position:    d.Position,
+		CreatedBy:   d.CreatedBy,
+		UpdatedBy:   d.UpdatedBy,
+		CreatedAt:   d.CreatedAt,
+		UpdatedAt:   d.UpdatedAt,
+
+		Source:       docSourceResponse(d.Source),
+		SourceLocked: d.SourceLocked,
 	}
 }
 
@@ -125,6 +244,9 @@ func DocumentListItemFromEntity(d *docdom.Document) DocumentListItemResponse {
 		UpdatedBy: d.UpdatedBy,
 		CreatedAt: d.CreatedAt,
 		UpdatedAt: d.UpdatedAt,
+
+		Source:       docSourceResponse(d.Source),
+		SourceLocked: d.SourceLocked,
 	}
 }
 
@@ -138,6 +260,7 @@ type DocSnapshotResponse struct {
 	DocumentID     uuid.UUID       `json:"document_id"`
 	Title          string          `json:"title"`
 	Content        json.RawMessage `json:"content,omitempty"`
+	ContentHash    *string         `json:"content_hash,omitempty"` // absent on snapshots taken before hashes were stored
 	SnapshotNumber int64           `json:"snapshot_number"`
 	CreatedBy      *uuid.UUID      `json:"created_by,omitempty"`
 	CreatedByName  string          `json:"created_by_name,omitempty"`
@@ -151,6 +274,7 @@ func DocSnapshotFromEntity(s *docdom.DocSnapshot) DocSnapshotResponse {
 		DocumentID:     s.DocumentID,
 		Title:          s.Title,
 		Content:        s.Content,
+		ContentHash:    s.ContentHash,
 		SnapshotNumber: s.SnapshotNumber,
 		CreatedBy:      s.CreatedBy,
 		CreatedByName:  s.CreatedByName,
@@ -208,8 +332,9 @@ func DocActivityFromEntity(a *docdom.Activity) DocActivityResponse {
 }
 
 // DocumentSearchHitResponse is one result of a title/content document search:
-// list-item metadata plus where the query matched and an excerpt (empty for
-// title matches). Content is never included.
+// list-item metadata plus where the query matched, an excerpt and the 1-based
+// block number of the first match (both absent for title matches). Content is
+// never included.
 type DocumentSearchHitResponse struct {
 	ID        uuid.UUID  `json:"id"`
 	ProjectID uuid.UUID  `json:"project_id"`
@@ -217,6 +342,7 @@ type DocumentSearchHitResponse struct {
 	Title     string     `json:"title"`
 	MatchedIn string     `json:"matched_in"`
 	Snippet   string     `json:"snippet,omitempty"`
+	Block     int        `json:"block,omitempty"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
@@ -229,6 +355,66 @@ func DocumentSearchHitFromEntity(h docdom.SearchHit) DocumentSearchHitResponse {
 		Title:     h.Document.Title,
 		MatchedIn: h.MatchedIn,
 		Snippet:   h.Snippet,
+		Block:     h.Block,
 		UpdatedAt: h.Document.UpdatedAt,
 	}
+}
+
+// =============================================================================
+// Change feed and batch read
+// =============================================================================
+
+// DocChangeResponse is one document in the change feed: metadata only. A
+// tombstone (deleted = true) carries the id and nothing else about the
+// document; its folder_id and content_hash are null and its title is empty.
+type DocChangeResponse struct {
+	ID          uuid.UUID  `json:"id"`
+	FolderID    *uuid.UUID `json:"folder_id"`
+	Title       string     `json:"title"`
+	ContentHash *string    `json:"content_hash"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	Deleted     bool       `json:"deleted"`
+}
+
+// DocChangeFolderResponse is one folder of the tree the change feed sends.
+type DocChangeFolderResponse struct {
+	ID       uuid.UUID  `json:"id"`
+	ParentID *uuid.UUID `json:"parent_id"`
+	Name     string     `json:"name"`
+}
+
+// DocChangesResponse is the body of GET /projects/:projectId/docs/changes.
+type DocChangesResponse struct {
+	Cursor string              `json:"cursor"`
+	Reset  bool                `json:"reset"`
+	Docs   []DocChangeResponse `json:"docs"`
+	// Folders is null when no folder changed since the cursor, and the whole
+	// tree (possibly empty) when one did or on a reset.
+	Folders []DocChangeFolderResponse `json:"folders"`
+}
+
+// DocChangesFromEntity maps a ChangeSet to its response.
+func DocChangesFromEntity(set *docdom.ChangeSet) DocChangesResponse {
+	resp := DocChangesResponse{Cursor: set.Cursor, Reset: set.Reset, Docs: make([]DocChangeResponse, 0, len(set.Docs))}
+	for _, d := range set.Docs {
+		if d.DeletedAt != nil {
+			resp.Docs = append(resp.Docs, DocChangeResponse{ID: d.ID, UpdatedAt: *d.DeletedAt, Deleted: true})
+			continue
+		}
+		resp.Docs = append(resp.Docs, DocChangeResponse{
+			ID: d.ID, FolderID: d.FolderID, Title: d.Title, ContentHash: d.ContentHash, UpdatedAt: d.UpdatedAt,
+		})
+	}
+	if set.FoldersIncluded {
+		resp.Folders = make([]DocChangeFolderResponse, 0, len(set.Folders))
+		for _, f := range set.Folders {
+			resp.Folders = append(resp.Folders, DocChangeFolderResponse{ID: f.ID, ParentID: f.ParentID, Name: f.Name})
+		}
+	}
+	return resp
+}
+
+// BatchGetDocumentsRequest is the body of POST /projects/:projectId/docs/batch-get.
+type BatchGetDocumentsRequest struct {
+	IDs []string `json:"ids"`
 }

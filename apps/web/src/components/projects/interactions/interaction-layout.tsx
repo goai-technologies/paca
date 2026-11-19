@@ -1,4 +1,5 @@
 import {
+	type UseQueryResult,
 	useInfiniteQuery,
 	useMutation,
 	useQueries,
@@ -6,6 +7,9 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { Spinner } from "@/components/ui/spinner";
+import { useStableCallback } from "@/hooks/use-stable-callback";
+import { notifyError } from "@/lib/notify";
 
 // Upper bound for manual-sort positions.  All computed positions stay strictly
 // inside (0, POSITION_MAX) by always taking midpoints toward the boundaries, so
@@ -13,11 +17,10 @@ import { useNavigate } from "@tanstack/react-router";
 const POSITION_MAX = Number.MAX_SAFE_INTEGER; // 2^53 − 1 ≈ 9 × 10^15
 
 import {
+	ChartGantt,
 	ChevronDown,
 	KanbanSquare,
 	List,
-	Loader2,
-	Map as MapIcon,
 	Plus,
 	Puzzle,
 	Search,
@@ -53,6 +56,7 @@ import {
 import {
 	allTasksQueryOptions,
 	bulkMoveViewTaskPositions,
+	type ChildTaskFilters,
 	type CustomFieldFilterQuery,
 	clearMyViewConfig,
 	createSprint,
@@ -62,16 +66,20 @@ import {
 	deleteViewById,
 	epicTasksInfiniteQueryOptions,
 	type FilterConfig,
+	type GanttZoom,
 	type InteractionView,
 	type ListTasksOptions,
 	layoutToViewType,
 	listAllTasks,
+	listSprints,
+	listTaskColumns,
+	MAX_COLUMNS,
+	projectTaskLinksQueryOptions,
 	reorderViewsByContext,
 	resolveFilterConfig,
 	resolveTaskTypeFilter,
-	sprintsQueryOptions,
+	sprintsInfiniteQueryOptions,
 	type Task,
-	type TaskListResult,
 	taskQueryOptions,
 	updateMyViewConfig,
 	updateSprint,
@@ -98,13 +106,15 @@ import { formatChord, isMacPlatform } from "@/lib/shortcuts/keymap";
 import { usePageShortcutStore } from "@/lib/shortcuts/page-shortcut-store";
 import { cn } from "@/lib/utils";
 import { BoardView } from "./board-view";
+import type { DateUpdate } from "./gantt-scale";
+import { GanttView } from "./gantt-view";
 import { ListView } from "./list-view";
 import { NewViewPopover } from "./new-view-popover";
 import { getImportanceBucketBounds } from "./priority";
 import { RenameViewDialog } from "./rename-view-dialog";
-import { RoadmapView } from "./roadmap-view";
 import type { SprintFormPayload } from "./sprint-form-modal";
 import { TaskDetailModal } from "./task-detail-modal";
+import { resolveSubtaskMode } from "./use-subtask-expansion";
 import { UNASSIGNED_FILTER_ID, ViewSettingsPanel } from "./view-settings-panel";
 import {
 	type EpicsPagination,
@@ -112,6 +122,7 @@ import {
 	getDefaultInitialPageSize,
 	getDefaultPageSize,
 	getTaskColumnKeys,
+	hasApiColumns,
 	keepPreviousDataOnPageSizeChangeOnly,
 	peopleFromTasks,
 	resolveSelectedTask,
@@ -251,50 +262,43 @@ interface InteractionLayoutProps {
 }
 
 /**
- * Translates a column key + column_by field into API filter options.
- * Returns null when the column cannot be filtered server-side.
+ * Translates a column key + column_by field into the API options that list
+ * that column's tasks: the server filters by group, so every column_by is
+ * paginated per column.
  */
 function buildColumnFilter(
 	colKey: string,
 	columnBy: string,
 	baseOpts: ListTasksOptions,
-): ListTasksOptions | null {
-	switch (columnBy) {
-		case "status": {
-			if (colKey === "__none") return null; // no-status not filterable server-side
-			return { ...baseOpts, statusIds: [colKey], statusId: undefined };
-		}
-		case "sprint": {
-			if (colKey === "__backlog") {
-				return { ...baseOpts, sprintId: null, sprintIds: undefined };
-			}
-			return { ...baseOpts, sprintId: colKey, sprintIds: undefined };
-		}
-		case "assignee": {
-			if (colKey === "__unassigned") {
-				return {
-					...baseOpts,
-					assigneeNull: true,
-					assigneeIds: undefined,
-					assigneeId: undefined,
-				};
-			}
-			return {
-				...baseOpts,
-				assigneeIds: [colKey],
-				assigneeNull: false,
-				assigneeId: undefined,
-			};
-		}
-		case "type": {
-			if (colKey === "__none") {
-				return { ...baseOpts, taskTypeNull: true, taskTypeIds: undefined };
-			}
-			return { ...baseOpts, taskTypeIds: [colKey], taskTypeNull: false };
-		}
-		default:
-			return null;
+): ListTasksOptions {
+	const group = { groupBy: columnBy, groupKey: colKey };
+	if (columnBy === "sprint") {
+		// The column picks the sprint, so the view's own sprint scope must not
+		// narrow it.
+		return {
+			...baseOpts,
+			sprintId: undefined,
+			sprintIds: undefined,
+			...group,
+		};
 	}
+	return { ...baseOpts, ...group };
+}
+
+/** The slice of each column query the layout reads. Returned through
+ *  `useQueries`' `combine` so the array keeps its identity until a column's
+ *  data or status really changes: a plain `useQueries()` result is a new
+ *  array on every render, which made `tasks` — and everything derived from it
+ *  (members, column definitions, pagination) — recompute on every render and
+ *  re-render every card on the board. */
+function combineColumnQueries(
+	results: UseQueryResult<Awaited<ReturnType<typeof listAllTasks>>>[],
+) {
+	return results.map((q) => ({
+		data: q.data,
+		dataUpdatedAt: q.dataUpdatedAt,
+		fetchStatus: q.fetchStatus,
+	}));
 }
 
 /** Sets `?taskId=` on the current URL without triggering a route navigation. */
@@ -445,9 +449,9 @@ export function InteractionLayout({
 					])
 				: context === "timeline"
 					? createViewByContext(projectId, context, {
-							name: "Roadmap",
-							view_type: "roadmap",
-							config: buildDefaultViewConfig("Roadmap"),
+							name: "Gantt",
+							view_type: "gantt",
+							config: buildDefaultViewConfig("Gantt"),
 						})
 					: createViewByContext(projectId, context, {
 							name: "Table",
@@ -562,6 +566,14 @@ export function InteractionLayout({
 	const [renameOpen, setRenameOpen] = useState(false);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const activeViewConfig = previewConfig ?? activeView?.config;
+	// The Gantt view draws "blocks" links as arrows unless the view hides them.
+	const showGanttDependencies =
+		activeView?.layout === "Gantt" &&
+		activeViewConfig?.gantt_dependencies !== "hidden";
+	const ganttLinksQuery = useQuery({
+		...projectTaskLinksQueryOptions(projectId, "blocks"),
+		enabled: !!projectId && showGanttDependencies,
+	});
 	// Creatable task types follow the active view's filter; if no filter is set,
 	// all non-system types are available.  This lets views on any page control
 	// which types can be created without hard-coding page-level rules.
@@ -596,7 +608,30 @@ export function InteractionLayout({
 		}
 	});
 
-	const { data: sprints = [] } = useQuery(sprintsQueryOptions(projectId));
+	// The open (active + planned) sprints: the groups when columns are by
+	// sprint, and what Start Sprint checks for another active sprint. Further
+	// pages load on demand via sprintsPagination.
+	const openSprintsQuery = useInfiniteQuery(
+		sprintsInfiniteQueryOptions(projectId, { status: ["active", "planned"] }),
+	);
+	const sprints = useMemo(
+		() => openSprintsQuery.data?.pages.flatMap((p) => p.items) ?? [],
+		[openSprintsQuery.data],
+	);
+	const sprintsPagination = useMemo(
+		() => ({
+			hasMore: !!openSprintsQuery.hasNextPage,
+			isLoadingMore: openSprintsQuery.isFetchingNextPage,
+			isError: openSprintsQuery.isFetchNextPageError,
+			onLoadMore: () => void openSprintsQuery.fetchNextPage(),
+		}),
+		[
+			openSprintsQuery.hasNextPage,
+			openSprintsQuery.isFetchingNextPage,
+			openSprintsQuery.isFetchNextPageError,
+			openSprintsQuery.fetchNextPage,
+		],
+	);
 
 	// Fetch Epic tasks for display in the epic field on task cards/rows.
 	// Paginated 20-per-page (see epicTasksInfiniteQueryOptions) — every epic
@@ -628,6 +663,13 @@ export function InteractionLayout({
 
 	const isRealView = !!activeViewId && !activeViewId.startsWith("__default-");
 	const effectiveViewId = isManualSort && isRealView ? activeViewId : undefined;
+
+	// Table and Timeline nest subtasks under their parents, so the top-level
+	// list leaves them out (the Board stays flat and keeps them as cards).
+	const subtaskViewKey = effectiveViewId ?? activeView?.id ?? "default";
+	const excludeSubtasks =
+		resolveSubtaskMode(activeViewConfig) !== "hidden" &&
+		(activeView?.layout === "Table" || activeView?.layout === "Gantt");
 	const hasExplicitFilterConfig = activeViewConfig?.filters !== undefined;
 	const apiFilters = useMemo(() => {
 		let assignee_ids: string[] | undefined;
@@ -682,7 +724,7 @@ export function InteractionLayout({
 					if (!f.after && !f.before) continue;
 					resolved[cf.field_key] = { after: f.after, before: f.before };
 				} else {
-					// text / url
+					// text / url / long_text
 					if (!f.contains) continue;
 					resolved[cf.field_key] = { contains: f.contains };
 				}
@@ -755,22 +797,6 @@ export function InteractionLayout({
 	);
 
 	// ── Per-column pagination ─────────────────────────────────────────────────
-	const isColumnBySupported =
-		columnBy === "status" || columnBy === "sprint" || columnBy === "type";
-
-	const fetchColumnDefs = useMemo(() => {
-		if (!isColumnBySupported) return [];
-		return getColumnGroupDefs(columnBy, viewCtx, t);
-	}, [isColumnBySupported, columnBy, viewCtx, t]);
-
-	// Guard: do not start column queries until views have finished loading.
-	// Without this, queries fire before effectiveViewId is available, fetching
-	// tasks without view_id and briefly rendering them in created_at order.
-	const colQueriesEnabled =
-		fetchColumnDefs.length > 0 &&
-		!viewsQuery.isLoading &&
-		activeView?.layout !== "Roadmap";
-
 	// Initial page size: configured view setting wins; otherwise falls back to
 	// the active layout's default (see PAGE_SIZE_DEFAULTS in view-utils.ts).
 	// "Load more" batches use the separate configuredPageSize below.
@@ -793,6 +819,7 @@ export function InteractionLayout({
 			assigneeNull:
 				columnBy !== "assignee" ? apiFilters.assignee_null : undefined,
 			taskTypeIds: columnBy !== "type" ? apiFilters.task_type_ids : undefined,
+			excludeSubtasks: excludeSubtasks || undefined,
 			pageSize: initialColPageSize,
 			sumField: activeViewConfig?.field_sum,
 			sortBy: activeViewConfig?.sort_by,
@@ -819,7 +846,119 @@ export function InteractionLayout({
 			activeViewConfig?.sort_by,
 			effectiveViewId,
 			debouncedSearchQuery,
+			excludeSubtasks,
 		],
+	);
+
+	// Some column_bys have columns that come from the data (tags, assignees,
+	// reporters, free-valued custom fields): the API lists them, narrowed by the
+	// view's filters, instead of the client guessing from the tasks it loaded.
+	// The Gantt view isn't paginated per column and keeps grouping what it loads.
+	const needsApiColumns =
+		hasApiColumns(columnBy, customFields) && activeView?.layout !== "Gantt";
+	const columnsFilterOpts = useMemo(() => {
+		const {
+			pageSize: _pageSize,
+			sumField: _sumField,
+			sortBy: _sortBy,
+			viewId: _viewId,
+			...filters
+		} = colBaseOpts;
+		return filters;
+	}, [colBaseOpts]);
+	const apiColumnsQuery = useQuery({
+		queryKey: [
+			"projects",
+			projectId,
+			"tasks",
+			"columns",
+			columnBy,
+			columnsFilterOpts,
+		],
+		queryFn: () => listTaskColumns(projectId, columnBy, columnsFilterOpts),
+		enabled: needsApiColumns && !viewsQuery.isLoading,
+		staleTime: 15_000,
+	});
+	// A failed request must not leave the view loading forever: it falls back to
+	// grouping the tasks it can load.
+	const apiColumnsPending =
+		needsApiColumns &&
+		apiColumnsQuery.data === undefined &&
+		!apiColumnsQuery.isError;
+	const dynamicColumns = useMemo(
+		() =>
+			needsApiColumns
+				? apiColumnsQuery.data?.columns.map(({ key, label }) => ({
+						key,
+						label,
+					}))
+				: undefined,
+		[needsApiColumns, apiColumnsQuery.data],
+	);
+	const columnsTruncated = needsApiColumns && !!apiColumnsQuery.data?.truncated;
+	const columnsCtx: ViewContext = useMemo(
+		() => ({ ...viewCtx, dynamicColumns }),
+		[viewCtx, dynamicColumns],
+	);
+
+	const fetchColumnDefs = useMemo(() => {
+		if (activeView?.layout === "Gantt") return [];
+		// Columns not listed (still loading, or the request failed): there is no
+		// per-column query to run.
+		if (needsApiColumns && !dynamicColumns) return [];
+		return getColumnGroupDefs(columnBy, columnsCtx, t);
+	}, [
+		activeView?.layout,
+		needsApiColumns,
+		dynamicColumns,
+		columnBy,
+		columnsCtx,
+		t,
+	]);
+
+	// Guard: do not start column queries until views have finished loading.
+	// Without this, queries fire before effectiveViewId is available, fetching
+	// tasks without view_id and briefly rendering them in created_at order.
+	const colQueriesEnabled =
+		fetchColumnDefs.length > 0 &&
+		!viewsQuery.isLoading &&
+		activeView?.layout !== "Gantt";
+
+	// Filters carried onto the children listed under an expanded parent row:
+	// the view's own filters and sort, minus what scopes the top level.
+	const childFilters = useMemo((): ChildTaskFilters => {
+		const {
+			sprintId: _sprintId,
+			sprintIds: _sprintIds,
+			taskTypeIds: _taskTypeIds,
+			taskTypeNull: _taskTypeNull,
+			sumField: _sumField,
+			viewId: _viewId,
+			pageSize: _pageSize,
+			cursor: _cursor,
+			parentTaskId: _parentTaskId,
+			excludeSubtasks: _excludeSubtasks,
+			...rest
+		} = colBaseOpts;
+		return {
+			...rest,
+			// Grouping by status/assignee splits that dimension across groups, so
+			// colBaseOpts omits it; children should still honour the user's filter.
+			statusIds: apiFilters.status_ids,
+			assigneeIds: apiFilters.assignee_ids,
+			assigneeNull: apiFilters.assignee_null,
+		};
+	}, [colBaseOpts, apiFilters]);
+	const childFiltersActive = useMemo(
+		() =>
+			Object.entries(childFilters).some(
+				([k, v]) =>
+					k !== "sortBy" &&
+					v !== undefined &&
+					v !== false &&
+					!(Array.isArray(v) && v.length === 0),
+			),
+		[childFilters],
 	);
 
 	// Tracks per-column total visible count so WS refetches restore the same depth.
@@ -828,6 +967,7 @@ export function InteractionLayout({
 	>({});
 
 	const columnQueries = useQueries({
+		combine: combineColumnQueries,
 		queries: colQueriesEnabled
 			? fetchColumnDefs.map((col) => {
 					const effectivePageSize =
@@ -836,18 +976,6 @@ export function InteractionLayout({
 						...colBaseOpts,
 						pageSize: effectivePageSize,
 					});
-					if (!colOpts) {
-						return {
-							queryKey: ["noop", col.key] as const,
-							queryFn: () =>
-								Promise.resolve({
-									items: [] as Task[],
-									page_size: 0,
-									next_cursor: null,
-								} as TaskListResult),
-							enabled: false,
-						};
-					}
 					// pageSize is deliberately excluded from the queryKey: "load
 					// more" (handleLoadMoreColumn) grows colExpandedPageSizes purely
 					// so that a *future* refetch (a websocket-triggered invalidation,
@@ -887,7 +1015,7 @@ export function InteractionLayout({
 			: [],
 	});
 
-	// Fallback single query for non-supported column_by (importance, custom fields) or roadmap
+	// Fallback single query for non-supported column_by (importance, custom fields) or Gantt
 	// Tracks total items to show so WS-triggered refetches restore the same depth.
 	const [globalExpandedPageSize, setGlobalExpandedPageSize] = useState<
 		number | null
@@ -906,6 +1034,7 @@ export function InteractionLayout({
 			assigneeIds: apiFilters.assignee_ids,
 			assigneeNull: apiFilters.assignee_null,
 			taskTypeIds: apiFilters.task_type_ids,
+			excludeSubtasks: excludeSubtasks || undefined,
 			sortBy: activeViewConfig?.sort_by,
 			viewId: effectiveViewId,
 			search: debouncedSearchQuery || undefined,
@@ -927,6 +1056,7 @@ export function InteractionLayout({
 			activeViewConfig?.sort_by,
 			effectiveViewId,
 			debouncedSearchQuery,
+			excludeSubtasks,
 		],
 	);
 
@@ -939,7 +1069,7 @@ export function InteractionLayout({
 	const fallbackQueryOpts = allTasksQueryOptions(projectId, fallbackOpts);
 	const fallbackQuery = useQuery({
 		...fallbackQueryOpts,
-		enabled: !colQueriesEnabled && !viewsQuery.isLoading,
+		enabled: !colQueriesEnabled && !viewsQuery.isLoading && !apiColumnsPending,
 		// See the matching comment on the column queries above: "load more"
 		// grows pageSize (and thus the queryKey), so keep showing the smaller
 		// page's data while the larger one fetches instead of dropping to
@@ -1057,7 +1187,6 @@ export function InteractionLayout({
 				pageSize: configuredPageSize ?? getDefaultPageSize(activeView?.layout),
 				cursor,
 			});
-			if (!colOpts) return;
 			colLoadingMoreRef.current[colKey] = true;
 			setColLoadingMore((prev) => ({ ...prev, [colKey]: true }));
 			try {
@@ -1111,7 +1240,7 @@ export function InteractionLayout({
 		],
 	);
 
-	// Global load-more (roadmap / non-column views)
+	// Global load-more (Gantt / non-column views)
 	const [globalNextCursor, setGlobalNextCursor] = useState<string | null>(null);
 	const [globalExtraTasks, setGlobalExtraTasks] = useState<Task[]>([]);
 	const [globalLoadingMore, setGlobalLoadingMore] = useState(false);
@@ -1266,6 +1395,7 @@ export function InteractionLayout({
 	// are excluded via fetchStatus, since they'll never fetch).
 	const tasksLoading =
 		viewsQuery.isLoading ||
+		apiColumnsPending ||
 		(colQueriesEnabled
 			? columnQueries.some(
 					(q) => q.data === undefined && q.fetchStatus !== "idle",
@@ -1426,6 +1556,7 @@ export function InteractionLayout({
 	);
 
 	const createTaskMutation = useMutation({
+		meta: { success: "created", subject: "task" },
 		mutationFn: async (payload: {
 			title: string;
 			statusId: string;
@@ -1595,9 +1726,22 @@ export function InteractionLayout({
 		[projectId, qc, tasksListQueryKey],
 	);
 
+	// Gantt: saves the dates of a dragged bar. Unlike a column move it resolves
+	// or rejects, so the chart can drop its optimistic bar and offer an undo.
+	const handleRescheduleTask = useCallback(
+		async (taskId: string, update: DateUpdate) => {
+			const updatedTask = await updateTask(projectId, taskId, update);
+			qc.setQueryData(["projects", projectId, "tasks", taskId], updatedTask);
+			void qc.invalidateQueries({ queryKey: tasksListQueryKey });
+			return updatedTask;
+		},
+		[projectId, qc, tasksListQueryKey],
+	);
+
 	// ── Delete task (Mod+Backspace shortcut / context menu) ─────────────────
 	const [deleteConfirmTask, setDeleteConfirmTask] = useState<Task | null>(null);
 	const deleteTaskMutation = useMutation({
+		meta: { success: "deleted", subject: "task" },
 		mutationFn: (taskId: string) => deleteTask(projectId, taskId),
 		onSuccess: (_, taskId) => {
 			qc.invalidateQueries({ queryKey: tasksListQueryKey });
@@ -1608,15 +1752,15 @@ export function InteractionLayout({
 			if (selectedTaskId === taskId) setSelectedTaskId(null);
 		},
 	});
-	const handleRequestDeleteTask = useCallback(
-		(taskId: string) => {
-			const task = tasks.find((t) => t.id === taskId);
-			if (task) setDeleteConfirmTask(task);
-		},
-		[tasks],
-	);
+	// Stable identity: it is handed to every card, and depending on `tasks`
+	// would re-render all of them each time a page of tasks loads.
+	const handleRequestDeleteTask = useStableCallback((taskId: string) => {
+		const task = tasks.find((t) => t.id === taskId);
+		if (task) setDeleteConfirmTask(task);
+	});
 
 	const createViewMutation = useMutation({
+		meta: { success: "created", subject: "view" },
 		mutationFn: (payload: {
 			name: string;
 			layout: ViewLayout;
@@ -1644,6 +1788,7 @@ export function InteractionLayout({
 	});
 
 	const renameViewMutation = useMutation({
+		meta: { success: "renamed", subject: "view" },
 		mutationFn: (payload: { viewId: string; name: string }) =>
 			updateViewById(projectId, payload.viewId, { name: payload.name }),
 		onSuccess: () => qc.invalidateQueries({ queryKey: viewsQueryKey }),
@@ -1667,6 +1812,7 @@ export function InteractionLayout({
 	// tracking future changes to) what they just made the team default — so
 	// it's cleared right after.
 	const saveForEveryoneMutation = useMutation({
+		meta: { success: "saved", subject: "view" },
 		mutationFn: async (payload: { viewId: string; config: ViewConfig }) => {
 			await updateViewById(projectId, payload.viewId, {
 				config: payload.config,
@@ -1679,12 +1825,10 @@ export function InteractionLayout({
 		},
 	});
 
-	const [viewActionError, setViewActionError] = useState<string | null>(null);
-
 	const deleteViewMutation = useMutation({
+		meta: { success: "deleted", subject: "view" },
 		mutationFn: (viewId: string) => deleteViewById(projectId, viewId),
 		onSuccess: (_, deletedId) => {
-			setViewActionError(null);
 			qc.invalidateQueries({ queryKey: viewsQueryKey });
 			if (preferredViewId === deletedId) {
 				const remaining = views.filter((v) => v.id !== deletedId);
@@ -1692,7 +1836,8 @@ export function InteractionLayout({
 			}
 		},
 		onError: (err: unknown) => {
-			setViewActionError(
+			notifyError(
+				err,
 				getApiErrorCode(err) === ApiErrorCode.ViewIsLastView
 					? t("layout.shell.viewErrors.isLastView")
 					: t("layout.shell.viewErrors.deleteFailed"),
@@ -1704,12 +1849,12 @@ export function InteractionLayout({
 		mutationFn: (orderedIds: string[]) =>
 			reorderViewsByContext(projectId, context, orderedIds, sprintId),
 		onSuccess: () => {
-			setViewActionError(null);
 			qc.invalidateQueries({ queryKey: viewsQueryKey });
 		},
 		onError: (err: unknown) => {
 			setLocalViews(null);
-			setViewActionError(
+			notifyError(
+				err,
 				getApiErrorCode(err) === ApiErrorCode.ViewReorderInvalid
 					? t("layout.shell.viewErrors.reorderInvalid")
 					: t("layout.shell.viewErrors.reorderFailed"),
@@ -1744,18 +1889,27 @@ export function InteractionLayout({
 
 	// ── Sprint management (backlog only) ────────────────────────────────────
 	const createSprintMutation = useMutation({
-		mutationFn: (name: string) =>
-			createSprint(projectId, { name, status: "planned" }),
+		meta: { success: "created", subject: "sprint" },
+		mutationFn: async () => {
+			// Number the new sprint after every existing one, not just the
+			// loaded ones — the total comes from the server.
+			const { total_count } = await listSprints(projectId, { pageSize: 1 });
+			return createSprint(projectId, {
+				name: `Sprint ${total_count + 1}`,
+				status: "planned",
+			});
+		},
 		onSuccess: () =>
 			qc.invalidateQueries({ queryKey: ["projects", projectId, "sprints"] }),
 	});
 
 	const handleNewSprint = () => {
-		const nextNum = sprints.length + 1;
-		createSprintMutation.mutate(`Sprint ${nextNum}`);
+		createSprintMutation.mutate();
 	};
 
 	const updateSprintMutation = useMutation({
+		// The start-sprint modal renders its own inline error.
+		meta: { success: "started", subject: "sprint", silent: true },
 		mutationFn: ({
 			sprintId: sid,
 			payload,
@@ -1898,8 +2052,8 @@ export function InteractionLayout({
 								>
 									{view.layout === "Board" ? (
 										<KanbanSquare className="size-3.5" />
-									) : view.layout === "Roadmap" ? (
-										<MapIcon className="size-3.5" />
+									) : view.layout === "Gantt" ? (
+										<ChartGantt className="size-3.5" />
 									) : view.layout === "Plugin" ? (
 										<Puzzle className="size-3.5" />
 									) : (
@@ -1933,7 +2087,6 @@ export function InteractionLayout({
 											<DropdownMenuItem
 												disabled={views.length <= 1}
 												onClick={() => {
-													setViewActionError(null);
 													deleteViewMutation.mutate(view.id);
 												}}
 												className="text-destructive focus:text-destructive"
@@ -2030,16 +2183,16 @@ export function InteractionLayout({
 				</div>
 			</div>
 
-			{viewActionError && (
-				<p className="shrink-0 border-b border-border/25 bg-destructive/10 px-8 py-2 text-xs text-destructive">
-					{viewActionError}
+			{columnsTruncated && (
+				<p className="shrink-0 border-b border-border/25 bg-muted/40 px-8 py-2 text-xs text-muted-foreground">
+					{t("layout.shell.columnsTruncated", { max: MAX_COLUMNS })}
 				</p>
 			)}
 
 			{/* View content */}
 			<div
 				ref={viewContentRef}
-				className="flex flex-1 flex-col overflow-hidden"
+				className="isolate flex flex-1 flex-col overflow-hidden"
 			>
 				{activePluginView && activeView ? (
 					<RemoteComponent
@@ -2076,8 +2229,10 @@ export function InteractionLayout({
 						taskTypes={creatableTaskTypes}
 						members={members}
 						reporters={reporters}
+						dynamicColumns={dynamicColumns}
 						customFields={customFields}
 						sprints={sprints}
+						sprintsPagination={sprintsPagination}
 						epics={displayEpics}
 						epicsPagination={epicsPagination}
 						viewConfig={activeViewConfig}
@@ -2106,8 +2261,11 @@ export function InteractionLayout({
 								: undefined
 						}
 					/>
-				) : activeView?.layout === "Roadmap" ? (
-					<RoadmapView
+				) : activeView?.layout === "Gantt" ? (
+					<GanttView
+						projectId={projectId}
+						childFilters={childFilters}
+						viewKey={subtaskViewKey}
 						tasks={tasks}
 						statuses={statuses}
 						taskTypes={creatableTaskTypes}
@@ -2122,6 +2280,22 @@ export function InteractionLayout({
 						manualSort={isManualSort}
 						onReorderTask={effectiveViewId ? handleReorderTask : undefined}
 						onMoveToColumn={canEdit ? handleMoveToColumn : undefined}
+						onRescheduleTask={canEdit ? handleRescheduleTask : undefined}
+						zoom={activeViewConfig?.gantt_zoom}
+						onZoomChange={
+							isRealView && activeView
+								? (zoom: GanttZoom) =>
+										updateViewConfigMutation.mutate({
+											viewId: activeView.id,
+											config: {
+												...(activeView.config ?? {}),
+												gantt_zoom: zoom,
+											},
+										})
+								: undefined
+						}
+						showDependencies={showGanttDependencies}
+						blockLinks={ganttLinksQuery.data}
 						pagination={globalPagination}
 						onCreateTask={handleCreateTask}
 						onTaskClick={handleTaskClick}
@@ -2135,11 +2309,15 @@ export function InteractionLayout({
 						taskTypes={creatableTaskTypes}
 						members={members}
 						reporters={reporters}
+						dynamicColumns={dynamicColumns}
 						customFields={customFields}
 						epics={displayEpics}
 						epicsPagination={epicsPagination}
 						viewConfig={activeViewConfig}
 						canCreate={canCreate}
+						childFilters={childFilters}
+						filtersActive={childFiltersActive}
+						viewKey={subtaskViewKey}
 						columnPagination={columnPagination}
 						onCreateTask={handleCreateTask}
 						onTaskClick={handleTaskClick}
@@ -2151,6 +2329,9 @@ export function InteractionLayout({
 						onUpdateTaskField={canEdit ? handleMoveToColumn : undefined}
 						onDeleteTask={canEdit ? handleRequestDeleteTask : undefined}
 						sprints={context === "backlog" ? sprints : undefined}
+						sprintsPagination={
+							context === "backlog" ? sprintsPagination : undefined
+						}
 						onStartSprint={
 							context === "backlog" && canManageSprints
 								? handleStartSprint
@@ -2240,7 +2421,7 @@ export function InteractionLayout({
 							disabled={deleteTaskMutation.isPending}
 						>
 							{deleteTaskMutation.isPending ? (
-								<Loader2 className="size-4 animate-spin" />
+								<Spinner aria-hidden="true" />
 							) : (
 								t("taskDetail.header.deleteDialog.delete")
 							)}

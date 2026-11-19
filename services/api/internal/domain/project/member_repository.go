@@ -23,18 +23,10 @@ type MemberRepository interface {
 	// project. Human team-member counts come from userdom.Service.CountUsers
 	// instead: they aren't project-scoped, so they don't need this table.
 	CountDistinctAgentsByProjects(ctx context.Context, projectIDs []uuid.UUID) (int64, error)
-	FindMember(ctx context.Context, projectID, userID uuid.UUID) (*ProjectMember, error)
-	// FindMemberByAgent returns the active member record for an agent in a
-	// project. Used to resolve an agent UUID to a member UUID.
-	FindMemberByAgent(ctx context.Context, projectID, agentID uuid.UUID) (*ProjectMember, error)
-	// FindMemberByUserProject returns the active member record for a user in a
-	// project.  Used by background workers to resolve a user UUID to a member UUID.
-	FindMemberByUserProject(ctx context.Context, userID, projectID uuid.UUID) (*ProjectMember, error)
-	// FindMemberByActor resolves an actor to a project member.
-	// When agentID is non-nil the agent's member record is returned;
-	// otherwise the user's member record (via userID + projectID) is returned.
-	// This is the single canonical lookup used by activity services and workers.
-	FindMemberByActor(ctx context.Context, projectID, actorID uuid.UUID, agentID *uuid.UUID) (*ProjectMember, error)
+	// FindMember returns the active member record of an account (a user, an
+	// agent or a service account) in a project; ErrMemberNotFound when it has
+	// none. This is the single account -> member lookup.
+	FindMember(ctx context.Context, projectID, accountID uuid.UUID) (*ProjectMember, error)
 	// FindMemberByID returns the active member record for the given
 	// project_members.id.  Used to resolve an assignee member ID to a user ID.
 	FindMemberByID(ctx context.Context, memberID uuid.UUID) (*ProjectMember, error)
@@ -43,7 +35,7 @@ type MemberRepository interface {
 	// transaction. roledom.ErrNotAttachable when a role does not exist or
 	// cannot be attached in the project.
 	AddMember(ctx context.Context, m *ProjectMember, roleIDs []uuid.UUID, createdBy *uuid.UUID) error
-	RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error
+	RemoveMember(ctx context.Context, projectID, accountID uuid.UUID) error
 	// UpdateMemberDescription changes a member's Jev-facing description by
 	// their membership record ID — see ProjectMember.Description.
 	UpdateMemberDescription(ctx context.Context, memberID uuid.UUID, description string) error

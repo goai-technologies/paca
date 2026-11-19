@@ -62,8 +62,11 @@
 		"errors": {
 			"titleInvalid": "Недопустимый заголовок.",
 			"folderNameInvalid": "Недопустимое имя папки.",
-			"renameFailed": "Не удалось переименовать. Попробуйте еще раз."
-		}
+			"renameFailed": "Не удалось переименовать. Попробуйте еще раз.",
+			"moveIntoSelf": "Папку нельзя переместить в саму себя или в одну из её вложенных папок.",
+			"moveFailed": "Не удалось переместить элемент. Попробуйте еще раз."
+		},
+		"moveToTop": "Переместить на верхний уровень"
 	},
 	"notifications": {
 		"title": "Уведомления",
@@ -74,14 +77,21 @@
 		"unmuteSound": "Включить звук уведомлений",
 		"text": {
 			"assigned": "{{actor}} назначил(а) вам задачу #{{taskNumber}} — {{taskTitle}}",
-			"mentioned": "{{actor}} упомянул(а) вас в #{{taskNumber}} — {{taskTitle}}"
-		}
+			"mentioned": "{{actor}} упомянул(а) вас в #{{taskNumber}} — {{taskTitle}}",
+			"question": "{{actor}} задал(а) вам вопрос в «{{title}}»",
+			"mentionedInDoc": "{{actor}} упомянул(а) вас в документе «{{title}}»",
+			"automation": "Автоматизация: {{message}} (#{{taskNumber}} — {{taskTitle}})"
+		},
+		"untitledConversation": "Беседа без названия",
+		"globalChat": "Общий чат",
+		"untitledDocument": "Документ без названия"
 	},
 	"userMenu": {
 		"signIn": "Войти",
-		"myProfile": "Мой профиль",
+		"myProfile": "Аккаунт",
 		"apiKeys": "API-ключи",
 		"logOut": "Выйти",
-		"loggingOut": "Выход…"
+		"loggingOut": "Выход…",
+		"sendFeedback": "Отправить отзыв"
 	}
 }

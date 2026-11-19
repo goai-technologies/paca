@@ -531,9 +531,9 @@ func (s *Service) CompleteScreenshotUpload(ctx context.Context, projectID, annot
 }
 
 // ResolvePortForward looks up which project/environment/port-forward
-// currently owns hostPort, scoped to projects userID is a member of.
-func (s *Service) ResolvePortForward(ctx context.Context, userID uuid.UUID, hostPort int) (*annotationdom.PortForwardMatch, error) {
-	return s.repo.ResolvePortForward(ctx, userID, hostPort)
+// currently owns hostPort, scoped to projects accountID is a member of.
+func (s *Service) ResolvePortForward(ctx context.Context, accountID uuid.UUID, hostPort int) (*annotationdom.PortForwardMatch, error) {
+	return s.repo.ResolvePortForward(ctx, accountID, hostPort)
 }
 
 // GetScreenshotURL returns a presigned GET URL for an annotation's uploaded

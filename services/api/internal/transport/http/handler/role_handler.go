@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -50,12 +51,8 @@ func urlID(r *http.Request, param, what string) (uuid.UUID, error) {
 
 // attachmentCreator is the account recorded as the creator of new attachments.
 func attachmentCreator(r *http.Request) *uuid.UUID {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		return nil
-	}
-	id, err := uuid.Parse(claims.Subject)
-	if err != nil {
+	id, ok := middleware.ActorIDFromContext(r.Context())
+	if !ok {
 		return nil
 	}
 	return &id
@@ -72,17 +69,52 @@ func (h *RoleHandler) List(w http.ResponseWriter, r *http.Request) {
 		presenter.Error(w, r, err)
 		return
 	}
-	var roles []*roledom.Role
+	pageSize, err := parsePageSize(r, 30, 100)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	ids, err := parseIDsParam(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	page, err := parseOptionalPage(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	filter := roledom.RoleFilter{Search: strings.TrimSpace(r.URL.Query().Get("search")), IDs: ids, Offset: pageOffset(page, pageSize)}
+	var cursor *string
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		cursor = &raw
+	}
+	var (
+		roles   []*roledom.Role
+		hasMore bool
+		total   int
+	)
 	if project == nil {
-		roles, err = h.svc.ListPlatform(r.Context())
+		roles, hasMore, total, err = h.svc.ListPlatform(r.Context(), filter, cursor, pageSize)
 	} else {
-		roles, err = h.svc.ListForProject(r.Context(), *project)
+		roles, hasMore, total, err = h.svc.ListForProject(r.Context(), *project, filter, cursor, pageSize)
 	}
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
-	presenter.OK(w, r, dto.RolesFromEntities(roles))
+	var nextCursor *string
+	if hasMore && len(roles) > 0 {
+		c := roledom.EncodeCursor(roles[len(roles)-1])
+		nextCursor = &c
+	}
+	body := map[string]any{"items": dto.RolesFromEntities(roles), "page_size": pageSize, "next_cursor": nextCursor, "total_count": total}
+	if page > 0 {
+		// Paged by number: the caller navigates by page, not by cursor.
+		body["page"] = page
+		body["next_cursor"] = nil
+	}
+	presenter.OK(w, r, body)
 }
 
 // Get handles GET /admin/roles/{roleId} and GET /projects/{projectId}/roles/{roleId}.

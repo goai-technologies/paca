@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Image as ImageIcon, Loader2 } from "lucide-react";
+import { Image as ImageIcon } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AvatarUpload } from "@/components/shared/avatar-upload";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import type { AvatarResult } from "@/lib/avatar-api";
 import {
 	brandingQueryOptions,
@@ -42,23 +44,25 @@ export function BrandingSettings() {
 	const [colorDark, setColorDark] = useState<string | null>(
 		branding?.primary_color_dark ?? null,
 	);
+	const [feedbackEnabled, setFeedbackEnabled] = useState<boolean>(
+		branding?.feedback_enabled !== false,
+	);
 	const [generalError, setGeneralError] = useState<string | null>(null);
-	const [saved, setSaved] = useState(false);
 
 	const mutation = useMutation({
+		meta: { success: "updated", subject: "branding" },
 		mutationFn: () =>
 			updateSettings({
 				brand_name: brandName,
 				primary_color_light: colorLight,
 				primary_color_dark: colorDark,
+				feedback_enabled: feedbackEnabled,
 			}),
 		onSuccess: (updated) => {
 			setBrandingQueryData(queryClient, (old) =>
 				old ? { ...old, ...updated } : updated,
 			);
 			setGeneralError(null);
-			setSaved(true);
-			setTimeout(() => setSaved(false), 2500);
 		},
 		onError: () => {
 			setGeneralError(t("settings.general.errors.updateFailed"));
@@ -68,7 +72,8 @@ export function BrandingSettings() {
 	const isDirty =
 		brandName !== (branding?.brand_name ?? null) ||
 		colorLight !== (branding?.primary_color_light ?? null) ||
-		colorDark !== (branding?.primary_color_dark ?? null);
+		colorDark !== (branding?.primary_color_dark ?? null) ||
+		feedbackEnabled !== (branding?.feedback_enabled !== false);
 
 	// AvatarUpload's onChange delivers {avatar_url, avatar_thumb_url} — the
 	// generic shape the backend's logo/favicon endpoints deliberately mirror
@@ -209,6 +214,22 @@ export function BrandingSettings() {
 					})}
 				</div>
 
+				<div className="mt-6 flex items-start justify-between gap-4 border-t border-border/60 pt-4">
+					<div>
+						<Label htmlFor="feedback-enabled" className="text-sm font-medium">
+							{t("settings.general.feedbackLabel")}
+						</Label>
+						<p className="mt-0.5 text-sm text-muted-foreground">
+							{t("settings.general.feedbackDescription")}
+						</p>
+					</div>
+					<Switch
+						id="feedback-enabled"
+						checked={feedbackEnabled}
+						onCheckedChange={setFeedbackEnabled}
+					/>
+				</div>
+
 				{generalError ? (
 					<p className="mt-3 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
 						{generalError}
@@ -223,15 +244,10 @@ export function BrandingSettings() {
 						className="gap-1.5"
 					>
 						{mutation.isPending ? (
-							<Loader2 className="size-3.5 animate-spin" />
+							<Spinner aria-hidden="true" className="size-3.5" />
 						) : null}
 						{t("settings.general.save")}
 					</Button>
-					{saved ? (
-						<span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-							{t("settings.general.saved")}
-						</span>
-					) : null}
 				</div>
 			</div>
 		</div>

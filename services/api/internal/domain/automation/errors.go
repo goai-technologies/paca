@@ -26,4 +26,9 @@ var (
 	ErrActivateNoTrigger      = errors.New("automation: at least one trigger node is required before this automation can be activated")
 	ErrActivateNoAction       = errors.New("automation: at least one action node is required before this automation can be activated — without one, automation would run but never do anything")
 	ErrWebhookTokenInvalid    = errors.New("automation: webhook token invalid")
+	// ErrUpdateTaskSelfParent is returned when an update_task node reachable
+	// from a trigger with a fixed target task sets parent_task_id to that same
+	// task — the task service rejects a task as its own parent, so such a
+	// graph would fail every run at that step.
+	ErrUpdateTaskSelfParent = errors.New("automation: update_task cannot set the triggered task as its own parent")
 )

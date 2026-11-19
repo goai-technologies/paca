@@ -14,6 +14,7 @@ import {
 	getAnnotationTools,
 	handleAnnotationTool,
 } from "./annotation-tools.js";
+import { ASK_TOOL_NAMES, getAskTools, handleAskTool } from "./ask-tools.js";
 import {
 	getAttachmentTools,
 	handleAttachmentTool,
@@ -31,9 +32,15 @@ import {
 	handleDocActivityTool,
 } from "./doc-activity-tools.js";
 import {
+	DOC_MIRROR_TOOL_NAMES,
+	getDocMirrorTools,
+	handleDocMirrorTool,
+} from "./doc-mirror-tools.js";
+import {
 	getFilesystemDocTools,
 	handleFilesystemDocTool,
 } from "./filesystem-doc-tools.js";
+import { GIT_TOOL_NAMES, getGitTools, handleGitTool } from "./git-tools.js";
 import {
 	getProjectMemberTools,
 	getProjectRoleTools,
@@ -59,6 +66,11 @@ import {
 	getViewTools,
 	handleViewTool,
 } from "./view-tools.js";
+import {
+	getWorkspaceTools,
+	handleWorkspaceTool,
+	WORKSPACE_TOOL_NAMES,
+} from "./workspace-tools.js";
 
 /**
  * Returns all available MCP tools.
@@ -81,9 +93,13 @@ export function getAllTools(): Tool[] {
 		...getTaskLinkTools(),
 		...getAutomationTools(),
 		...getDocActivityTools(),
+		...getDocMirrorTools(),
 		...getRepoTools(),
+		...getWorkspaceTools(),
+		...getGitTools(),
 		...getConversationTools(),
 		...getAnnotationTools(),
+		...getAskTools(),
 	];
 }
 
@@ -103,7 +119,6 @@ export async function handleToolCall(
 		conversationClient: PacaAPIConversationClient;
 		annotationClient: PacaAPIAnnotationClient;
 	},
-	repoPluginIds: string[] = [],
 ): Promise<any> {
 	const { name, arguments: args } = request.params;
 
@@ -155,14 +170,22 @@ export async function handleToolCall(
 			name === "read_doc" ||
 			name === "write_doc" ||
 			name === "delete_doc" ||
-			name === "move_doc"
+			name === "move_doc" ||
+			name === "grep_docs" ||
+			name === "edit_doc"
 		) {
 			return handleFilesystemDocTool(
 				name,
 				args,
 				clients.apiClient,
 				clients.docClient,
+				clients.extendedClient,
 			);
+		}
+
+		// Document mirror tools (pull_docs, push_docs)
+		if (DOC_MIRROR_TOOL_NAMES.has(name)) {
+			return handleDocMirrorTool(name, args, clients.docClient);
 		}
 
 		// Search tools
@@ -277,7 +300,17 @@ export async function handleToolCall(
 			name === "clone_repository" ||
 			name === "push_branch"
 		) {
-			return handleRepoTool(name, args, clients.apiClient, repoPluginIds);
+			return handleRepoTool(name, args, clients.apiClient);
+		}
+
+		// Git review / comment / issue / CI tools
+		if ((GIT_TOOL_NAMES as readonly string[]).includes(name)) {
+			return handleGitTool(name, args, clients.apiClient);
+		}
+
+		// Workspace tools (inspect/prepare a checkout, commit, push)
+		if ((WORKSPACE_TOOL_NAMES as readonly string[]).includes(name)) {
+			return handleWorkspaceTool(name, args, clients.apiClient);
 		}
 
 		// Conversation tools
@@ -288,6 +321,16 @@ export async function handleToolCall(
 		// Page annotation ("comment") tools
 		if (name === "list_annotations" || name === "get_annotation") {
 			return handleAnnotationTool(name, args, clients.annotationClient);
+		}
+
+		// Ask-the-user (multiple-choice question) tool
+		if ((ASK_TOOL_NAMES as readonly string[]).includes(name)) {
+			return handleAskTool(
+				name,
+				args,
+				clients.taskExtendedClient,
+				clients.docClient,
+			);
 		}
 
 		throw new Error(`Unknown tool: ${name}`);

@@ -37,7 +37,7 @@ type ServiceAccountRepository interface {
 	// List returns up to limit live service accounts matching filter, ordered
 	// by name, after the account cursorAfter names (nil = the first page), plus
 	// whether more follow.
-	List(ctx context.Context, filter ServiceAccountFilter, cursorAfter *string, limit int) ([]*Account, bool, error)
+	List(ctx context.Context, filter ServiceAccountFilter, cursorAfter *string, limit int) ([]*Account, bool, int, error)
 	// Update saves name, description and avatar keys.
 	Update(ctx context.Context, a *Account) error
 	// Delete soft-deletes the account and, in the same transaction, removes
@@ -51,6 +51,9 @@ type ServiceAccountFilter struct {
 	// Search is split on whitespace; every word must appear (case-insensitive)
 	// in the account's name or description.
 	Search string
+	// Offset, when positive, skips that many accounts instead of resuming
+	// from a cursor — page-number paging for tables. The cursor is then ignored.
+	Offset int
 }
 
 // CreateServiceAccountInput carries the data to create a service account.
@@ -73,7 +76,7 @@ type ServiceAccountService interface {
 	Get(ctx context.Context, id uuid.UUID) (*Account, error)
 	// List is the cursor-paginated, searchable listing — see
 	// ServiceAccountRepository.List.
-	List(ctx context.Context, filter ServiceAccountFilter, cursorAfter *string, limit int) ([]*Account, bool, error)
+	List(ctx context.Context, filter ServiceAccountFilter, cursorAfter *string, limit int) ([]*Account, bool, int, error)
 	Update(ctx context.Context, id uuid.UUID, in UpdateServiceAccountInput) (*Account, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 

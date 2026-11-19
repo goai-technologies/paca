@@ -85,9 +85,9 @@ async function cleanupTestUsers(request: APIRequestContext) {
 // editing a user never carries one, so a role is set in a second call. A user holds
 // any number of roles; this call replaces the whole set.
 async function assignRole(request: APIRequestContext, userId: string, names: string[]) {
-  const list = await request.get(GLOBAL_ROLES_URL);
+  const list = await request.get(`${GLOBAL_ROLES_URL}?page_size=100`);
   expect(list.ok()).toBeTruthy();
-  const roles: Array<{ id: string; name: string }> = (await list.json()).data ?? [];
+  const roles: Array<{ id: string; name: string }> = (await list.json()).data.items ?? [];
   const roleIds = names.map((name) => {
     const role = roles.find((candidate) => candidate.name === name);
     expect(role, `global role ${name} exists`).toBeTruthy();

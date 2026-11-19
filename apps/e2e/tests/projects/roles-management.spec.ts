@@ -66,9 +66,11 @@ async function listRoles(
 	request: APIRequestContext,
 	projectId: string,
 ): Promise<ApiRole[]> {
-	const response = await request.get(`${API_URL}/projects/${projectId}/roles`);
+	const response = await request.get(
+		`${API_URL}/projects/${projectId}/roles?page_size=100`,
+	);
 	expect(response.ok()).toBeTruthy();
-	return (await response.json()).data ?? [];
+	return (await response.json()).data.items ?? [];
 }
 
 /** Creates a project role that allows exactly `actions`, as the Simple view would. */

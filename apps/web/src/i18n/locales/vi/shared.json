@@ -1,6 +1,8 @@
 {
 	"activityPane": {
+		"resize": "Thay đổi kích thước bảng hoạt động",
 		"title": "Hoạt động",
+		"actions": "Thao tác với mục",
 		"empty": "Chưa có hoạt động nào",
 		"emptyComments": "Chưa có bình luận nào",
 		"showAllActivity": "Xem tất cả hoạt động",
@@ -194,5 +196,14 @@
 		"minOne": "Cần ít nhất một vai trò.",
 		"clear": "Xóa",
 		"placeholder": "Chọn vai trò"
+	},
+	"askQuestion": {
+		"otherPlaceholder": "Hoặc nhập câu trả lời của bạn…",
+		"submit": "Gửi câu trả lời",
+		"answered": "Bạn đã trả lời: {{answer}}"
+	},
+	"paneResize": {
+		"sidebar": "Thay đổi kích thước thanh bên",
+		"taskColumn": "Thay đổi kích thước cột công việc"
 	}
 }

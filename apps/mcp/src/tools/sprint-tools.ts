@@ -1,10 +1,12 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PacaAPIClient } from "../api/index.js";
+import { moreNotice, pagingFields, pagingProperties } from "../api/paginate.js";
 import { formatList, formatSprint } from "../utils/index.js";
 
 const ListSprintsSchema = z.object({
 	projectId: z.string(),
+	...pagingFields,
 });
 
 const GetSprintSchema = z.object({
@@ -17,6 +19,7 @@ const CreateSprintSchema = z.object({
 	name: z.string(),
 	startDate: z.string(),
 	endDate: z.string(),
+	goal: z.string().nullable().optional(),
 });
 
 const UpdateSprintSchema = z.object({
@@ -25,6 +28,7 @@ const UpdateSprintSchema = z.object({
 	name: z.string().optional(),
 	startDate: z.string().optional(),
 	endDate: z.string().optional(),
+	goal: z.string().nullable().optional(),
 });
 
 const DeleteSprintSchema = z.object({
@@ -45,7 +49,8 @@ export function getSprintTools(): Tool[] {
 	return [
 		{
 			name: "list_sprints",
-			description: "List all sprints in a project",
+			description:
+				"List the sprints in a project, one page at a time. When more remain, the reply says so and gives a cursor to pass to the next call.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -54,6 +59,7 @@ export function getSprintTools(): Tool[] {
 						description:
 							"The technical UUID of the project (e.g., '550e8400-e29b-41d4-a716-446655440000'). Use list_projects to get the project ID. Do NOT use the project name.",
 					},
+					...pagingProperties,
 				},
 				required: ["projectId"],
 			},
@@ -101,6 +107,10 @@ export function getSprintTools(): Tool[] {
 						type: "string",
 						description: "The end date (ISO 8601 format)",
 					},
+					goal: {
+						type: ["string", "null"],
+						description: "The goal of the sprint",
+					},
 				},
 				required: ["projectId", "name", "startDate", "endDate"],
 			},
@@ -132,6 +142,11 @@ export function getSprintTools(): Tool[] {
 					endDate: {
 						type: "string",
 						description: "The new end date (ISO 8601 format)",
+					},
+					goal: {
+						type: ["string", "null"],
+						description:
+							"The new goal of the sprint. Set to null to clear the goal.",
 					},
 				},
 				required: ["projectId", "sprintId"],
@@ -194,14 +209,14 @@ export async function handleSprintTool(
 ): Promise<any> {
 	switch (toolName) {
 		case "list_sprints": {
-			const { projectId } = ListSprintsSchema.parse(args);
-			const sprints = await client.listSprints(projectId);
-			const formatted = formatList(sprints, formatSprint);
+			const { projectId, cursor, pageSize } = ListSprintsSchema.parse(args);
+			const page = await client.listSprints(projectId, { cursor, pageSize });
+			const formatted = formatList(page.items, formatSprint);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Sprints:\n\n${formatted}`,
+						text: `Sprints:\n\n${formatted}${moreNotice(page, "list_sprints")}`,
 					},
 				],
 			};
@@ -221,13 +236,14 @@ export async function handleSprintTool(
 		}
 
 		case "create_sprint": {
-			const { projectId, name, startDate, endDate } =
+			const { projectId, name, startDate, endDate, goal } =
 				CreateSprintSchema.parse(args);
 			const sprint = await client.createSprint({
 				project_id: projectId,
 				name,
 				start_date: startDate,
 				end_date: endDate,
+				goal: goal === "" ? null : goal,
 			});
 			return {
 				content: [
@@ -240,12 +256,13 @@ export async function handleSprintTool(
 		}
 
 		case "update_sprint": {
-			const { projectId, sprintId, name, startDate, endDate } =
+			const { projectId, sprintId, name, startDate, endDate, goal } =
 				UpdateSprintSchema.parse(args);
 			const sprint = await client.updateSprint(projectId, sprintId, {
 				name,
 				start_date: startDate,
 				end_date: endDate,
+				goal: goal === "" ? null : goal,
 			});
 			return {
 				content: [

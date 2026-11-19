@@ -7,8 +7,13 @@ import type {
 	TaskLink,
 	UpdateCommentInput,
 } from "../types/index.js";
-import { formatApiRequestError, markdownToBlocknote } from "../utils/index.js";
-import { fetchAllPages, withPaging } from "./paginate.js";
+import {
+	formatApiRequestError,
+	linkTeamMentions,
+	type MentionableMember,
+	markdownToBlocknote,
+} from "../utils/index.js";
+import { type Page, type PageOptions, toPage, withPaging } from "./paginate.js";
 
 /**
  * Extended API client for task activities and comments.
@@ -92,22 +97,50 @@ export class PacaAPITaskExtendedClient {
 	async listTaskActivities(
 		projectId: string,
 		taskId: string,
-	): Promise<TaskActivity[]> {
-		// The API pages newest first; callers read the timeline oldest first.
-		const newestFirst = await fetchAllPages<TaskActivity>(
-			(cursor) =>
-				this.get(
-					withPaging(
-						`/api/v1/projects/${projectId}/tasks/${taskId}/activities`,
-						cursor,
-					),
+		opts: PageOptions = {},
+	): Promise<Page<TaskActivity>> {
+		// One page, newest first; next pages reach further back in time.
+		return toPage<TaskActivity>(
+			await this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/tasks/${taskId}/activities`,
+					opts,
 				),
-			500,
+			),
 		);
-		return newestFirst.reverse();
 	}
 
 	// ==================== Task Comments ====================
+
+	/**
+	 * Turns `@username` / `@Name (id: ...)` text into real mention chips for
+	 * project members. Best-effort: on any failure the comment is posted with
+	 * the text as written rather than blocked.
+	 */
+	private async linkMentions(projectId: string, blocks: any[]): Promise<any[]> {
+		if (!JSON.stringify(blocks).includes("@")) return blocks;
+		try {
+			const members: MentionableMember[] = [];
+			let cursor: string | undefined;
+			// Bounded: a project has no fixed upper bound on members.
+			for (let i = 0; i < 10; i++) {
+				const page = toPage<MentionableMember>(
+					await this.get(
+						withPaging(`/api/v1/projects/${projectId}/members`, {
+							cursor,
+							pageSize: 100,
+						}),
+					),
+				);
+				members.push(...page.items);
+				if (!page.nextCursor) break;
+				cursor = page.nextCursor;
+			}
+			return linkTeamMentions(blocks, members);
+		} catch {
+			return blocks;
+		}
+	}
 
 	async addTaskComment(
 		projectId: string,
@@ -115,7 +148,7 @@ export class PacaAPITaskExtendedClient {
 		input: CreateCommentInput,
 	): Promise<TaskActivity> {
 		const contentBlocks = input.content
-			? markdownToBlocknote(input.content)
+			? await this.linkMentions(projectId, markdownToBlocknote(input.content))
 			: null;
 
 		const body: any = {
@@ -135,7 +168,7 @@ export class PacaAPITaskExtendedClient {
 		input: UpdateCommentInput,
 	): Promise<TaskActivity> {
 		const contentBlocks = input.content
-			? markdownToBlocknote(input.content)
+			? await this.linkMentions(projectId, markdownToBlocknote(input.content))
 			: null;
 
 		const body: any = {
@@ -158,14 +191,19 @@ export class PacaAPITaskExtendedClient {
 		);
 	}
 
-	async listSubtasks(projectId: string, parentTaskId: string): Promise<any[]> {
-		const response = await this.get(
-			`/api/v1/projects/${projectId}/tasks?parent_task_id=${parentTaskId}`,
+	async listSubtasks(
+		projectId: string,
+		parentTaskId: string,
+		opts: PageOptions = {},
+	): Promise<Page<any>> {
+		return toPage(
+			await this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/tasks?parent_task_id=${parentTaskId}`,
+					opts,
+				),
+			),
 		);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.tasks || response.data || [];
 	}
 
 	async listTaskStatuses(projectId: string): Promise<any[]> {
@@ -186,22 +224,36 @@ export class PacaAPITaskExtendedClient {
 		return response.items || response.types || response.data || [];
 	}
 
-	async listProjectMembers(projectId: string): Promise<any[]> {
-		return fetchAllPages((cursor) =>
-			this.get(withPaging(`/api/v1/projects/${projectId}/members`, cursor)),
+	async listProjectMembers(
+		projectId: string,
+		opts: PageOptions & { search?: string; ids?: string[] } = {},
+	): Promise<Page<any>> {
+		const filters = new URLSearchParams();
+		if (opts.search) filters.set("search", opts.search);
+		if (opts.ids?.length) filters.set("ids", opts.ids.join(","));
+		const qs = filters.toString();
+		return toPage(
+			await this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/members${qs ? `?${qs}` : ""}`,
+					opts,
+				),
+			),
 		);
 	}
 
 	// ==================== Task Links ====================
 
-	async listTaskLinks(projectId: string, taskId: string): Promise<TaskLink[]> {
-		const response = await this.get(
-			`/api/v1/projects/${projectId}/tasks/${taskId}/links`,
+	async listTaskLinks(
+		projectId: string,
+		taskId: string,
+		opts: PageOptions = {},
+	): Promise<Page<TaskLink>> {
+		return toPage<TaskLink>(
+			await this.get(
+				withPaging(`/api/v1/projects/${projectId}/tasks/${taskId}/links`, opts),
+			),
 		);
-		if (Array.isArray(response)) {
-			return response;
-		}
-		return response.items || response.links || response.data || [];
 	}
 
 	async createTaskLink(

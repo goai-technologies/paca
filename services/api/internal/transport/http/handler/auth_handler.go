@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/Paca-AI/api/internal/apierr"
 	domainauth "github.com/Paca-AI/api/internal/domain/auth"
+	mfadom "github.com/Paca-AI/api/internal/domain/mfa"
 	"github.com/Paca-AI/api/internal/transport/http/dto"
 	"github.com/Paca-AI/api/internal/transport/http/middleware"
 	"github.com/Paca-AI/api/internal/transport/http/presenter"
@@ -63,8 +66,22 @@ type CookieConfig struct {
 
 // AuthHandler handles authentication endpoints.
 type AuthHandler struct {
-	svc    domainauth.Service
-	cookie CookieConfig
+	svc      domainauth.Service
+	passkeys PasskeyLoginService
+	cookie   CookieConfig
+}
+
+// PasskeyLoginService is the passkey half of the second login step. It is
+// optional: without it the passkey endpoints answer MFA_UNAVAILABLE.
+type PasskeyLoginService interface {
+	BeginPasskeyLogin(ctx context.Context, challenge string) (json.RawMessage, error)
+	CompletePasskeyLogin(ctx context.Context, challenge string, response []byte, clientIP string) (*domainauth.TokenPair, error)
+}
+
+// WithPasskeyLogin enables the passkey login endpoints.
+func (h *AuthHandler) WithPasskeyLogin(svc PasskeyLoginService) *AuthHandler {
+	h.passkeys = svc
+	return h
 }
 
 // NewAuthHandler returns an AuthHandler wired to the provided auth service.
@@ -93,12 +110,45 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pair, err := h.svc.Login(r.Context(), req.Username, req.Password, req.RememberMe)
+	pair, err := h.svc.Login(r.Context(), domainauth.LoginInput{
+		Username:   req.Username,
+		Password:   req.Password,
+		OTP:        req.OTP,
+		RememberMe: req.RememberMe,
+		ClientIP:   middleware.ClientIP(r),
+	})
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
 
+	if pair.MFAChallenge != "" {
+		// Password accepted, second factor owed: no cookies yet.
+		presenter.OK(w, r, map[string]any{
+			"message":       "mfa required",
+			"mfa_required":  true,
+			"mfa_challenge": pair.MFAChallenge,
+			"mfa_methods":   pair.MFAMethods,
+		})
+		return
+	}
+
+	h.setTokenCookies(w, r, pair, pair.RefreshTTL)
+	presenter.OK(w, r, map[string]any{"message": "logged in"})
+}
+
+// VerifyMFA handles POST /auth/mfa/verify, the second step of a login that
+// answered mfa_required. On success it sets the same cookies Login does.
+func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
+	var req dto.MFAVerifyRequest
+	if !middleware.BindJSON(w, r, &req) {
+		return
+	}
+	pair, err := h.svc.CompleteMFALogin(r.Context(), req.Challenge, req.Code, middleware.ClientIP(r))
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
 	h.setTokenCookies(w, r, pair, pair.RefreshTTL)
 	presenter.OK(w, r, map[string]any{"message": "logged in"})
 }
@@ -364,4 +414,43 @@ func (h *AuthHandler) clearCookies(w http.ResponseWriter, _ *http.Request) {
 		SameSite: http.SameSiteNoneMode,
 		MaxAge:   -1,
 	})
+}
+
+// PasskeyOptions handles POST /auth/mfa/passkey/options: the WebAuthn request
+// options for the account a login challenge was issued to.
+func (h *AuthHandler) PasskeyOptions(w http.ResponseWriter, r *http.Request) {
+	if h.passkeys == nil {
+		presenter.Error(w, r, mfadom.ErrPasskeyUnavailable)
+		return
+	}
+	var req dto.PasskeyLoginOptionsRequest
+	if !middleware.BindJSON(w, r, &req) {
+		return
+	}
+	opts, err := h.passkeys.BeginPasskeyLogin(r.Context(), req.Challenge)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.OK(w, r, map[string]any{"options": opts})
+}
+
+// PasskeyVerify handles POST /auth/mfa/passkey/verify, the passkey twin of
+// VerifyMFA. On success it sets the same cookies Login does.
+func (h *AuthHandler) PasskeyVerify(w http.ResponseWriter, r *http.Request) {
+	if h.passkeys == nil {
+		presenter.Error(w, r, mfadom.ErrPasskeyUnavailable)
+		return
+	}
+	var req dto.PasskeyLoginVerifyRequest
+	if !middleware.BindJSON(w, r, &req) {
+		return
+	}
+	pair, err := h.passkeys.CompletePasskeyLogin(r.Context(), req.Challenge, req.Credential, middleware.ClientIP(r))
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	h.setTokenCookies(w, r, pair, pair.RefreshTTL)
+	presenter.OK(w, r, map[string]any{"message": "logged in"})
 }

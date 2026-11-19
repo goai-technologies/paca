@@ -23,9 +23,7 @@ vi.mock("@/lib/role-api", () => ({
 		queryKey: ["roles", "attribute-schema"],
 		queryFn: async () => [],
 	}),
-	projectRolesQueryOptions: (projectId: string) => ({
-		queryKey: ["projects", projectId, "roles"],
-	}),
+	projectRolesKey: (projectId: string) => ["projects", projectId, "roles"],
 }));
 
 import { actionsToPolicy, type Policy } from "@/lib/policy";

@@ -53,6 +53,10 @@ func TestValidate(t *testing.T) {
 	}{
 		{"valid", mk(func(s *Statement) {}), ""},
 		{"valid wildcards", mk(func(s *Statement) { s.Actions = []string{"*", "tasks:*"}; s.Resources = []string{"*", "project/*/x"} }), ""},
+		{"valid git identity resource", mk(func(s *Statement) {
+			s.Actions = []string{"git.identities:manage"}
+			s.Resources = []string{"git_identity/*"}
+		}), ""},
 		{"valid conditions", mk(func(s *Statement) {
 			s.Conditions = Conditions{"StringEquals": {"principal.id": {"a"}}, "Bool": {"resource.id": {"true"}}}
 		}), ""},

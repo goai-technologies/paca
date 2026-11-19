@@ -125,50 +125,20 @@ type ConversationService interface {
 	// conversations are readable by any project member; owner-private ones
 	// only by their chat-session owner).
 	GetConversation(ctx context.Context, projectID, conversationID, memberID uuid.UUID) (*AgentConversation, error)
-	// GetConversationForAgent returns a conversation for an agent-
-	// authenticated caller (an agent, no human member/actor identity of
-	// its own to check against) — used by the read_conversation MCP tool
-	// when a user attaches a Conversation as chat context.
-	// GetConversation/GetGlobalConversation both require a human
-	// member/actor identity a bare agent doesn't have (agents aren't
-	// project members, and a project-scoped agent's trigger never carries
-	// an actor_user_id), so this can't just delegate to either of those.
-	//
-	// It is NOT enough to check "is this the requested conversation's own
-	// agent" and stop there: the same agent can be talking to many
-	// different humans (a global agent chats with any authenticated user;
-	// a project-scoped agent can hold a separate owner-private conversation
-	// with each project member, and can be invited into more than one
-	// project). Authorizing on agent identity alone would let any one of
-	// those humans point the agent at another human's conversation ID —
-	// one it has no relationship to at all — and have the agent read it
-	// back, bypassing owner_private/project/actor isolation entirely via
-	// the agent as a confused deputy. (An earlier version of this method
-	// did exactly that; see the currentConversationID parameter below for
-	// the fix.)
-	//
-	// currentConversationID is the conversation the calling agent process
-	// is actually running as part of right now (agent-runner's own
-	// trigger.ConversationID, forwarded as X-Conversation-ID — see
-	// ConversationHandler.GetConversationForAgent). The rule:
-	//   - conversationID == currentConversationID is always allowed (an
-	//     agent may always read the conversation it's currently in).
-	//   - Otherwise, currentConversationID must itself resolve to a
-	//     conversation belonging to callerAgentID (an unverifiable or
-	//     mismatched currentConversationID means there is no trusted
-	//     context to check against, so nothing else is reachable), and the
-	//     requested conversation must be visible to *whichever human is
-	//     driving that current conversation* — the same rule
-	//     authorizeConversationAccess/GetGlobalConversation already apply
-	//     when that human asks directly: same actor for two global
-	//     conversations, or same project plus (project_shared, or
-	//     owner-private to that same chat-session member) for two
-	//     project-scoped ones. See the implementation's doc comment for
-	//     the exact rule.
-	// Any conversation outside that boundary is not reachable via this
-	// path (ErrConversationNotFound), including a different agent's, or
-	// the same agent's conversation with an unrelated human.
-	GetConversationForAgent(ctx context.Context, conversationID, callerAgentID, currentConversationID uuid.UUID) (*AgentConversation, error)
+	// GetConversationForAgent returns a conversation for an agent-authenticated
+	// caller — used by the read_conversation MCP tool. callerAgentID is the
+	// agent account the API key / token proves (never a client-supplied
+	// value). Whether that agent may read conversations at all is the router's
+	// conversations:read gate on /agents/me/conversations/*, judged on the
+	// agent's own roles over the conversation's resource — so a role can be
+	// limited to some conversations (for instance its own) with an IAM
+	// condition. This only applies the data rules the gate can't see:
+	//   - a soft-deleted conversation is not found;
+	//   - an owner-private chat is never reachable, the agent's own included:
+	//     an agent is not the member who owns it, and one agent chats with many
+	//     members, so nothing proves the human it acts for is that owner.
+	// Anything else returns ErrConversationNotFound.
+	GetConversationForAgent(ctx context.Context, conversationID, callerAgentID uuid.UUID) (*AgentConversation, error)
 	ListConversationEvents(ctx context.Context, conversationID uuid.UUID, window ConversationEventWindow) ([]*AgentConversationEvent, int64, error)
 	// StopConversation interrupts (if running) and permanently tears down the
 	// conversation's sandbox. memberID gates ownership (see GetConversation).
@@ -201,32 +171,32 @@ type ConversationService interface {
 	// -- Global chat conversations (ProjectID == uuid.Nil). Thin siblings of
 	// the methods above with the ownership check inverted (ProjectID must be
 	// uuid.Nil instead of matching a given projectID) and the actor
-	// identified by ActorUserID instead of a resolved project_members.id.
+	// identified by ActorAccountID instead of a resolved project_members.id.
 
 	// ListGlobalConversations returns the caller's own global-chat
-	// conversations (never another user's — actorUserID is forced
+	// conversations (never another user's — actorAccountID is forced
 	// server-side, not client-suppliable) matching the filter. Global chat
 	// has no project-team concept to grant shared visibility the way project
 	// conversations do, so this stays scoped to the caller.
-	ListGlobalConversations(ctx context.Context, actorUserID uuid.UUID, in ListConversationsFilter, limit int) (convs []*AgentConversation, hasMore bool, err error)
+	ListGlobalConversations(ctx context.Context, actorAccountID uuid.UUID, in ListConversationsFilter, limit int) (convs []*AgentConversation, hasMore bool, err error)
 	// GetGlobalConversation returns a single conversation after verifying it
-	// is both a global-chat conversation and owned by actorUserID — the
+	// is both a global-chat conversation and owned by actorAccountID — the
 	// global-chat equivalent of GetConversation's projectID ownership check.
 	// Every other Global* conversation method below funnels through this for
-	// its existence+ownership gate, so actorUserID must never be dropped
+	// its existence+ownership gate, so actorAccountID must never be dropped
 	// from any of them.
-	GetGlobalConversation(ctx context.Context, conversationID, actorUserID uuid.UUID) (*AgentConversation, error)
-	StopGlobalConversation(ctx context.Context, conversationID, actorUserID uuid.UUID) error
-	PauseGlobalConversation(ctx context.Context, conversationID, actorUserID uuid.UUID) error
+	GetGlobalConversation(ctx context.Context, conversationID, actorAccountID uuid.UUID) (*AgentConversation, error)
+	StopGlobalConversation(ctx context.Context, conversationID, actorAccountID uuid.UUID) error
+	PauseGlobalConversation(ctx context.Context, conversationID, actorAccountID uuid.UUID) error
 	// UpdateGlobalConversationTitle/DeleteGlobalConversation are
 	// UpdateConversationTitle/DeleteConversation's global-chat siblings —
 	// see those doc comments.
-	UpdateGlobalConversationTitle(ctx context.Context, conversationID, actorUserID uuid.UUID, title string) (*AgentConversation, error)
-	DeleteGlobalConversation(ctx context.Context, conversationID, actorUserID uuid.UUID) error
-	GlobalHeartbeat(ctx context.Context, conversationID, actorUserID uuid.UUID) error
+	UpdateGlobalConversationTitle(ctx context.Context, conversationID, actorAccountID uuid.UUID, title string) (*AgentConversation, error)
+	DeleteGlobalConversation(ctx context.Context, conversationID, actorAccountID uuid.UUID) error
+	GlobalHeartbeat(ctx context.Context, conversationID, actorAccountID uuid.UUID) error
 	// SendGlobalConversationMessage is SendConversationMessage's global-chat
 	// sibling — see its doc comment for onBusy.
-	SendGlobalConversationMessage(ctx context.Context, conversationID uuid.UUID, message string, actorUserID uuid.UUID, contextItems []ContextItemRef, onBusy string) error
+	SendGlobalConversationMessage(ctx context.Context, conversationID uuid.UUID, message string, actorAccountID uuid.UUID, contextItems []ContextItemRef, onBusy string) error
 }
 
 // ChatSessionService defines chat session use cases.
@@ -248,9 +218,9 @@ type ChatSessionService interface {
 	// page / admin pages — no project context). See ChatSession's doc
 	// comment.
 
-	ListGlobalChatSessions(ctx context.Context, agentID, actorUserID uuid.UUID) ([]*AgentChatSession, error)
-	StartGlobalChatSession(ctx context.Context, agentID, actorUserID uuid.UUID, message string, contextItems []ContextItemRef, onBusy string) (*AgentChatSession, *AgentConversation, error)
-	SendGlobalChatMessage(ctx context.Context, sessionID, actorUserID uuid.UUID, message string, contextItems []ContextItemRef, onBusy string) (*AgentConversation, error)
+	ListGlobalChatSessions(ctx context.Context, agentID, actorAccountID uuid.UUID) ([]*AgentChatSession, error)
+	StartGlobalChatSession(ctx context.Context, agentID, actorAccountID uuid.UUID, message string, contextItems []ContextItemRef, onBusy string) (*AgentChatSession, *AgentConversation, error)
+	SendGlobalChatMessage(ctx context.Context, sessionID, actorAccountID uuid.UUID, message string, contextItems []ContextItemRef, onBusy string) (*AgentConversation, error)
 }
 
 // --- Input types ---
@@ -270,6 +240,8 @@ type CreateAgentInput struct {
 	LLMBaseURL  string
 	ACPProvider string
 	ACPCommand  []string
+	ACPModel    string
+	ACPEffort   string
 	// CLIProvider is one of claude-code | codex | cursor-agent | gemini-cli
 	// — required (and the fields below meaningful) only when AgentType is
 	// "provider_cli". See Agent.CLIProvider's doc comment.
@@ -324,6 +296,8 @@ type CreateGlobalAgentInput struct {
 	LLMBaseURL        string
 	ACPProvider       string
 	ACPCommand        []string
+	ACPModel          string
+	ACPEffort         string
 	SystemPrompt      string
 	MaxIterations     int
 	TimeoutMinutes    int
@@ -345,6 +319,8 @@ type UpdateAgentInput struct {
 	LLMBaseURL  *string
 	ACPProvider *string
 	ACPCommand  []string
+	ACPModel    *string
+	ACPEffort   *string
 	// CLIProvider/CLIModel/CLIAuthMode/CLIAPIKey mirror CreateAgentInput's
 	// fields — nil means "unchanged" (same convention as every other
 	// pointer field here); only meaningful for an existing provider_cli

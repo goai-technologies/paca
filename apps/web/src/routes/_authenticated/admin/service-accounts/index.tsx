@@ -1,31 +1,28 @@
-import {
-	keepPreviousData,
-	useInfiniteQuery,
-	useQuery,
-} from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Plus, Search, ServerCog } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-
 import { DeleteServiceAccountDialog } from "@/components/admin/service-accounts/DeleteServiceAccountDialog";
 import { ServiceAccountFormDialog } from "@/components/admin/service-accounts/ServiceAccountFormDialog";
 import { ServiceAccountRoleDialog } from "@/components/admin/service-accounts/ServiceAccountRoleDialog";
 import { ServiceAccountsTable } from "@/components/admin/service-accounts/ServiceAccountsTable";
-import { LoadMoreSentinel } from "@/components/shared/load-more-sentinel";
+import { ReportIssueButton } from "@/components/report-issue-button";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Pagination } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCanAssignGlobalRole } from "@/hooks/use-can-assign-global-role";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import { usePermissions } from "@/hooks/use-permissions";
+import { useRolesByIds } from "@/hooks/use-role-search";
+import { useTablePaging } from "@/hooks/use-table-paging";
 import { myPermissionsQueryOptions } from "@/lib/admin-api";
 import { hasPermission } from "@/lib/permissions";
-import { platformRolesQueryOptions } from "@/lib/role-api";
 import {
 	type ServiceAccount,
-	serviceAccountsInfiniteQueryOptions,
+	serviceAccountsPageQueryOptions,
 } from "@/lib/service-account-api";
 
 export const Route = createFileRoute("/_authenticated/admin/service-accounts/")(
@@ -55,33 +52,44 @@ function ServiceAccountsPage() {
 	// The roles route needs service_accounts:write on top of roles:assign.
 	const canAssignRole = useCanAssignGlobalRole() && canWrite;
 
-	// Search runs on the server (debounced); accounts page in by cursor.
+	// Search runs on the server (debounced); the table pages by number.
 	const [search, setSearch] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
-	const applySearch = useDebouncedCallback(setDebouncedSearch, 300);
+	const { page, pageSize, setPage, setPageSize } = useTablePaging(
+		"admin-service-accounts",
+	);
+	const applySearch = useDebouncedCallback((value: string) => {
+		setDebouncedSearch(value);
+		setPage(1);
+	}, 300);
 	const {
-		data: accountPages,
+		data: accountPage,
 		isLoading: isDataLoading,
 		isError,
-		fetchNextPage,
-		hasNextPage,
-		isFetchingNextPage,
-		isFetchNextPageError,
-	} = useInfiniteQuery({
-		...serviceAccountsInfiniteQueryOptions(debouncedSearch),
+		error,
+	} = useQuery({
+		...serviceAccountsPageQueryOptions(page, pageSize, debouncedSearch),
 		enabled: canRead,
 		placeholderData: keepPreviousData,
 	});
-	const accounts = useMemo(
-		() => accountPages?.pages.flatMap((p) => p.items) ?? [],
-		[accountPages],
-	);
+	const accounts = useMemo(() => accountPage?.items ?? [], [accountPage]);
+	const total = accountPage?.total_count ?? 0;
+	const totalPages = Math.max(1, Math.ceil(total / pageSize));
+	// Deleting the last account of the last page leaves it empty: step back.
+	useEffect(() => {
+		if (accountPage && page > totalPages) setPage(totalPages);
+	}, [accountPage, page, totalPages, setPage]);
 	const isLoading = isPermissionsLoading || isDataLoading;
-	// Role badges show descriptions when the viewer can read the roles list.
-	const { data: roleDirectory } = useQuery({
-		...platformRolesQueryOptions,
-		retry: false,
-	});
+	// Role badges show descriptions when the viewer can read roles; the roles of
+	// the visible accounts are looked up by id rather than loading every role.
+	const roleDirectory = useRolesByIds(
+		undefined,
+		[...new Set(accounts.flatMap((a) => a.roles.map((r) => r.id)))].slice(
+			0,
+			100,
+		),
+		can("roles:read"),
+	);
 
 	const [createOpen, setCreateOpen] = useState(false);
 	const [editAccount, setEditAccount] = useState<ServiceAccount | null>(null);
@@ -138,10 +146,13 @@ function ServiceAccountsPage() {
 					<Skeleton className="h-14 w-full" />
 				</div>
 			) : isError ? (
-				<NoPermissionState
-					title={t("serviceAccounts.errors.loadFailed")}
-					description={t("serviceAccounts.errors.tryAgain")}
-				/>
+				<div className="flex flex-col items-center gap-3">
+					<NoPermissionState
+						title={t("serviceAccounts.errors.loadFailed")}
+						description={t("serviceAccounts.errors.tryAgain")}
+					/>
+					<ReportIssueButton error={error} />
+				</div>
 			) : accounts.length === 0 && !debouncedSearch.trim() ? (
 				<div className="flex flex-col items-center gap-3 rounded-xl border border-dashed py-14 text-center">
 					<ServerCog className="size-9 text-muted-foreground/50" />
@@ -183,11 +194,13 @@ function ServiceAccountsPage() {
 						onDelete={setDeleteAccount}
 						onChangeRole={setRolesAccount}
 					/>
-					<LoadMoreSentinel
-						hasMore={!!hasNextPage}
-						isLoadingMore={isFetchingNextPage}
-						isError={isFetchNextPageError}
-						onLoadMore={() => void fetchNextPage()}
+					<Pagination
+						page={page}
+						totalPages={totalPages}
+						onPageChange={setPage}
+						total={total}
+						pageSize={pageSize}
+						onPageSizeChange={setPageSize}
 					/>
 				</>
 			)}

@@ -5,15 +5,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-	ArrowLeft,
-	History,
-	Loader2,
-	Pencil,
-	Save,
-	Workflow,
-	X,
-} from "lucide-react";
+import { ArrowLeft, History, Pencil, Save, Workflow, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AutomationCanvas } from "@/components/projects/automation/automation-canvas";
@@ -23,7 +15,10 @@ import { AutomationRunHistoryPanel } from "@/components/projects/automation/auto
 import { getPriority } from "@/components/projects/interactions/priority";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "@/components/ui/toast";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import {
 	ACTION_TYPES,
@@ -50,15 +45,19 @@ import {
 	updateAutomation,
 	updateAutomationNode,
 } from "@/lib/automation-api";
-import { sprintsQueryOptions } from "@/lib/interaction-api";
+import {
+	pluginConfigRows,
+	pluginMatchLabel,
+} from "@/lib/automation-plugin-config";
 import { useMemberDirectory } from "@/lib/member-directory";
+import { showErrorToast } from "@/lib/notify";
 import {
 	customFieldsQueryOptions,
 	taskStatusesQueryOptions,
 	taskTypesQueryOptions,
 } from "@/lib/project-api";
 import { useCurrentContextStore } from "@/lib/shortcuts/current-context-store";
-import { cn } from "@/lib/utils";
+import { useSprintDirectory } from "@/lib/sprint-directory";
 
 function extractErrorMessage(err: unknown, fallback: string): string {
 	const e = err as { response?: { data?: { error?: string } } };
@@ -122,7 +121,7 @@ function AutomationBuilderPage() {
 		customFieldsQueryOptions(projectId),
 	);
 	const { data: taskTypes = [] } = useQuery(taskTypesQueryOptions(projectId));
-	const { data: sprints = [] } = useQuery(sprintsQueryOptions(projectId));
+	const getSprint = useSprintDirectory(projectId);
 	const {
 		data: runPages,
 		fetchNextPage: fetchMoreRuns,
@@ -140,7 +139,6 @@ function AutomationBuilderPage() {
 
 	const [tab, setTab] = useState<"graph" | "runs">("graph");
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [renaming, setRenaming] = useState(false);
 	const [nameDraft, setNameDraft] = useState("");
 
@@ -148,9 +146,11 @@ function AutomationBuilderPage() {
 	const invalidate = () => qc.invalidateQueries({ queryKey: graphKey });
 
 	function reportError(err: unknown) {
-		setErrorMessage(
-			extractErrorMessage(err, t("automation.builder.genericError")),
-		);
+		showErrorToast({
+			title: extractErrorMessage(err, t("automation.builder.genericError")),
+			description: "",
+			error: err,
+		});
 	}
 
 	function labelForType(
@@ -267,11 +267,56 @@ function AutomationBuilderPage() {
 		return false;
 	}
 
+	function describePluginNode(node: AutomationNode): string | undefined {
+		// A condition's configured values show on its match output instead
+		// (conditionMatchLabel), not repeated in the body.
+		if (node.kind === "condition") return undefined;
+		const rows = pluginConfigRows(
+			configSchemaForType(node.kind, node.type),
+			node.config,
+		);
+		if (!rows) return undefined;
+		if (rows.length === 0) {
+			return t("automation.nodeConfig.description.notConfigured");
+		}
+		return rows.map(pluginFieldText).join("\n");
+	}
+
+	function pluginFieldText(r: { title: string; value: string }): string {
+		return t("automation.nodeConfig.description.pluginField", {
+			field: r.title,
+			value: r.value,
+		});
+	}
+
+	// The label on a plugin condition's single "match" output — the expected
+	// value itself ("Merged") rather than a generic "Matched", so the graph
+	// reads without opening the node. Schema defaults are not filled in, so an
+	// unconfigured condition falls back to "Matched".
+	function conditionMatchLabel(node: AutomationNode): string | undefined {
+		return pluginMatchLabel(
+			pluginConfigRows(configSchemaForType(node.kind, node.type), node.config, {
+				useDefaults: false,
+			}),
+			pluginFieldText,
+		);
+	}
+
 	function describeNode(node: AutomationNode): string | undefined {
+		const pluginSummary = describePluginNode(node);
+		if (pluginSummary !== undefined) return pluginSummary;
 		if (node.kind === "trigger") {
 			const cfg = node.config as TriggerConfig;
 			switch (node.type) {
 				case "status_changed":
+					return cfg.status_id
+						? statuses.find((s) => s.id === cfg.status_id)?.name
+						: t("automation.nodeConfig.trigger.anyStatus");
+				case "field_changed":
+					return cfg.field
+						? t(`automation.nodeConfig.trigger.changedFields.${cfg.field}`)
+						: t("automation.nodeConfig.description.notConfigured");
+				case "child_changed":
 					return cfg.status_id
 						? statuses.find((s) => s.id === cfg.status_id)?.name
 						: t("automation.nodeConfig.trigger.anyStatus");
@@ -387,7 +432,7 @@ function AutomationBuilderPage() {
 					);
 					pushField(
 						"sprint_id",
-						sprints.find((s) => s.id === fields.sprint_id)?.name,
+						fields.sprint_id ? getSprint(fields.sprint_id)?.name : undefined,
 					);
 					pushField("start_date", fields.start_date?.slice(0, 10));
 					pushField("due_date", fields.due_date?.slice(0, 10));
@@ -410,6 +455,34 @@ function AutomationBuilderPage() {
 						host,
 					});
 				}
+				case "add_comment":
+					return cfg.comment?.text
+						? t("automation.nodeConfig.description.commentSummary", {
+								text: cfg.comment.text,
+							})
+						: t("automation.nodeConfig.description.notConfigured");
+				case "notify":
+					return cfg.notify?.message
+						? t("automation.nodeConfig.description.notifySummary", {
+								message: cfg.notify.message,
+							})
+						: t("automation.nodeConfig.description.notConfigured");
+				case "link_task":
+					return cfg.link
+						? t(`automation.nodeConfig.action.linkTypes.${cfg.link.type}`)
+						: t("automation.nodeConfig.description.notConfigured");
+				case "create_task":
+					return cfg.create?.title
+						? t("automation.nodeConfig.description.createTaskSummary", {
+								title: cfg.create.title,
+							})
+						: t("automation.nodeConfig.description.notConfigured");
+				case "wait":
+					return cfg.wait_minutes && cfg.wait_minutes > 0
+						? t("automation.nodeConfig.description.waitMinutes", {
+								minutes: cfg.wait_minutes,
+							})
+						: t("automation.nodeConfig.description.notConfigured");
 				default:
 					return undefined;
 			}
@@ -514,6 +587,7 @@ function AutomationBuilderPage() {
 	});
 
 	const renameMutation = useMutation({
+		meta: { success: "renamed", subject: "automation" },
 		mutationFn: () =>
 			updateAutomation(projectId, automationId, { name: nameDraft }),
 		onSuccess: () => {
@@ -524,11 +598,13 @@ function AutomationBuilderPage() {
 	});
 
 	const activateMutation = useMutation({
+		meta: { success: "activated", subject: "automation" },
 		mutationFn: () => activateAutomation(projectId, automationId),
 		onSuccess: invalidate,
 		onError: reportError,
 	});
 	const deactivateMutation = useMutation({
+		meta: { success: "deactivated", subject: "automation" },
 		mutationFn: () => deactivateAutomation(projectId, automationId),
 		onSuccess: invalidate,
 		onError: reportError,
@@ -537,7 +613,7 @@ function AutomationBuilderPage() {
 	if (!graph) {
 		return (
 			<div className="flex items-center justify-center flex-1">
-				<Loader2 className="size-5 animate-spin text-muted-foreground" />
+				<Spinner aria-hidden="true" className="size-5 text-muted-foreground" />
 			</div>
 		);
 	}
@@ -626,66 +702,53 @@ function AutomationBuilderPage() {
 				</div>
 			</div>
 
-			{/* View tabs (Graph / Run History) + view-specific actions */}
-			<div className="border-b border-border/50 px-4 shrink-0">
-				<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-					<div className="flex items-center gap-1 -mb-px">
-						<button
-							type="button"
-							onClick={() => setTab("graph")}
-							className={cn(
-								"flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors",
-								tab === "graph"
-									? "border-primary text-primary"
-									: "border-transparent text-muted-foreground hover:text-foreground",
-							)}
-						>
-							<Workflow className="size-3.5" />
-							{t("automation.builder.tabGraph")}
-						</button>
-						<button
-							type="button"
-							onClick={() => setTab("runs")}
-							className={cn(
-								"flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors",
-								tab === "runs"
-									? "border-primary text-primary"
-									: "border-transparent text-muted-foreground hover:text-foreground",
-							)}
-						>
-							<History className="size-3.5" />
-							{t("automation.builder.tabRuns")}
-						</button>
+			<Tabs
+				value={tab}
+				onValueChange={(v) => setTab(v as "graph" | "runs")}
+				className="min-h-0 flex-1 gap-0"
+			>
+				{/* View tabs (Graph / Run History) + view-specific actions */}
+				<div className="border-b border-border/50 px-4 shrink-0">
+					<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+						<TabsList variant="line" className="h-10">
+							<TabsTrigger value="graph" className="flex-none px-3">
+								<Workflow />
+								{t("automation.builder.tabGraph")}
+							</TabsTrigger>
+							<TabsTrigger value="runs" className="flex-none px-3">
+								<History />
+								{t("automation.builder.tabRuns")}
+							</TabsTrigger>
+						</TabsList>
+
+						{tab === "graph" && (
+							<AutomationNodePalette
+								projectId={projectId}
+								canEdit={canManage}
+								onAddTrigger={(triggerType) =>
+									addNodeMutation.mutate({ kind: "trigger", type: triggerType })
+								}
+								onAddCondition={(conditionType) =>
+									addNodeMutation.mutate({
+										kind: "condition",
+										type: conditionType,
+									})
+								}
+								onAddAction={(actionType) =>
+									addNodeMutation.mutate({ kind: "action", type: actionType })
+								}
+							/>
+						)}
 					</div>
-
-					{tab === "graph" && (
-						<AutomationNodePalette
-							projectId={projectId}
-							canEdit={canManage}
-							onAddTrigger={(triggerType) =>
-								addNodeMutation.mutate({ kind: "trigger", type: triggerType })
-							}
-							onAddCondition={(conditionType) =>
-								addNodeMutation.mutate({
-									kind: "condition",
-									type: conditionType,
-								})
-							}
-							onAddAction={(actionType) =>
-								addNodeMutation.mutate({ kind: "action", type: actionType })
-							}
-						/>
-					)}
 				</div>
-			</div>
 
-			{tab === "graph" ? (
-				<div className="flex flex-1 min-h-0 relative">
+				<TabsContent value="graph" className="relative flex min-h-0 flex-1">
 					<AutomationCanvas
 						nodes={graph.nodes}
 						edges={graph.edges}
 						nodeLabel={(n) => labelForType(n.kind, n.type)}
 						nodeDescription={describeNode}
+						conditionMatchLabel={conditionMatchLabel}
 						canEdit={canManage}
 						selectedNodeId={selectedNodeId}
 						onSelectNode={setSelectedNodeId}
@@ -698,9 +761,11 @@ function AutomationBuilderPage() {
 									target,
 								)
 							) {
-								setErrorMessage(
-									t("automation.builder.taskLessTriggerConnectionError"),
-								);
+								toast.add({
+									type: "error",
+									title: t("automation.builder.taskLessTriggerConnectionError"),
+									timeout: 8000,
+								});
 								return;
 							}
 							addEdgeMutation.mutate({ source, sourceHandle, target });
@@ -710,8 +775,6 @@ function AutomationBuilderPage() {
 						}
 						onDeleteNode={(nodeId) => removeNodeMutation.mutate(nodeId)}
 						onDeleteEdge={(edgeId) => removeEdgeMutation.mutate(edgeId)}
-						errorMessage={errorMessage}
-						onDismissError={() => setErrorMessage(null)}
 					/>
 					{selectedNode && (
 						<AutomationNodeConfigPanel
@@ -736,21 +799,22 @@ function AutomationBuilderPage() {
 							onRemove={() => removeNodeMutation.mutate(selectedNode.id)}
 						/>
 					)}
-				</div>
-			) : (
-				<AutomationRunHistoryPanel
-					projectId={projectId}
-					automationId={automationId}
-					runs={runs}
-					pagination={{
-						hasMore: !!hasMoreRuns,
-						isLoadingMore: isFetchingMoreRuns,
-						isError: isMoreRunsError,
-						onLoadMore: () => void fetchMoreRuns(),
-					}}
-					nodeLabel={nodeLabel}
-				/>
-			)}
+				</TabsContent>
+				<TabsContent value="runs" className="flex min-h-0 flex-1 flex-col">
+					<AutomationRunHistoryPanel
+						projectId={projectId}
+						automationId={automationId}
+						runs={runs}
+						pagination={{
+							hasMore: !!hasMoreRuns,
+							isLoadingMore: isFetchingMoreRuns,
+							isError: isMoreRunsError,
+							onLoadMore: () => void fetchMoreRuns(),
+						}}
+						nodeLabel={nodeLabel}
+					/>
+				</TabsContent>
+			</Tabs>
 		</div>
 	);
 }

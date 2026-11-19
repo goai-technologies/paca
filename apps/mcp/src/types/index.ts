@@ -27,22 +27,17 @@ export interface PacaConfig {
 	projectId?: string;
 	/**
 	 * UUID of the conversation this MCP server instance is running as part
-	 * of, forwarded as X-Conversation-ID on every API request — set
-	 * unconditionally by agent-runner's buildMCPServers (PACA_CONVERSATION_ID),
-	 * unlike projectId. Lets services/api's
-	 * GetConversationForAgent (the read_conversation tool's backing
-	 * endpoint) authorize a cross-conversation read against *this*
-	 * conversation's own project/actor/owning member, instead of trusting
-	 * agentId alone — see that method's doc comment for why bare agent
-	 * identity isn't sufficient. Unset only for a personal API key running
-	 * outside any conversation.
+	 * of — set unconditionally by agent-runner's buildMCPServers
+	 * (PACA_CONVERSATION_ID), unlike projectId. Unset only for a personal API
+	 * key running outside any conversation.
 	 */
 	conversationId?: string;
 	/**
-	 * Names (e.g. "com.paca.github") of the repository plugins installed on
-	 * this conversation's project, forwarded from the agent-runner trigger's
-	 * repo_plugin_ids field as PACA_REPO_PLUGIN_IDS (comma-separated). Empty
-	 * or unset means no repository plugin is configured, in which case the
+	 * Names (e.g. "com.paca.github") of the Git provider plugins installed,
+	 * forwarded from the agent-runner trigger's repo_plugin_ids field as
+	 * PACA_REPO_PLUGIN_IDS (comma-separated). Only used to decide whether the
+	 * Git tools are offered; the tools themselves talk to core. Empty or unset
+	 * means no Git provider is installed, in which case the
 	 * repo tools (list_repositories/clone_repository/push_branch) are hidden
 	 * entirely — see server.ts's tool-listing handler.
 	 */
@@ -215,6 +210,19 @@ export interface Document {
 	updated_by?: string | null;
 	created_at: string;
 	updated_at: string;
+	/** Hash of the content alone; the If-Match value for writes. */
+	content_hash?: string;
+	/** The repository file a managed copy is pushed from. */
+	source?: DocSource | null;
+	/** A locked managed copy changes only through a push from its repository. */
+	source_locked?: boolean;
+}
+
+/** The repository file a managed document copy comes from. */
+export interface DocSource {
+	repository: string;
+	path: string;
+	commit?: string;
 }
 
 export interface DocumentSearchHit {
@@ -224,6 +232,8 @@ export interface DocumentSearchHit {
 	title: string;
 	matched_in: "title" | "content";
 	snippet?: string;
+	/** 1-based block of the first content match (absent for title matches). */
+	block?: number;
 	updated_at: string;
 }
 
@@ -283,6 +293,8 @@ export interface DocumentSnapshot {
 	title: string;
 	content: unknown[] | null;
 	snapshot_number: number;
+	/** Absent on snapshots taken before hashes were stored. */
+	content_hash?: string;
 	created_by?: string | null;
 	created_by_name?: string;
 	created_at: string;
@@ -473,8 +485,8 @@ export interface UpdateTaskStatusInput {
 
 // ==================== Views ====================
 
-export type ViewType = "table" | "board" | "roadmap" | "plugin";
-export type ViewLayout = "Board" | "Table" | "Roadmap";
+export type ViewType = "table" | "board" | "gantt" | "plugin";
+export type ViewLayout = "Board" | "Table" | "Gantt";
 export type ViewsContext = "sprint" | "backlog" | "timeline";
 
 export type FilterEntry = boolean | FilterConfig;
@@ -557,17 +569,17 @@ export interface ReorderViewsInput {
 	view_ids: string[];
 }
 
-export interface BulkMoveTasksInput {
-	task_id: string;
-	target_view_id: string;
-	target_status_id: string | null;
-	target_position?: number;
+export interface MoveTaskPositionInput {
+	position: number;
+	group_key?: string | null;
 }
 
-export interface MoveTaskInput {
-	target_view_id: string;
-	target_status_id: string | null;
-	target_position?: number;
+export interface BulkMoveTasksInput {
+	items: Array<{
+		task_id: string;
+		position: number;
+		group_key?: string | null;
+	}>;
 }
 
 // ==================== Custom Fields ====================
@@ -579,7 +591,8 @@ export type FieldType =
 	| "select"
 	| "multi_select"
 	| "boolean"
-	| "url";
+	| "url"
+	| "long_text";
 
 export interface CustomFieldOption {
 	value: string;
@@ -594,6 +607,8 @@ export interface CustomFieldDefinition {
 	field_type: FieldType;
 	options: CustomFieldOption[];
 	is_required: boolean;
+	use_in_search: boolean;
+	rows: number;
 	created_at: string;
 	updated_at: string;
 }
@@ -604,6 +619,8 @@ export interface CreateCustomFieldInput {
 	field_type: FieldType;
 	options?: CustomFieldOption[];
 	is_required?: boolean;
+	use_in_search?: boolean;
+	rows?: number;
 }
 
 export interface UpdateCustomFieldInput {
@@ -611,6 +628,8 @@ export interface UpdateCustomFieldInput {
 	field_type?: FieldType;
 	options?: CustomFieldOption[];
 	is_required?: boolean;
+	use_in_search?: boolean;
+	rows?: number;
 }
 
 // ==================== Attachments ====================
@@ -897,7 +916,7 @@ export interface AddAutomationEdgeInput {
 // another conversation's transcript (e.g. one attached as chat context).
 // Field-for-field mirror of services/api's dto.AgentConversationResponse /
 // dto.AgentConversationEventResponse. ProjectID/TriggeredByMemberID are unset
-// for a global-chat conversation, which carries ActorUserID instead — see
+// for a global-chat conversation, which carries ActorAccountID instead — see
 // that DTO's doc comment.
 
 export type ConversationStatus =
@@ -923,7 +942,7 @@ export interface AgentConversation {
 	task_id?: string | null;
 	chat_session_id?: string | null;
 	triggered_by_member_id?: string | null;
-	actor_user_id?: string | null;
+	actor_account_id?: string | null;
 	status: ConversationStatus;
 	iteration_count: number;
 	input_tokens: number;
@@ -974,31 +993,30 @@ export interface ConversationEventPage {
 // ==================== Repository (repo-tools) ====================
 
 /**
- * One repository as returned by a repository plugin's
- * `GET /api/v1/plugins/{pluginId}/projects/{projectId}/repositories` route
- * (a plugin-owned endpoint proxied through PluginHandler.ProxyRequest —
- * there is no core-API implementation of repository listing to mirror
- * beyond this shape). Ported from the equivalent per-item dict shape in the
- * now-removed services/ai-agent's repo_tools.py ListRepositoriesExecutor.
+ * A repository linked to a project, from core's
+ * `GET /api/v1/projects/{projectId}/git/repositories`. `clone_url` never
+ * carries credentials.
  */
-export interface RepositoryListItem {
+export interface GitRepository {
 	id: string;
-	full_name: string;
-	owner: string;
-	repo_name: string;
+	provider_id: string;
+	host: string;
+	full_path: string;
+	default_branch: string;
 	clone_url: string;
+	/** What the repository is for, written by project members; may be empty. */
+	description?: string;
 }
 
 /**
- * Clone credentials for one repository, from the same plugin's
- * `.../repositories/{repoId}/clone-info` route. `token` is short-lived and
- * must never be logged — see repo-tools.ts's scrubToken.
+ * A short-lived credential for ONE git operation, from core's
+ * `POST .../git/repositories/{repoId}/credential/{read|write}`. `secret` must
+ * never be logged or shown to a model.
  */
-export interface RepositoryCloneInfo {
-	id: string;
-	full_name: string;
-	clone_url: string;
-	token: string;
+export interface GitCredential {
+	username: string;
+	secret: string;
+	expires_at: string | null;
 }
 
 /**

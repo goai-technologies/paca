@@ -15,7 +15,7 @@ import type {
 	UpdateAutomationNodeInput,
 } from "../types/index.js";
 import { formatApiRequestError } from "../utils/index.js";
-import { fetchAllPages, withPaging } from "./paginate.js";
+import { type Page, type PageOptions, toPage, withPaging } from "./paginate.js";
 
 /**
  * API client for automation-graph endpoints.
@@ -98,14 +98,14 @@ export class PacaAPIAutomationClient {
 
 	async listAutomations(
 		projectId: string,
-		status?: AutomationStatus,
-	): Promise<Automation[]> {
-		const queryString = status ? `?status=${status}` : "";
-		return fetchAllPages((cursor) =>
-			this.get(
+		opts: PageOptions & { status?: AutomationStatus } = {},
+	): Promise<Page<Automation>> {
+		const queryString = opts.status ? `?status=${opts.status}` : "";
+		return toPage<Automation>(
+			await this.get(
 				withPaging(
 					`/api/v1/projects/${projectId}/automations${queryString}`,
-					cursor,
+					opts,
 				),
 			),
 		);
@@ -237,17 +237,16 @@ export class PacaAPIAutomationClient {
 	async listAutomationRuns(
 		projectId: string,
 		automationId: string,
-	): Promise<AutomationRun[]> {
-		// Newest first; a long history is capped rather than paged without end.
-		return fetchAllPages(
-			(cursor) =>
-				this.get(
-					withPaging(
-						`/api/v1/projects/${projectId}/automations/${automationId}/runs`,
-						cursor,
-					),
+		opts: PageOptions = {},
+	): Promise<Page<AutomationRun>> {
+		// One page, newest first.
+		return toPage<AutomationRun>(
+			await this.get(
+				withPaging(
+					`/api/v1/projects/${projectId}/automations/${automationId}/runs`,
+					opts,
 				),
-			500,
+			),
 		);
 	}
 

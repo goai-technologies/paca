@@ -14,7 +14,8 @@ export type ActivityNameMaps = {
 	/** Display name for a membership id; undefined while unresolved or for
 	 *  someone who is no longer a member. */
 	members: (id: string) => string | undefined;
-	sprints: Record<string, string>; // sprint_id → sprint name
+	/** Name for a sprint id; undefined while unresolved or once deleted. */
+	sprints: (id: string) => string | undefined;
 };
 
 type FieldChange = {
@@ -55,7 +56,7 @@ export function describeTaskChange(
 		(id && names.members(String(id))) ||
 		(id ? String(id).slice(0, 8) : t("taskDetail.activity.none"));
 	const resolveSprint = (id: unknown) =>
-		(id && names.sprints[String(id)]) ||
+		(id && names.sprints(String(id))) ||
 		(id ? String(id).slice(0, 8) : t("taskDetail.activity.none"));
 
 	switch (change.field) {
@@ -233,7 +234,7 @@ export function activityDescription(
 
 export function ActivityItem({
 	entry,
-	names = { members: () => undefined, sprints: {} },
+	names = { members: () => undefined, sprints: () => undefined },
 }: {
 	entry: ActivityEntry;
 	names?: ActivityNameMaps;

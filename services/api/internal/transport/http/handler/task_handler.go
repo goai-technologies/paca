@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -43,6 +44,7 @@ type TaskHandler struct {
 	avatarSvc       attachmentdom.AvatarService
 	notificationSvc notificationdom.Service
 	autofillRepo    taskdom.AutofillRepository
+	memberRepo      projectdom.MemberRepository
 }
 
 // NewTaskHandler returns a TaskHandler wired to the task service, view service,
@@ -111,7 +113,7 @@ const assignedToMeMemberLookupConcurrency = 20
 // the global user ID, so a membership lookup is required before the tasks
 // can be queried.
 type projectServiceForAssigned interface {
-	ListAccessible(ctx context.Context, userID uuid.UUID, page, pageSize int) ([]*projectdom.Project, int64, error)
+	ListAccessible(ctx context.Context, accountID uuid.UUID, page, pageSize int) ([]*projectdom.Project, int64, error)
 	ListAllMembers(ctx context.Context, projectID uuid.UUID) ([]*projectdom.ProjectMember, error)
 	// ListMembers is used to resolve the people behind a page of tasks
 	// when a list request asks for include=assignees,reporter.
@@ -125,6 +127,26 @@ func WithTaskAssignedProjectService(svc projectServiceForAssigned) TaskHandlerOp
 	return func(h *TaskHandler) {
 		h.projectSvc = svc
 	}
+}
+
+// WithTaskMemberRepository attaches the project member repository used to
+// default a new task's reporter to its creator's project_members.id. Without
+// it, tasks created without an explicit reporter_id have no reporter.
+func WithTaskMemberRepository(repo projectdom.MemberRepository) TaskHandlerOption {
+	return func(h *TaskHandler) { h.memberRepo = repo }
+}
+
+// checkReporter rejects a reporter that is not an active member of projectID.
+// It is a no-op when no member repository is configured.
+func (h *TaskHandler) checkReporter(ctx context.Context, projectID, memberID uuid.UUID) error {
+	if h.memberRepo == nil {
+		return nil
+	}
+	m, err := h.memberRepo.FindMemberByID(ctx, memberID)
+	if errors.Is(err, projectdom.ErrMemberNotFound) || (err == nil && m.ProjectID != projectID) {
+		return apierr.New(apierr.CodeBadRequest, "reporter_id must be a member of this project")
+	}
+	return err
 }
 
 // WithTaskAutofillRepository configures recording which fields a user
@@ -604,6 +626,7 @@ func (h *TaskHandler) parseTaskFilter(r *http.Request, projectID uuid.UUID) (tas
 		}
 		filter.ParentTaskID = &id
 	}
+	filter.ExcludeSubtasks = filter.ParentTaskID == nil && r.URL.Query().Get("exclude_subtasks") == "true"
 	if raw := strings.TrimSpace(r.URL.Query().Get("search")); raw != "" {
 		filter.Search = &raw
 		filter.SearchContent = r.URL.Query().Get("search_content") == "true"
@@ -669,7 +692,106 @@ func (h *TaskHandler) parseTaskFilter(r *http.Request, projectID uuid.UUID) (tas
 		}
 		filter.Tags = tags
 	}
+	if by := strings.TrimSpace(r.URL.Query().Get("group_by")); by != "" {
+		group, err := h.parseTaskGroup(r, projectID, by)
+		if err != nil {
+			return filter, err
+		}
+		filter.Group = group
+	}
 	return filter, nil
+}
+
+// parseTaskGroup builds the TaskGroup a listing is narrowed to from
+// group_by=<dimension> and group_key=<group>. A custom field's type is
+// resolved from its definition; a key that names no custom field is a bad
+// request.
+func (h *TaskHandler) parseTaskGroup(r *http.Request, projectID uuid.UUID, by string) (*taskdom.TaskGroup, error) {
+	key := r.URL.Query().Get("group_key")
+	if key == "" {
+		return nil, apierr.New(apierr.CodeBadRequest, "group_key is required with group_by")
+	}
+	group := &taskdom.TaskGroup{By: by, Key: key}
+	fieldType, err := h.groupFieldType(r.Context(), projectID, by)
+	if err != nil {
+		return nil, err
+	}
+	group.FieldType = fieldType
+	return group, nil
+}
+
+// groupFieldType returns the custom field type behind a group_by / column_by
+// value, or "" when it names a built-in dimension.
+func (h *TaskHandler) groupFieldType(ctx context.Context, projectID uuid.UUID, by string) (string, error) {
+	switch by {
+	case taskdom.GroupByStatus, taskdom.GroupBySprint, taskdom.GroupByAssignee,
+		taskdom.GroupByReporter, taskdom.GroupByType, taskdom.GroupByImportance, taskdom.GroupByTags:
+		return "", nil
+	}
+	cfs, err := h.svc.ListCustomFieldDefinitions(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	for _, cf := range cfs {
+		if cf.FieldKey == by {
+			return string(cf.FieldType), nil
+		}
+	}
+	return "", apierr.New(apierr.CodeBadRequest, "unknown group_by")
+}
+
+// ListTaskColumns handles GET /projects/:projectId/tasks/columns?column_by=<dim>.
+// It lists the columns of a group-by dimension whose columns come from the
+// data: tags, assignees, reporters and the values of a free-valued custom
+// field. It accepts the same filters as ListTasks (so a view's own filters
+// narrow the columns); each column is then listed with ListTasks'
+// group_by=<dim>&group_key=<key>, plus the "no value" column every dimension
+// has. Dimensions with a fixed set of columns (status, sprint, type,
+// importance) are a bad request: the client already holds those.
+func (h *TaskHandler) ListTaskColumns(w http.ResponseWriter, r *http.Request) {
+	projectID, err := parseProjectID(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	by := strings.TrimSpace(r.URL.Query().Get("column_by"))
+	if by == "" {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "column_by is required"))
+		return
+	}
+	switch by {
+	case taskdom.GroupByStatus, taskdom.GroupBySprint, taskdom.GroupByType, taskdom.GroupByImportance:
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "column_by has a fixed set of columns"))
+		return
+	}
+	if _, err := h.groupFieldType(r.Context(), projectID, by); err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	filter, err := h.parseTaskFilter(r, projectID)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	scopeCtx, err := scopedContext(r, h.listScoper, iam.ActionTasksRead, projectID, "task")
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	columns, err := h.svc.ListGroupColumns(scopeCtx, projectID, filter, by)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	truncated := len(columns) > taskdom.MaxGroupColumns
+	if truncated {
+		columns = columns[:taskdom.MaxGroupColumns]
+	}
+	out := make([]map[string]any, len(columns))
+	for i, c := range columns {
+		out[i] = map[string]any{"key": c.Key, "label": c.Label, "count": c.Count}
+	}
+	presenter.OK(w, r, map[string]any{"columns": out, "truncated": truncated})
 }
 
 // ListTasks handles GET /projects/:projectId/tasks.
@@ -679,6 +801,7 @@ func (h *TaskHandler) parseTaskFilter(r *http.Request, projectID uuid.UUID) (tas
 //   - assignee_id=<uuid> or assignee_ids=<uuid,uuid>
 //   - task_type_ids=<uuid,uuid>
 //   - parent_task_id=<uuid>
+//   - exclude_subtasks=true (omit tasks whose parent is a non-Epic task in the same sprint; ignored with parent_task_id)
 //   - search=<text> (matches title or "#<task_number>", case-insensitive)
 //   - search_content=true (with search: also match description text)
 //   - custom_field_filters=<json> (object keyed by custom field key; see
@@ -688,6 +811,8 @@ func (h *TaskHandler) parseTaskFilter(r *http.Request, projectID uuid.UUID) (tas
 //   - story_points_min=<int>, story_points_max=<int>
 //   - importance_ranges=<json> (array of {"min":int,"max":int}, OR'd together)
 //   - tags=<tag,tag,...> (matches tasks with ANY of these tags)
+//   - group_by=<dimension>&group_key=<key> (only the tasks in one group of a
+//     group-by dimension; see taskdom.TaskGroup for the keys)
 //   - include=assignees,reporter (embed the people behind assignee_ids /
 //     reporter_id in each task as "assignees" / "reporter")
 func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
@@ -828,14 +953,8 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 // first), keyset-paginated via the same opaque "cursor" query param used by
 // ListTasks. Powers the cross-project "assigned to me" widget on the home page.
 func (h *TaskHandler) ListAssignedToMe(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.ClaimsFrom(r)
-	if claims == nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
-		return
-	}
-	userID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+	accountID, ok := requireAccountID(w, r)
+	if !ok {
 		return
 	}
 
@@ -864,7 +983,7 @@ func (h *TaskHandler) ListAssignedToMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projects, _, err := h.projectSvc.ListAccessible(r.Context(), userID, 1, 10000)
+	projects, _, err := h.projectSvc.ListAccessible(r.Context(), accountID, 1, 10000)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -890,7 +1009,7 @@ func (h *TaskHandler) ListAssignedToMe(w http.ResponseWriter, r *http.Request) {
 				return listErr
 			}
 			for _, m := range members {
-				if m.UserID == userID {
+				if m.AccountID == accountID {
 					mu.Lock()
 					memberIDs = append(memberIDs, m.ID)
 					memberProjects = append(memberProjects, projectID)
@@ -1000,6 +1119,22 @@ func (h *TaskHandler) GetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 	presenter.OK(w, r, dto.TaskFromEntity(t))
 }
 
+// GetTaskByKey handles GET /tasks/by-key/:taskKey.
+// It looks up a task by its project prefix and sequential number (e.g. PRJ-1).
+func (h *TaskHandler) GetTaskByKey(w http.ResponseWriter, r *http.Request) {
+	prefix, taskNumber, ok := taskdom.ParseTaskKey(chi.URLParam(r, "taskKey"))
+	if !ok {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid task key"))
+		return
+	}
+	t, err := h.svc.GetTaskByKey(r.Context(), prefix, taskNumber)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.OK(w, r, dto.TaskFromEntity(t))
+}
+
 // CreateTask handles POST /projects/:projectId/tasks.
 func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	projectID, err := parseProjectID(r)
@@ -1036,10 +1171,31 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve the activity/assignment actor before creating so an invalid
 	// created_by_user_id fails without persisting a task.
-	activityActorID, activityAgentID, haveActor, err := h.resolveCreateActivityActor(r.Context(), projectID, req.CreatedByUserID)
+	activityActorID, _, haveActor, err := h.resolveCreateActivityActor(r.Context(), projectID, req.CreatedByUserID)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
+	}
+
+	// An explicit reporter must be a member of this project; otherwise default
+	// it to whoever is creating the task. A caller with no project membership
+	// (e.g. an admin) just gets none; any other lookup failure is surfaced.
+	reporterID := req.ReporterID
+	if reporterID != nil {
+		if err := h.checkReporter(r.Context(), projectID, *reporterID); err != nil {
+			presenter.Error(w, r, err)
+			return
+		}
+	} else if h.memberRepo != nil {
+		id, err := callerMemberID(r, h.memberRepo, projectID)
+		switch {
+		case err == nil:
+			reporterID = &id
+		case errors.Is(err, projectdom.ErrMemberNotFound):
+		default:
+			presenter.Error(w, r, err)
+			return
+		}
 	}
 
 	t, err := h.svc.CreateTask(r.Context(), taskdom.CreateTaskInput{
@@ -1055,7 +1211,7 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		Importance:       req.Importance,
 		StoryPoints:      req.StoryPoints,
 		AssigneeIDs:      req.AssigneeIDs,
-		ReporterID:       req.ReporterID,
+		ReporterID:       reporterID,
 		CustomFields:     req.CustomFields,
 		StartDate:        req.StartDate,
 		DueDate:          req.DueDate,
@@ -1107,15 +1263,15 @@ func (h *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 			TaskID:       t.ID,
 			ProjectID:    projectID,
 			ActorID:      &activityActorID,
-			ActorAgentID: activityAgentID,
 			ActivityType: taskdom.ActivityTypeTaskCreated,
 			Content:      content,
+			Snapshot:     dto.TaskSnapshot(t),
 		})
 
 		// Enqueue one assignment event per assignee so the NotificationConsumer
 		// can create the in-app notification asynchronously (best-effort).
 		for _, memberID := range req.AssigneeIDs {
-			_ = events.PublishAssignmentChanged(r.Context(), h.publisher, t.ID, projectID, memberID, nil, activityActorID, activityAgentID, nil)
+			_ = events.PublishAssignmentChanged(r.Context(), h.publisher, t.ID, projectID, memberID, nil, activityActorID, nil)
 		}
 	}
 
@@ -1180,10 +1336,24 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.ReporterID.Set && req.ReporterID.Value != nil {
+		if err := h.checkReporter(r.Context(), projectID, *req.ReporterID.Value); err != nil {
+			presenter.Error(w, r, err)
+			return
+		}
+	}
+
+	ifVersion, err := ifMatchVersion(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+
 	// Fetch old state before mutating so we can record before/after values.
 	oldTask, _ := h.svc.GetTask(r.Context(), projectID, taskID)
 
 	t, err := h.svc.UpdateTask(r.Context(), projectID, taskID, taskdom.UpdateTaskInput{
+		IfVersion:        ifVersion,
 		TaskTypeID:       req.TaskTypeID.Ptr(),
 		StatusID:         req.StatusID.Ptr(),
 		SprintID:         req.SprintID.Ptr(),
@@ -1249,11 +1419,6 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Record update activity (best-effort).
 	if actorID, ok := middleware.ActorIDFromContext(r.Context()); ok && oldTask != nil {
-		agentID, _ := middleware.AgentIDFromContext(r.Context())
-		var agentIDPtr *uuid.UUID
-		if agentID != uuid.Nil {
-			agentIDPtr = &agentID
-		}
 		changes := h.taskChangedFields(r.Context(), oldTask, req)
 		if len(changes) > 0 {
 			content, _ := json.Marshal(map[string]any{"changes": changes})
@@ -1261,9 +1426,9 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 				TaskID:       taskID,
 				ProjectID:    projectID,
 				ActorID:      &actorID,
-				ActorAgentID: agentIDPtr,
 				ActivityType: taskdom.ActivityTypeTaskUpdated,
 				Content:      content,
+				Snapshot:     dto.TaskSnapshot(t),
 			})
 		}
 
@@ -1280,7 +1445,7 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 				if _, alreadyAssigned := oldSet[memberID]; alreadyAssigned {
 					continue
 				}
-				_ = events.PublishAssignmentChanged(r.Context(), h.publisher, taskID, projectID, memberID, nil, actorID, agentIDPtr, nil)
+				_ = events.PublishAssignmentChanged(r.Context(), h.publisher, taskID, projectID, memberID, nil, actorID, nil)
 			}
 		}
 
@@ -1570,16 +1735,10 @@ func (h *TaskHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 
 	// Record deletion activity (best-effort).
 	if actorID, ok := middleware.ActorIDFromContext(r.Context()); ok {
-		agentID, _ := middleware.AgentIDFromContext(r.Context())
-		var agentIDPtr *uuid.UUID
-		if agentID != uuid.Nil {
-			agentIDPtr = &agentID
-		}
 		_ = h.activitySvc.RecordActivity(r.Context(), taskdom.RecordActivityInput{
 			TaskID:       taskID,
 			ProjectID:    projectID,
 			ActorID:      &actorID,
-			ActorAgentID: agentIDPtr,
 			ActivityType: taskdom.ActivityTypeTaskDeleted,
 			Content:      json.RawMessage(`{}`),
 		})
@@ -1703,6 +1862,8 @@ func (h *TaskHandler) CreateCustomFieldDefinition(w http.ResponseWriter, r *http
 		FieldType:   req.FieldType,
 		Options:     req.CustomFieldOptionsToDomain(),
 		IsRequired:  req.IsRequired,
+		UseInSearch: req.UseInSearch,
+		Rows:        req.Rows,
 	})
 	if err != nil {
 		presenter.Error(w, r, err)
@@ -1734,6 +1895,8 @@ func (h *TaskHandler) UpdateCustomFieldDefinition(w http.ResponseWriter, r *http
 		FieldType:   req.FieldType,
 		Options:     req.CustomFieldOptionsToDomain(),
 		IsRequired:  req.IsRequired,
+		UseInSearch: req.UseInSearch,
+		Rows:        req.Rows,
 	})
 	if err != nil {
 		presenter.Error(w, r, err)
@@ -1841,17 +2004,10 @@ func (h *TaskHandler) AddComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentID, _ := middleware.AgentIDFromContext(r.Context())
-	var agentIDPtr *uuid.UUID
-	if agentID != uuid.Nil {
-		agentIDPtr = &agentID
-	}
-
 	a, err := h.activitySvc.AddComment(r.Context(), taskdom.AddCommentInput{
 		TaskID:    taskID,
 		ProjectID: projectID,
 		ActorID:   actorID,
-		AgentID:   agentIDPtr,
 		Content:   req.Content,
 	})
 	if err != nil {
@@ -1890,13 +2046,7 @@ func (h *TaskHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentID, _ := middleware.AgentIDFromContext(r.Context())
-	var agentIDPtr *uuid.UUID
-	if agentID != uuid.Nil {
-		agentIDPtr = &agentID
-	}
-
-	a, err := h.activitySvc.UpdateComment(r.Context(), commentID, projectID, actorID, agentIDPtr, req.Content)
+	a, err := h.activitySvc.UpdateComment(r.Context(), commentID, projectID, actorID, req.Content)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -1924,13 +2074,7 @@ func (h *TaskHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentID, _ := middleware.AgentIDFromContext(r.Context())
-	var agentIDPtr *uuid.UUID
-	if agentID != uuid.Nil {
-		agentIDPtr = &agentID
-	}
-
-	if err := h.activitySvc.DeleteComment(r.Context(), commentID, projectID, actorID, agentIDPtr); err != nil {
+	if err := h.activitySvc.DeleteComment(r.Context(), commentID, projectID, actorID); err != nil {
 		presenter.Error(w, r, err)
 		return
 	}
@@ -1952,7 +2096,13 @@ func (h *TaskHandler) ListTaskLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	links, err := h.svc.ListTaskLinks(r.Context(), projectID, taskID)
+	pageSize, err := parsePageSize(r, 30, 100)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	cursor := parseCursorParam(r)
+	links, hasMore, total, err := h.svc.ListTaskLinks(r.Context(), projectID, taskID, cursor, pageSize)
 	if err != nil {
 		presenter.Error(w, r, err)
 		return
@@ -1962,7 +2112,56 @@ func (h *TaskHandler) ListTaskLinks(w http.ResponseWriter, r *http.Request) {
 	for _, l := range links {
 		resp = append(resp, dto.TaskLinkFromEntity(l))
 	}
-	presenter.OK(w, r, map[string]any{"items": resp})
+	var nextCursor *string
+	if hasMore && len(links) > 0 {
+		c := taskdom.EncodeLinkCursor(links[len(links)-1])
+		nextCursor = &c
+	}
+	presenter.OK(w, r, map[string]any{"items": resp, "page_size": pageSize, "next_cursor": nextCursor, "total_count": total})
+}
+
+// ListProjectTaskLinks handles GET /projects/:projectId/task-links: one page
+// of the project's links of the required link_type, oldest first. A link is
+// listed only when the caller may read both of its tasks, so a client can
+// draw the links between the tasks it shows (the Gantt view's dependency
+// arrows) with one request instead of one per task.
+func (h *TaskHandler) ListProjectTaskLinks(w http.ResponseWriter, r *http.Request) {
+	projectID, err := parseProjectID(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	linkType := taskdom.LinkType(r.URL.Query().Get("link_type"))
+	if !taskdom.ValidLinkTypes[linkType] {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "link_type must be one of: blocks, relates_to, duplicates"))
+		return
+	}
+	pageSize, err := parsePageSize(r, 100, 500)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	scopeCtx, err := scopedContext(r, h.listScoper, iam.ActionTasksRead, projectID, "task")
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+
+	links, hasMore, err := h.svc.ListProjectTaskLinks(scopeCtx, projectID, linkType, parseCursorParam(r), pageSize)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	resp := make([]dto.ProjectTaskLinkResponse, 0, len(links))
+	for _, l := range links {
+		resp = append(resp, dto.ProjectTaskLinkFromEntity(l))
+	}
+	var nextCursor *string
+	if hasMore && len(links) > 0 {
+		c := taskdom.EncodeLinkCursor(links[len(links)-1])
+		nextCursor = &c
+	}
+	presenter.OK(w, r, map[string]any{"items": resp, "page_size": pageSize, "next_cursor": nextCursor})
 }
 
 // CreateTaskLink handles POST /projects/:projectId/tasks/:taskId/links.
@@ -2011,11 +2210,6 @@ func (h *TaskHandler) CreateTaskLink(w http.ResponseWriter, r *http.Request) {
 
 	// Record link creation activity (best-effort).
 	if actorID, ok := middleware.ActorIDFromContext(r.Context()); ok {
-		agentID, _ := middleware.AgentIDFromContext(r.Context())
-		var agentIDPtr *uuid.UUID
-		if agentID != uuid.Nil {
-			agentIDPtr = &agentID
-		}
 		content, _ := json.Marshal(map[string]any{
 			"target_task_id": req.TargetTaskID,
 			"link_type":      req.LinkType,
@@ -2024,7 +2218,6 @@ func (h *TaskHandler) CreateTaskLink(w http.ResponseWriter, r *http.Request) {
 			TaskID:       taskID,
 			ProjectID:    projectID,
 			ActorID:      &actorID,
-			ActorAgentID: agentIDPtr,
 			ActivityType: taskdom.ActivityTypeTaskLinkAdded,
 			Content:      content,
 		})
@@ -2058,17 +2251,11 @@ func (h *TaskHandler) DeleteTaskLink(w http.ResponseWriter, r *http.Request) {
 
 	// Record link deletion activity (best-effort).
 	if actorID, ok := middleware.ActorIDFromContext(r.Context()); ok {
-		agentID, _ := middleware.AgentIDFromContext(r.Context())
-		var agentIDPtr *uuid.UUID
-		if agentID != uuid.Nil {
-			agentIDPtr = &agentID
-		}
 		content, _ := json.Marshal(map[string]any{"link_id": linkID})
 		_ = h.activitySvc.RecordActivity(r.Context(), taskdom.RecordActivityInput{
 			TaskID:       taskID,
 			ProjectID:    projectID,
 			ActorID:      &actorID,
-			ActorAgentID: agentIDPtr,
 			ActivityType: taskdom.ActivityTypeTaskLinkRemoved,
 			Content:      content,
 		})

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Paca-AI/api/internal/apierr"
@@ -598,6 +599,16 @@ func (h *PluginHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		subPath = "/"
 	}
 
+	// A plugin's internal routes (a Git provider's /_git/* operations) are for
+	// core code only, which reaches them through Runtime.CallInternal. A route
+	// with no manifest declaration carries no auth policy, so without this the
+	// proxy would run them for anyone, signed in or not. Answered exactly like a
+	// route that does not exist.
+	if isInternalPluginPath(subPath) {
+		presenter.Error(w, r, apierr.New(apierr.CodePluginNotFound, "plugin route not found"))
+		return
+	}
+
 	route, pathParams := matchPluginRoute(found.Manifest.Backend.Routes, r.Method, subPath)
 	var mwOK bool
 	r, mwOK = h.applyPluginRouteMiddlewares(w, r, found.ID.String(), route, pathParams)
@@ -618,12 +629,15 @@ func (h *PluginHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	// The kind of the authenticated account, so the runtime's permission_check
 	// judges the caller as the same principal the router's gates do.
 	accountKind := ""
-	if p, ok := middleware.PrincipalFrom(r); ok {
-		accountKind = string(p.Kind)
+	principal, authenticated := middleware.PrincipalFrom(r)
+	if authenticated {
+		accountKind = string(principal.Kind)
 	}
-	if claims != nil {
+	if claims != nil && authenticated {
 		callerRole = claims.Role
-		userIDStr = claims.Subject
+		// Plugins receive the account id as "user_id" (the wire name predates
+		// service accounts and agents); keep that field for compatibility.
+		userIDStr = principal.AccountID.String()
 
 		// Resolve project member only when the route's manifest explicitly declares
 		// project-scoped permission enforcement.  Plugin routes that don't carry a
@@ -641,12 +655,7 @@ func (h *PluginHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 					presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid projectId in path"))
 					return
 				}
-				userID, err := uuid.Parse(claims.Subject)
-				if err != nil {
-					presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
-					return
-				}
-				member, err := h.memberRepo.FindMemberByUserProject(r.Context(), userID, projectID)
+				member, err := h.memberRepo.FindMember(r.Context(), projectID, principal.AccountID)
 				if err != nil {
 					// API-key-authenticated callers (a service account or an agent)
 					// may hold workspace-wide permissions without being a project member.
@@ -1120,4 +1129,30 @@ func installArtifactsError(err error) error {
 		return apiErr
 	}
 	return apierr.New(apierr.CodeBadRequest, "failed to install plugin artifacts: "+err.Error())
+}
+
+// isInternalPluginPath reports whether a proxied path addresses a route reserved
+// for core (see plugindom.GitProviderRoutePrefix). It is deliberately broader
+// than a prefix match on the raw string: it decodes percent-escapes, collapses
+// dot segments and repeated slashes, ignores case, and refuses the reserved name
+// as ANY path segment, so no spelling of the path reaches the plugin's router
+// as "/_git/...".
+func isInternalPluginPath(sub string) bool {
+	for range 3 { // escapes can be nested (%255F); decode until stable
+		un, err := url.PathUnescape(sub)
+		if err != nil {
+			return true // undecodable paths are not legitimate plugin routes
+		}
+		if un == sub {
+			break
+		}
+		sub = un
+	}
+	reserved := strings.TrimPrefix(plugindom.GitProviderRoutePrefix, "/")
+	for _, seg := range strings.Split(sub, "/") {
+		if strings.EqualFold(strings.TrimSpace(seg), reserved) {
+			return true
+		}
+	}
+	return false
 }

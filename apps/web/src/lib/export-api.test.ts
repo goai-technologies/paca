@@ -29,7 +29,13 @@ describe("projectExportsQueryOptions polling", () => {
 	const interval = (data: ProjectExport[] | undefined) => {
 		const client = new QueryClient();
 		const opts = projectExportsQueryOptions("p");
-		if (data) client.setQueryData(opts.queryKey, data);
+		if (data)
+			client.setQueryData(opts.queryKey, {
+				items: data,
+				page: 1,
+				page_size: 20,
+				total_count: data.length,
+			});
 		const query = client.getQueryCache().find({ queryKey: opts.queryKey });
 		const fn = opts.refetchInterval as (q: unknown) => unknown;
 		return fn(query ?? { state: { data: undefined } });

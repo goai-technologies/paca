@@ -24,10 +24,10 @@ type scopeRecordingSprintSvc struct {
 	hasIt  bool
 }
 
-func (s *scopeRecordingSprintSvc) ListSprints(ctx context.Context, _ uuid.UUID) ([]*sprintdom.Sprint, error) {
+func (s *scopeRecordingSprintSvc) ListSprints(ctx context.Context, _ uuid.UUID, _ sprintdom.SprintFilter, _ *string, _ int) ([]*sprintdom.Sprint, bool, int, error) {
 	s.called = true
 	s.scope, s.hasIt = iam.ScopeFrom(ctx, "sprint")
-	return nil, nil
+	return nil, false, 0, nil
 }
 
 type fakeScoper struct {

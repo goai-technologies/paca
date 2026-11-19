@@ -207,7 +207,16 @@ describe("RolePicker", () => {
 
 	it("offers a retry when the roles fail to load, and recovers", async () => {
 		mockGet.mockRejectedValueOnce(new Error("network"));
-		mockGet.mockResolvedValueOnce({ data: { data: [USER, ADMIN] } });
+		mockGet.mockResolvedValueOnce({
+			data: {
+				data: {
+					items: [USER, ADMIN],
+					page_size: 30,
+					next_cursor: null,
+					total_count: 2,
+				},
+			},
+		});
 		renderPicker({}, { roles: null });
 
 		expect(await screen.findByRole("alert")).toHaveTextContent(

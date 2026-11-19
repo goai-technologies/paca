@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRegistryMap, type Plugin } from "./plugin-api";
+import { buildNavItems, buildRegistryMap, type Plugin } from "./plugin-api";
 
 function makePlugin(overrides: Partial<Plugin> = {}): Plugin {
 	return {
@@ -62,5 +62,58 @@ describe("buildRegistryMap", () => {
 	it("excludes registrations from disabled plugins", () => {
 		const registry = buildRegistryMap([makePlugin({ enabled: false })]);
 		expect(registry.get("project.settings.tab")).toBeUndefined();
+	});
+});
+
+describe("buildNavItems", () => {
+	function appPagePlugin(): Plugin {
+		return makePlugin({
+			manifest: {
+				id: "com.paca.example",
+				displayName: "Example",
+				version: "1.0.0",
+				frontend: {
+					remoteEntryUrl: "https://example.test/remoteEntry.js",
+					extensionPoints: [{ point: "app.page", component: "CallbackPage" }],
+					navItems: [
+						{
+							scope: "app",
+							slug: "callback",
+							label: "Callback",
+							component: "CallbackPage",
+							requiredPermission: "example:manage",
+						},
+					],
+				},
+			},
+		});
+	}
+
+	it("routes an app-scope nav item to its app.page registration", () => {
+		const items = buildNavItems([appPagePlugin()], "app");
+
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({
+			pluginId: "com.paca.example",
+			scope: "app",
+			slug: "callback",
+			requiredPermission: "example:manage",
+		});
+		expect(items[0].registration.component).toBe("CallbackPage");
+	});
+
+	it("keeps app pages out of the project and admin sidebars", () => {
+		const plugin = appPagePlugin();
+		expect(buildNavItems([plugin], "project")).toEqual([]);
+		expect(buildNavItems([plugin], "admin")).toEqual([]);
+	});
+
+	it("skips an app nav item that has no app.page registration", () => {
+		const plugin = appPagePlugin();
+		plugin.manifest.frontend = {
+			...plugin.manifest.frontend,
+			extensionPoints: [],
+		};
+		expect(buildNavItems([plugin], "app")).toEqual([]);
 	});
 });

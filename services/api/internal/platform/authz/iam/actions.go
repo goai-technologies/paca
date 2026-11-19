@@ -74,9 +74,38 @@ const (
 	// ActionSettingsSSOWrite is root-equivalent: a provider that links
 	// accounts by email signs in as any account with a matching email.
 	ActionSettingsSSOWrite Action = "settings.sso:write"
+	// ActionSettingsSecurityWrite is root-equivalent too: it sets the login
+	// policy (MFA requirement, IP allow-lists) and can reset another
+	// account's MFA or allow-list, which removes the protection on it. It
+	// shares the "sso" platform root so no wildcard grant over "settings"
+	// carries it.
+	ActionSettingsSecurityWrite Action = "settings.security:write"
 
 	ActionPluginsRead  Action = "plugins:read"
 	ActionPluginsWrite Action = "plugins:write"
+
+	// Git: the repositories a project linked through a Git provider plugin.
+	// Write covers linking and unlinking and minting a credential that can
+	// push; Read covers listing and minting a read-only credential.
+	ActionGitRead  Action = "git:read"
+	ActionGitWrite Action = "git:write"
+	// ActionGitApprove gates approving a change request. It is separate from
+	// write so a role can comment and request changes without being able to
+	// satisfy a required review.
+	ActionGitApprove Action = "git:approve"
+	// ActionGitMerge gates merging a change request; off in every default role.
+	ActionGitMerge Action = "git:merge"
+
+	// ActionGitConnectionsManage gates creating and deleting the connections
+	// (GitHub Apps, access tokens) that belong to one project. Workspace
+	// connections are governed by ActionGitIdentitiesManage instead.
+	ActionGitConnectionsManage Action = "git.connections:manage"
+
+	// ActionGitIdentitiesManage gates the instance's bot identities on Git
+	// platforms: creating them (which creates an app/bot on the platform),
+	// listing and deleting them. It is a workspace-level privilege: an
+	// identity can act on every repository it is installed on.
+	ActionGitIdentitiesManage Action = "git.identities:manage"
 )
 
 // BuiltinActions returns every built-in action, in declaration order.
@@ -95,7 +124,8 @@ func BuiltinActions() []Action {
 		ActionEnvironmentsRead, ActionEnvironmentsWrite, ActionEnvironmentsConnect,
 		ActionWorkflowsRead, ActionWorkflowsWrite,
 		ActionAnnotationsRead, ActionAnnotationsWrite, ActionAnnotationsResolve,
-		ActionSettingsWrite, ActionSettingsSSOWrite, ActionPluginsRead, ActionPluginsWrite,
+		ActionSettingsWrite, ActionSettingsSSOWrite, ActionSettingsSecurityWrite, ActionPluginsRead, ActionPluginsWrite,
+		ActionGitRead, ActionGitWrite, ActionGitApprove, ActionGitMerge, ActionGitConnectionsManage, ActionGitIdentitiesManage,
 	}
 }
 

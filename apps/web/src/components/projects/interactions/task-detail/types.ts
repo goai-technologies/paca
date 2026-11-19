@@ -18,9 +18,12 @@ export interface CustomFieldDef {
 		| "Checkbox"
 		| "Select"
 		| "MultiSelect"
-		| "Url";
+		| "Url"
+		| "LongText";
 	required?: boolean;
 	options?: CustomFieldOption[];
+	/** Visible lines for LongText fields. */
+	rows?: number;
 }
 
 export interface Attachment {

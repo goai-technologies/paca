@@ -5,6 +5,7 @@
   "additionalProperties": true,
   "properties": {
     "publicUrl": { "type": "string" },
+    "gitWebhookPublicUrl": { "type": "string" },
     "imagePullSecrets": {
       "type": "array",
       "items": {
@@ -25,6 +26,7 @@
         "encryptionKey": { "type": "string" },
         "internalApiKey": { "type": "string" },
         "postgresPassword": { "type": "string" },
+        "valkeyPassword": { "type": "string" },
         "storageAccessKeyId": { "type": "string" },
         "storageSecretAccessKey": { "type": "string" }
       }
@@ -192,6 +194,7 @@
           "type": "object",
           "additionalProperties": true,
           "properties": {
+            "store": { "type": "string", "enum": ["local", "s3"] },
             "persistence": {
               "type": "object",
               "additionalProperties": true,
@@ -221,6 +224,7 @@
       "additionalProperties": true,
       "properties": {
         "replicaCount": { "type": "integer", "minimum": 0 },
+        "allowMultipleReplicas": { "type": "boolean" },
         "image": { "$ref": "#/definitions/image" },
         "resources": { "$ref": "#/definitions/resources" },
         "logLevel": { "type": "string" },
@@ -255,6 +259,7 @@
             "namespace": { "type": "string" },
             "cpuLimit": { "type": "string" },
             "memoryLimit": { "type": "string" },
+            "podReadyTimeout": { "type": "string", "minLength": 1 },
             "imagePullSecrets": {
               "type": "array",
               "items": {
@@ -301,6 +306,7 @@
         "replicaCount": { "type": "integer", "minimum": 0 },
         "image": { "$ref": "#/definitions/image" },
         "resources": { "$ref": "#/definitions/resources" },
+        "autoHttps": { "type": "boolean" },
         "service": {
           "type": "object",
           "additionalProperties": true,

@@ -36,7 +36,8 @@
 			"changeRoleAction": "Alterar função",
 			"deleteAction": "Excluir usuário",
 			"pwdResetHint": "Este usuário precisa definir uma nova senha no próximo login",
-			"columnActions": "Ações"
+			"columnActions": "Ações",
+			"securityAction": "Segurança"
 		},
 		"formDialog": {
 			"createdTitle": "Usuário criado",
@@ -110,6 +111,7 @@
 			"errors": {
 				"userNotFound": "Este usuário não existe mais.",
 				"forbidden": "Você não tem permissão para redefinir a senha deste usuário.",
+				"passwordLoginDisabled": "O login com senha está desativado (somente SSO), então a senha deste usuário não pode ser redefinida. Ele entra com o login único.",
 				"internalError": "Algo deu errado. Tente novamente.",
 				"generic": "Algo deu errado."
 			}
@@ -142,6 +144,24 @@
 			"title": "Nenhum usuário encontrado",
 			"description": "Tente outra pesquisa ou filtro de função.",
 			"clear": "Limpar filtros"
+		},
+		"security": {
+			"title": "Proteções de login de {{name}}",
+			"description": "Controle de onde esta pessoa pode entrar e limpe a verificação em duas etapas dela.",
+			"ip": {
+				"label": "Endereços IP permitidos",
+				"hint": "Um endereço IP ou intervalo CIDR por linha. Deixe vazio para permitir qualquer endereço. Vale para o login com senha."
+			},
+			"mfa": {
+				"title": "Verificação em duas etapas",
+				"description": "Se a pessoa perdeu o dispositivo e os códigos de recuperação, limpe-a para que possa configurá-la de novo.",
+				"reset": "Redefinir verificação em duas etapas",
+				"confirmReset": "Sim, redefinir",
+				"resetDone": "A verificação em duas etapas foi redefinida. A pessoa poderá configurá-la de novo no próximo login.",
+				"resetFailed": "Não foi possível redefinir a verificação em duas etapas."
+			},
+			"cancel": "Cancelar",
+			"save": "Salvar"
 		}
 	},
 	"globalRoles": {
@@ -301,6 +321,14 @@
 			"serviceAccountsWrite": {
 				"label": "Gerenciar contas de serviço",
 				"description": "Criar, editar e excluir contas de serviço e emitir ou revogar suas chaves de API"
+			},
+			"gitIdentitiesManage": {
+				"label": "Gerenciar conexões Git do espaço de trabalho",
+				"description": "Adicionar e remover os aplicativos do GitHub e tokens de acesso que todos os projetos do espaço de trabalho podem usar"
+			},
+			"settingsSecurityWrite": {
+				"label": "Gerenciar a segurança de login",
+				"description": "Define quem deve usar a verificação em duas etapas e de quais endereços IP é possível entrar, e redefine a verificação em duas etapas de outra pessoa. Remover essa proteção de uma conta equivale a assumir o controle dela, então trate como acesso total de administrador."
 			}
 		},
 		"permissionGroups": {
@@ -310,7 +338,8 @@
 			"projects": "Projetos",
 			"plugins": "Plugins",
 			"settings": "Configurações",
-			"serviceAccounts": "Contas de serviço"
+			"serviceAccounts": "Contas de serviço",
+			"git": "Git"
 		},
 		"defaultDialog": {
 			"title": "Definir função padrão",
@@ -418,7 +447,9 @@
 			"saved": "Salvo",
 			"errors": {
 				"updateFailed": "Falha ao salvar. Tente novamente."
-			}
+			},
+			"feedbackLabel": "Feedback",
+			"feedbackDescription": "Mostra “Enviar feedback” no menu do usuário e “Relatar este problema” nas telas de erro, que abrem uma issue do GitHub pré-preenchida. Desative em instâncias privadas ou auto-hospedadas."
 		},
 		"sso": {
 			"title": "Login único (SSO)",
@@ -453,6 +484,12 @@
 				"scopesHint": "Separados por espaços. \"openid\" é sempre incluído.",
 				"allowedDomains": "Domínios de e-mail permitidos",
 				"allowedDomainsHint": "Separados por vírgulas. Deixe vazio para permitir qualquer domínio. Apenas e-mails verificados são aceitos.",
+				"groupPolicy": "Exigir um grupo ou função",
+				"groupPolicyHint": "Somente identidades cujo token de ID contenha um grupo ou função permitido podem entrar, inclusive usuários que já haviam entrado.",
+				"groupClaim": "Claim de grupos",
+				"groupClaimHint": "Claim do token de ID com os grupos ou funções, por exemplo groups, roles ou realm_access.roles. O login é recusado se estiver ausente ou malformado.",
+				"allowedGroups": "Grupos permitidos",
+				"allowedGroupsHint": "Separados por vírgulas. O usuário precisa de pelo menos um. Use valores estáveis, como os IDs de objeto de grupo do Entra. A correspondência é exata. Tokens do Microsoft Entra com excesso de grupos são negados.",
 				"enabled": "Ativado",
 				"enabledHint": "Mostrar este provedor na página de login.",
 				"autoProvision": "Criar contas automaticamente",
@@ -473,6 +510,45 @@
 				"saveFailed": "Falha ao salvar o provedor. Tente novamente.",
 				"loadFailed": "Falha ao carregar os provedores SSO.",
 				"deleteFailed": "Falha ao excluir o provedor. Tente novamente."
+			}
+		},
+		"nav": {
+			"workspace": "Espaço de trabalho",
+			"signIn": "Login",
+			"branding": "Identidade visual",
+			"sso": "Login único",
+			"security": "Segurança de login"
+		},
+		"security": {
+			"roles": {
+				"title": "Funções protegidas",
+				"description": "As regras abaixo valem para quem tem qualquer uma das funções escolhidas. Ative Todas as funções para cobrir todos, inclusive funções criadas depois.",
+				"all": "Todas as funções"
+			},
+			"mfa": {
+				"title": "Exigir verificação em duas etapas",
+				"description": "Quem tem uma função protegida precisa configurar um app autenticador antes de entrar com senha. Os logins por SSO dependem das configurações multifator do seu provedor de identidade.",
+				"rolloutNote": "Quem ainda não configurou será guiado na configuração no próximo login."
+			},
+			"ip": {
+				"title": "Endereços IP permitidos",
+				"description": "Limita o login com senha das funções protegidas a estes endereços. Deixe vazio para permitir qualquer endereço.",
+				"hint": "Um endereço IP ou intervalo CIDR por linha, por exemplo 203.0.113.0/24. IPv4 e IPv6 são aceitos.",
+				"lockoutWarning": "Inclua o seu próprio endereço ou você pode ficar sem acesso. O login por SSO não é afetado."
+			},
+			"ssoOnly": {
+				"title": "Login somente com SSO",
+				"description": "Desativa o login com senha para todas as contas, qualquer que seja a função, exceto o administrador padrão (a conta criada a partir de ADMIN_USERNAME). Os demais entram com o login único, e as senhas deles não podem ser definidas, redefinidas nem alteradas.",
+				"noProvider": "Ative primeiro um provedor de SSO.",
+				"adminNote": "A página de login mostra apenas os provedores de SSO. O administrador padrão entra pelo link \"Entrar como administrador\" (ou /?admin=1), por exemplo para desativar esta opção se o provedor de identidade estiver indisponível."
+			},
+			"noRoles": "Nenhuma função está protegida ainda, então estas regras não se aplicam a ninguém.",
+			"errors": {
+				"invalidCidr": "Uma das entradas não é um endereço IP nem um intervalo CIDR válido.",
+				"selfLockout": "Seu próprio endereço IP precisa estar na lista, senão você ficaria bloqueado. Adicione-o e salve novamente.",
+				"ssoOnlyNoProvider": "O login somente com SSO precisa de pelo menos um provedor de SSO ativado.",
+				"saveFailed": "Falha ao salvar. Tente novamente.",
+				"loadFailed": "Não foi possível carregar as configurações de segurança de login."
 			}
 		}
 	},
@@ -628,5 +704,80 @@
 				"deleteHint": "As chaves de API deixam de funcionar e as funções e participações em projetos são removidas."
 			}
 		}
+	},
+	"git": {
+		"cancel": "Cancelar",
+		"setup": {
+			"dialogTitle": "Configurar {{provider}} em {{host}}",
+			"dialogDescription": "O Paca vai criar em {{host}} uma identidade de bot que os agentes usam para clonar, enviar alterações e trabalhar em {{changeRequests}}. Você será enviado a {{host}} para aprovar e depois voltará aqui.",
+			"name": "Nome do app (opcional)",
+			"nameHelp": "Como o bot aparece na plataforma. Deixe vazio para usar o padrão.",
+			"org": "Organização (opcional)",
+			"orgHelp": "Deixe vazio para criá-lo na sua própria conta.",
+			"start": "Continuar para {{host}}",
+			"submitToken": "Salvar",
+			"public": "Permitir instalar em outras contas (app público)",
+			"publicHelp": "Necessário quando os projetos usam repositórios de usuários ou organizações diferentes. Um app privado só pode ser instalado na conta que o possui.",
+			"next": "Avançar",
+			"tokenDescription": "O Paca se conecta ao {{host}} com um token de acesso que você cria lá. Na próxima etapa, você o cola.",
+			"host": "Host",
+			"hostHelp": "O endereço da sua instância, por exemplo gitlab.example.com.",
+			"kind": {
+				"label": "Conectar com",
+				"app": {
+					"title": "Aplicativo",
+					"help": "O Paca cria um aplicativo no {{provider}} para você. O acesso fica limitado aos repositórios em que você o instalar."
+				},
+				"bot_user": {
+					"title": "Token de acesso",
+					"help": "Cole um token de acesso de projeto ou de grupo. O Paca age como o usuário bot dele."
+				},
+				"token": {
+					"title": "Token de acesso",
+					"help": "Cole um token de acesso pessoal. Ele age como o proprietário, então use um usuário de máquina dedicado."
+				}
+			},
+			"scope": {
+				"label": "Disponível para",
+				"project": {
+					"title": "Somente este projeto",
+					"help": "Somente este projeto pode vincular repositórios por meio desta conexão."
+				},
+				"workspace": {
+					"title": "Todos os projetos",
+					"help": "Todos os projetos do espaço de trabalho podem vincular repositórios por meio desta conexão.",
+					"noPermission": "Requer a permissão do espaço de trabalho para gerenciar conexões Git."
+				},
+				"none": "Você não tem permissão para adicionar conexões aqui."
+			}
+		},
+		"delete": {
+			"button": "Remover",
+			"title": "Remover esta conexão?",
+			"description": "Os repositórios vinculados por meio de {{name}} em {{host}} deixam de funcionar até que você os reconecte por outra conexão. O aplicativo ou o token em si não é excluído na plataforma; remova-o lá se não precisar mais dele.",
+			"confirm": "Remover conexão",
+			"usage": {
+				"title": "Repositórios que a usam ({{count}}):",
+				"others": "Mais {{count}} em outros projetos.",
+				"consequence": "Eles continuam vinculados, mas sem credencial, então os agentes não podem usá-los. Depois, reconecte cada um a outra conexão."
+			}
+		},
+		"callback": {
+			"working": "Concluindo a configuração…",
+			"workingHint": "Mantenha esta página aberta.",
+			"failedTitle": "Não foi possível concluir a configuração",
+			"back": "Voltar às configurações do Git"
+		},
+		"errors": {
+			"generic": "Algo deu errado. Tente novamente.",
+			"setupInvalid": "Este link de configuração é inválido, expirou ou já foi usado. Inicie a configuração novamente.",
+			"identityExists": "Já existe uma identidade aqui. Remova-a primeiro para configurar uma nova.",
+			"publicUrlRequired": "A URL pública da instância não está configurada (PUBLIC_URL), então a plataforma não consegue acessá-la.",
+			"providerUnavailable": "O plugin do provedor Git está indisponível. Verifique se ele está instalado e ativado.",
+			"providerRejected": "A plataforma recusou a solicitação. Verifique as permissões da conta usada.",
+			"notFound": "Não encontrado."
+		},
+		"copy": "Copiar",
+		"copied": "Copiado"
 	}
 }

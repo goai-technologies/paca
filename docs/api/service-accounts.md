@@ -26,13 +26,13 @@ All paths are under `/api/v1/admin`. The envelope and error format are the usual
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
-| `GET` | `/service-accounts` | `service_accounts:read` | List the live service accounts by name, cursor-paginated: `{items, page_size, next_cursor}`. Query: `page_size` (1-100, default 30), `cursor`, `search` (every word must appear in the name or description). |
+| `GET` | `/service-accounts` | `service_accounts:read` | List the live service accounts by name, cursor-paginated: `{items, page_size, next_cursor, total_count}`. Query: `page_size` (1-100, default 30), `cursor`, `page` (numbered paging for tables, instead of `cursor`; echoed back with `next_cursor` null), `search` (every word must appear in the name or description). |
 | `POST` | `/service-accounts` | `service_accounts:write` | Create `{name, description?}`. The account holds no role until it is given some. |
 | `GET` | `/service-accounts/{id}` | `service_accounts:read` | One account (`404 SERVICE_ACCOUNT_NOT_FOUND`; a user or agent id is not one). |
 | `PATCH` | `/service-accounts/{id}` | `service_accounts:write` | Change `name` and/or `description`. |
 | `DELETE` | `/service-accounts/{id}` | `service_accounts:write` | Soft-delete it: its keys stop working, its role attachments and project memberships are removed. |
 | `POST` | `/service-accounts/{id}/avatar/initiate-upload`, `.../complete-upload`; `DELETE .../avatar` | `service_accounts:write` | Avatar, same flow as users and agents. |
-| `GET` | `/service-accounts/{id}/api-keys` | `service_accounts:read` | Active keys (prefix, expiry, last use), newest first and cursor-paginated: `{items, page_size, next_cursor, total_count}` (`cursor`, `page_size` ≤ 100). The key itself is never listed. |
+| `GET` | `/service-accounts/{id}/api-keys` | `service_accounts:read` | Active keys (prefix, expiry, last use), newest first and cursor-paginated: `{items, page_size, next_cursor, total_count}` (`cursor` or `page`, `page_size` ≤ 100). The key itself is never listed. |
 | `POST` | `/service-accounts/{id}/api-keys` | `service_accounts:write` | Mint a key `{name, expires_at?}`; the response carries `key` **once**. The caller must also hold `roles:assign` on every role the account currently holds (`403` otherwise), because the key lets its holder act with those roles. |
 | `DELETE` | `/service-accounts/{id}/api-keys/{keyId}` | `service_accounts:write` | Revoke a key. |
 | `GET` | `/service-accounts/{id}/roles` | `roles:read` and `service_accounts:read` | The account's workspace roles. |

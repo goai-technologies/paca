@@ -23,7 +23,7 @@ Every agent before `000031` was a **project agent**: owned by exactly one projec
 
 - **Project agent** (`agent_scope = 'project'`, unchanged): `project_id` set, no `global_role_id`. Behaves exactly as before.
 - **Global agent** (`agent_scope = 'global'`): `project_id` is `NULL`. It has no home project of its own — instead it:
-  - Chats with any user directly from the home page and admin pages, with no project context (`agent_chat_sessions`/`agent_conversations` rows where `project_id IS NULL` and `actor_user_id` identifies the human instead of a `project_members` row).
+  - Chats with any user directly from the home page and admin pages, with no project context (`agent_chat_sessions`/`agent_conversations` rows where `project_id IS NULL` and `actor_account_id` identifies the human instead of a `project_members` row).
   - Is **invited into a project** exactly the way a human is added as a member: `POST /projects/:id/members` with `agent_id` instead of `user_id`, creating an ordinary `project_members` row. Once invited, it behaves identically to a project agent inside that project — task assignment, `@mention`, project chat, project-role permissions all work unmodified, because none of that logic was ever keyed on `agents.project_id`, only on the `project_members` row existing.
   - Can be invited into **many projects at once** — `uq_pm_project_agent` (`000008`) was already scoped per `(project_id, agent_id)`, not per `agent_id` alone, so this needed no schema change. Each project it's in gets independent conversations; a single conversation is always scoped to one project (or to none, for the global chat).
   - Has its own platform-level roles — platform-wide `role_attachments` rows (`principal_type = 'agent'`, `project_id` NULL), set with `PUT /admin/agents/:agentId/roles` — deciding what it may do when acting with no project context, e.g. from the home/admin chat. (Before `000064` this was `agents.global_role_id`, an FK to `global_roles`; that column is now unused and kept only until a later migration drops it. Inside a project the agent is judged by the roles attached to its membership there.)
@@ -36,7 +36,7 @@ OR
 (agent_scope = 'global' AND project_id IS NULL)
 ```
 
-A global chat session or conversation has no `project_members` row to identify the human by (there may be none — the agent might not be invited into any project yet), so `agent_chat_sessions` and `agent_conversations` each gain an `actor_user_id UUID REFERENCES users(id)` column that stands in for `member_id`/`triggered_by_member_id` in that case. Both tables enforce "exactly one of the project-scoped shape or the global-actor shape" via a CHECK constraint (`ck_agent_chat_sessions_actor`, `ck_agent_conversations_actor`) — see the table definitions below.
+A global chat session or conversation has no `project_members` row to identify the human by (there may be none — the agent might not be invited into any project yet), so `agent_chat_sessions` and `agent_conversations` each gain an `actor_account_id UUID REFERENCES users(id)` column that stands in for `member_id`/`triggered_by_member_id` in that case. Both tables enforce "exactly one of the project-scoped shape or the global-actor shape" via a CHECK constraint (`ck_agent_chat_sessions_actor`, `ck_agent_conversations_actor`) — see the table definitions below.
 
 **Scope note:** global agents can chat, and — once invited into a project — do project work the same as any project agent. They cannot create or manage user accounts or platform roles; no MCP tool exposes that capability to any agent, project or global (a deliberate safety boundary, not a schema limitation).
 
@@ -66,8 +66,10 @@ Table agents {
   llm_base_url varchar [null, note: 'Optional custom base URL (e.g. Azure or a local LLM)']
 
   // ACP configuration — set only for agent_type = acp
-  acp_provider varchar [null, note: 'claude-code | codex | gemini-cli | goose | custom. Required when agent_type = acp.']
+  acp_provider varchar [null, note: 'claude-code | codex | gemini-cli | goose | opencode | custom. Required when agent_type = acp.']
   acp_command jsonb [not null, default: '[]', note: 'Launch command + args; only meaningful when acp_provider = custom']
+  acp_model text [not null, default: '', note: 'Optional model name the bridge requests when it starts a session, passed as entered. Empty = provider default.']
+  acp_effort text [not null, default: '', note: 'Optional reasoning-effort value the bridge requests when it starts a session, passed as entered. Empty = provider default.']
   acp_bridge_token_hash varchar [null, note: 'SHA-256 digest of the current local-bridge auth token. Plaintext shown once, never persisted. No global-scope bridge-token endpoint exists yet — see Known Gaps.']
 
   system_prompt text [not null, default: '']
@@ -166,9 +168,9 @@ Persistent chat sessions between a human and an agent. Each session accumulates 
 Table agent_chat_sessions {
   id uuid [primary key]
   agent_id uuid [not null, ref: > agents.id]
-  project_id uuid [null, ref: > projects.id, note: 'A project chat session. NULL for a global chat session — see actor_user_id.']
+  project_id uuid [null, ref: > projects.id, note: 'A project chat session. NULL for a global chat session — see actor_account_id.']
   member_id uuid [null, ref: > project_members.id, note: 'The human project member chatting with a project agent. NULL for a global chat session.']
-  actor_user_id uuid [null, ref: > users.id, note: 'The human chatting with a global agent from the home/admin pages, identified directly — there may be no project_members row for them at all. NULL for a project chat session. ON DELETE RESTRICT (users are only ever soft-deleted).']
+  actor_account_id uuid [null, ref: > accounts.id, note: 'The account chatting with a global agent from the home/admin pages, identified directly — there may be no project_members row for them at all. NULL for a project chat session. ON DELETE RESTRICT (users are only ever soft-deleted).']
   title varchar [null, note: 'Auto-generated or user-set session title']
   last_message_at timestamp [null]
   created_at timestamp [not null]
@@ -179,9 +181,9 @@ Table agent_chat_sessions {
 `ck_agent_chat_sessions_actor` enforces exactly one shape:
 
 ```sql
-(project_id IS NOT NULL AND member_id IS NOT NULL AND actor_user_id IS NULL)
+(project_id IS NOT NULL AND member_id IS NOT NULL AND actor_account_id IS NULL)
 OR
-(project_id IS NULL AND member_id IS NULL AND actor_user_id IS NOT NULL)
+(project_id IS NULL AND member_id IS NULL AND actor_account_id IS NOT NULL)
 ```
 
 ### `agent_conversations`
@@ -192,15 +194,15 @@ Tracks each agent run. One row per trigger invocation — a task assignment, an 
 Table agent_conversations {
   id uuid [primary key, note: 'Also used as the ACP session/conversation identifier agent-runner passes to Goose']
   agent_id uuid [not null, ref: > agents.id]
-  project_id uuid [null, ref: > projects.id, note: 'NULL for a global-chat conversation (project_id IS NULL + actor_user_id IS NOT NULL)']
+  project_id uuid [null, ref: > projects.id, note: 'NULL for a global-chat conversation (project_id IS NULL + actor_account_id IS NOT NULL)']
 
   // Trigger context
   trigger_type varchar [not null, note: 'task_assigned | comment_mention | chat_message | description_write | automation_message. Global chat always uses chat_message — project_id IS NULL is what distinguishes it.']
   task_id uuid [null, ref: > tasks.id]
   comment_id uuid [null, note: 'activities row id for the triggering comment']
   chat_session_id uuid [null, ref: > agent_chat_sessions.id]
-  triggered_by_member_id uuid [null, ref: > project_members.id, note: 'A project-scoped human member. NULL for the automation-workflow engine or a global-chat conversation (see actor_user_id).']
-  actor_user_id uuid [null, ref: > users.id, note: 'Set only for a global-chat conversation — the human chatting with a global agent, identified directly. ON DELETE RESTRICT.']
+  triggered_by_member_id uuid [null, ref: > project_members.id, note: 'A project-scoped human member. NULL for the automation-workflow engine or a global-chat conversation (see actor_account_id).']
+  actor_account_id uuid [null, ref: > accounts.id, note: 'Set only for a global-chat conversation — the account chatting with a global agent, identified directly. ON DELETE RESTRICT.']
 
   // Execution state
   status varchar [not null, default: 'queued', note: 'queued | running | paused | finished | failed | stopped']
@@ -230,9 +232,9 @@ Table agent_conversations {
 }
 ```
 
-`ck_agent_conversations_actor` enforces `triggered_by_member_id` and `actor_user_id` are never both set — the three resulting actor states are:
+`ck_agent_conversations_actor` enforces `triggered_by_member_id` and `actor_account_id` are never both set — the three resulting actor states are:
 
-| `triggered_by_member_id` | `actor_user_id` | Meaning |
+| `triggered_by_member_id` | `actor_account_id` | Meaning |
 |---|---|---|
 | set | NULL | Project-scoped human member triggered this |
 | NULL | NULL | Automation-workflow engine triggered this, no human involved |
@@ -305,23 +307,23 @@ Ref: agent_environment_variables.agent_id > agents.id [delete: cascade]
 
 // Conversations reference the agent and, for a project conversation, the
 // project/task/triggering member; a global-chat conversation instead
-// carries actor_user_id and a null project_id
+// carries actor_account_id and a null project_id
 Ref: agent_conversations.agent_id > agents.id
 Ref: agent_conversations.project_id > projects.id
 Ref: agent_conversations.task_id > tasks.id
 Ref: agent_conversations.triggered_by_member_id > project_members.id
-Ref: agent_conversations.actor_user_id > users.id
+Ref: agent_conversations.actor_account_id > accounts.id
 Ref: agent_conversations.chat_session_id > agent_chat_sessions.id
 
 // Events belong to a conversation
 Ref: agent_conversation_events.conversation_id > agent_conversations.id [delete: cascade]
 
 // Chat sessions tie an agent to a human — via a project member for a
-// project session, or directly via actor_user_id for a global session
+// project session, or directly via actor_account_id for a global session
 Ref: agent_chat_sessions.agent_id > agents.id
 Ref: agent_chat_sessions.project_id > projects.id
 Ref: agent_chat_sessions.member_id > project_members.id
-Ref: agent_chat_sessions.actor_user_id > users.id
+Ref: agent_chat_sessions.actor_account_id > accounts.id
 ```
 
 ---
@@ -332,9 +334,9 @@ Ref: agent_chat_sessions.actor_user_id > users.id
 |---|---|
 | `agents` | `(project_id, handle)` partial unique (project agents), `(handle)` partial unique (global agents), `(agent_scope)`, `(global_role_id)` partial |
 | `agent_environment_variables` | `(agent_id, key)` unique |
-| `agent_conversations` | `(agent_id, status)`, `(task_id)`, `(chat_session_id)`, `(actor_user_id)` partial |
+| `agent_conversations` | `(agent_id, status)`, `(task_id)`, `(chat_session_id)`, `(actor_account_id)` partial |
 | `agent_conversation_events` | `(conversation_id, event_index)` unique, `(conversation_id, event_type)` |
-| `agent_chat_sessions` | `(agent_id, member_id)`, `(project_id, member_id)`, `(agent_id, actor_user_id)` partial |
+| `agent_chat_sessions` | `(agent_id, member_id)`, `(project_id, member_id)`, `(agent_id, actor_account_id)` partial |
 
 ---
 

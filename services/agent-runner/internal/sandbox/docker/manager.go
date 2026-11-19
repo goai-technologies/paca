@@ -269,7 +269,7 @@ func (m *Manager) Start(ctx context.Context, cfg sandbox.Config) (*sandbox.Handl
 
 	containerCfg := &container.Config{
 		Image: cfg.Image,
-		Cmd:   []string{"serve", "--host", "0.0.0.0", "--port", fmt.Sprintf("%d", sandbox.GooseServePort)},
+		Cmd:   []string{"serve", "--host", sandbox.GooseServeHost, "--port", fmt.Sprintf("%d", sandbox.GooseServePort)},
 		Env:   env,
 		Labels: map[string]string{
 			labelConvID:  cfg.ConversationID,
@@ -395,7 +395,7 @@ func (m *Manager) Start(ctx context.Context, cfg sandbox.Config) (*sandbox.Handl
 			cleanup()
 			return nil, err
 		}
-		candidates = []string{fmt.Sprintf("http://%s:%d", ip, sandbox.GooseServePort)}
+		candidates = []string{sandbox.GooseURL(ip, sandbox.GooseServePort)}
 	} else {
 		// Two candidate addresses, tried every poll tick, first one to
 		// answer wins:
@@ -434,7 +434,7 @@ func (m *Manager) Start(ctx context.Context, cfg sandbox.Config) (*sandbox.Handl
 		// which literal IP shows up in the candidate list. localhost above
 		// remains a guaranteed-reachable fallback regardless either way.
 		if ip, err := m.containerIP(ctx, created.ID, ""); err == nil {
-			candidates = append([]string{fmt.Sprintf("http://%s:%d", ip, sandbox.GooseServePort)}, candidates...)
+			candidates = append([]string{sandbox.GooseURL(ip, sandbox.GooseServePort)}, candidates...)
 		}
 	}
 
@@ -509,6 +509,28 @@ func (m *Manager) Stop(ctx context.Context, h *sandbox.Handle) error {
 		return fmt.Errorf("sandbox/docker: stop container %s: %w", h.ContainerID, err)
 	}
 	return nil
+}
+
+// LiveConversationIDs lists the conversation IDs whose sandbox container on
+// this Docker host is still running — All: false limits the query to running
+// containers, and static environments never carry labelConvID (they carry
+// paca.environment_id instead), so they cannot appear here.
+func (m *Manager) LiveConversationIDs(ctx context.Context) (map[string]struct{}, error) {
+	list, err := m.docker.ContainerList(ctx, client.ContainerListOptions{
+		Filters: client.Filters{}.Add("label", labelManaged+"=true"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sandbox/docker: list sandbox containers: %w", err)
+	}
+	live := make(map[string]struct{}, len(list.Items))
+	for _, c := range list.Items {
+		convID := c.Labels[labelConvID]
+		if convID == "" {
+			continue
+		}
+		live[convID] = struct{}{}
+	}
+	return live, nil
 }
 
 // CopyToContainer uploads tarContent (a tar archive stream) into containerID

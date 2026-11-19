@@ -15,6 +15,12 @@
 # sensible for that case.
 publicUrl: ""
 
+# gitWebhookPublicUrl is the origin Git providers deliver webhooks to, when that
+# must not be publicUrl (e.g. "https://paca-hooks.example.com"). Set it when the
+# public edge reaches only the browser and setup paths. Route this host to the
+# API separately. Empty: publicUrl, which also serves callbacks and passkeys.
+gitWebhookPublicUrl: ""
+
 imagePullSecrets: []
 
 # ---------------------------------------------------------------------------
@@ -43,6 +49,11 @@ secrets:
   # internal-only routes. Only required when agentRunner.enabled.
   internalApiKey: ""
   postgresPassword: ""
+  # Password (requirepass) of the bundled Valkey; required when valkey.enabled.
+  # Without it any pod in the cluster, including agent sandboxes, could use
+  # Valkey (agent triggers, environment commands, all conversation events).
+  # With existingSecret, put it under the VALKEY_PASSWORD key.
+  valkeyPassword: ""
   # Only read when rustfs.enabled is false (external S3) — the bundled
   # RustFS's own credentials live under rustfs.secret.rustfs.* instead, see
   # that section's doc comment for why the two aren't unified into one.
@@ -247,6 +258,9 @@ api:
   # / SSO endpoint (token refresh gets 3x). 0 disables the limit. The client
   # IP is the rightmost X-Forwarded-For entry, which the gateway sets.
   authRateLimitPerMinute: 20
+  # Reverse proxies in front of the API appending to X-Forwarded-For (0 = none).
+  # Drives the client address used by IP allow-lists and rate limits.
+  trustedProxyHops: 1
 
   # Installed-plugin storage (backend WASM, frontend bundles, MCP bundles,
   # Agent Skills bundles — deploy/docker-compose.prod.yml's
@@ -263,6 +277,18 @@ api:
   # installed plugins won't survive a Pod restart or be visible to the
   # gateway, so plugin installation isn't usable in that mode.
   plugins:
+    # Where installed plugins live: "local" (the persistent volume below) or
+    # "s3" (the object-storage bucket the api already uses for attachments —
+    # the persistence block below is then ignored: no PVC is created and
+    # nothing is mounted, and the gateway forwards plugin assets to the api
+    # instead of reading a shared volume, so no ReadWriteMany class is needed).
+    # Switching an existing install does not move its plugins: run
+    # `migrate-plugins` first (docs/plugins/backend-plugin-system.md).
+    store: local
+    # Comma-separated exact hostnames paca.fetch may reach on a private address,
+    # e.g. a self-hosted GitLab inside the cluster's network. Empty blocks all
+    # private addresses. See docs/plugins/backend-plugin-system.md.
+    fetchPrivateHosts: ""
     persistence:
       enabled: true
       accessMode: ReadWriteMany
@@ -295,6 +321,13 @@ web:
 # ---------------------------------------------------------------------------
 realtime:
   replicaCount: 1
+  # Replicas above 1 are refused unless this is true. Live updates (the sync
+  # protocol, Pub/Sub and the change log) and collaborative editing (one owner
+  # replica per document, found through Valkey) work across replicas. Socket.IO's
+  # polling transport, the client's fallback, still needs the gateway to keep
+  # one connection on one replica (sticky sessions); WebSocket does not.
+  # See services/realtime/README.md, "Running more than one replica".
+  allowMultipleReplicas: false
   image:
     repository: ghcr.io/paca-ai/paca-realtime
     tag: "latest"
@@ -351,6 +384,15 @@ agentRunner:
     # which most managed Kubernetes offerings (EKS/GKE/AKS with
     # containerd) do not.
     backend: kubernetes
+    # Whether a docker_enabled environment/agent may run at all. Such a sandbox
+    # needs a privileged docker:dind sidecar, and Pod Security Admission rejects a
+    # privileged container under every standard except "privileged" — so on a
+    # sandbox namespace enforcing Baseline (the strictest level this backend
+    # supports, see README) it can never start. Set false there: agent-runner then
+    # refuses the sandbox up front with an actionable error and the UI hides the
+    # docker toggles. Read by both agent-runner and api, which report it on
+    # GET /environments/config.
+    dockerInSandbox: true
     image:
       repository: ghcr.io/paca-ai/paca-agent-server-goose
       tag: "latest"
@@ -383,6 +425,9 @@ agentRunner:
     # matches the docker backend's own hardcoded 2 CPU / 4GiB.
     cpuLimit: "2"
     memoryLimit: "4Gi"
+    # Kubernetes only: positive Go duration to wait for a Pod IP, including
+    # node provisioning. Separate from agent-server HTTP readiness.
+    podReadyTimeout: "5m"
     # Secrets (already present in `namespace` above, type
     # kubernetes.io/dockerconfigjson) to attach to every sandbox Pod —
     # needed when sandbox.image is pulled from a private registry.
@@ -398,7 +443,7 @@ agentRunner:
       # default, or you want environments on a specific class (e.g. a
       # faster/cheaper tier than whatever's marked default).
       storageClassName: ""
-    # NOTE — not a toggle, just a heads-up: DockerEnabled agents
+    # NOTE — DockerEnabled agents
     # (agents.docker_enabled in the database) get a privileged
     # `docker:dind` sidecar added to their own sandbox Pod at runtime, one
     # conversation at a time, so they can run Docker commands — see
@@ -406,14 +451,16 @@ agentRunner:
     # (environments.docker_enabled) get the same sidecar, added once to
     # their own long-lived Deployment's Pod template at CreateEnvironment
     # time instead — see internal/sandbox/k8s/environment.go's own
-    # CreateEnvironment. There's nothing to configure here for either case
-    # (the sidecar only ever appears on a Pod belonging to an agent/
-    # environment that opts in) — but if `namespace` above enforces the
-    # Restricted Pod Security Standard, that agent's conversations (or that
-    # environment's Pod) will fail to start with a Forbidden admission
-    # error. Label the namespace with `pod-security.kubernetes.io/enforce:
-    # baseline` (or looser) if you plan to use DockerEnabled agents or
-    # environments.
+    # CreateEnvironment. The sidecar only ever appears on a Pod belonging to
+    # an agent/environment that opts in, but it is privileged, which Pod
+    # Security Admission forbids under every standard except "privileged":
+    # on a `namespace` enforcing Restricted or Baseline, those Pods are
+    # rejected outright. That is what `dockerInSandbox` above is for — set
+    # it false there. A namespace that must run Docker-enabled sandboxes
+    # needs `pod-security.kubernetes.io/enforce: privileged`, and the flag
+    # is not retroactive: flip it and any already-created Docker-enabled
+    # environment keeps its privileged Pod until that environment is
+    # deleted.
 
   # SSH bastion (optional, off by default) — lets a user
   # `ssh -p <port> root@<bastion-host>` straight into a running static
@@ -481,6 +528,12 @@ gateway:
     # quick start.
     type: ClusterIP
     port: 80
+  # Caddy automatic HTTPS when ingress.enabled is false and publicUrl is set.
+  # Set false to serve plain HTTP on :80 behind external TLS termination
+  # (Istio VirtualService, Gateway API route, tunnel) without creating an
+  # Ingress. Does not change publicUrl or api.cookieSecure. Ignored (HTTP is
+  # used) when ingress.enabled is true.
+  autoHttps: true
 
 # ---------------------------------------------------------------------------
 # SSH access / Port forwarding host display — see agentRunner.sshBastion/

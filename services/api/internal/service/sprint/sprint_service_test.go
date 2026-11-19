@@ -3,6 +3,7 @@ package sprintsvc_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -28,7 +29,11 @@ func newFakeSprintRepo() *fakeSprintRepo {
 	return &fakeSprintRepo{sprints: make(map[uuid.UUID]*sprintdom.Sprint)}
 }
 
-func (r *fakeSprintRepo) ListSprints(_ context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error) {
+func (r *fakeSprintRepo) ListSprints(ctx context.Context, projectID uuid.UUID, _ sprintdom.SprintFilter, _ *string, _ int) ([]*sprintdom.Sprint, bool, int, error) {
+	out, err := r.ListAllSprints(ctx, projectID)
+	return out, false, len(out), err
+}
+func (r *fakeSprintRepo) ListAllSprints(_ context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]*sprintdom.Sprint, 0)
@@ -137,6 +142,9 @@ func (r *fakeTaskRepo) FindTaskByID(_ context.Context, id uuid.UUID) (*taskdom.T
 func (r *fakeTaskRepo) FindTaskByNumber(_ context.Context, _ uuid.UUID, _ int64) (*taskdom.Task, error) {
 	return nil, taskdom.ErrTaskNotFound
 }
+func (r *fakeTaskRepo) FindTaskByKey(_ context.Context, _ string, _ int64) (*taskdom.Task, error) {
+	return nil, taskdom.ErrTaskNotFound
+}
 func (r *fakeTaskRepo) CreateTask(_ context.Context, t *taskdom.Task) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -214,8 +222,16 @@ func (r *fakeTaskRepo) SumTaskField(_ context.Context, _ uuid.UUID, _ taskdom.Ta
 	return 0, nil
 }
 
-func (r *fakeTaskRepo) ListTaskLinks(_ context.Context, _ uuid.UUID) ([]*taskdom.TaskLink, error) {
+func (r *fakeTaskRepo) ListTaskLinks(_ context.Context, _ uuid.UUID, _ *string, _ int) ([]*taskdom.TaskLink, bool, int, error) {
+	return []*taskdom.TaskLink{}, false, 0, nil
+}
+
+func (r *fakeTaskRepo) ListAllTaskLinks(_ context.Context, _ uuid.UUID) ([]*taskdom.TaskLink, error) {
 	return []*taskdom.TaskLink{}, nil
+}
+
+func (r *fakeTaskRepo) ListProjectTaskLinks(_ context.Context, _ uuid.UUID, _ taskdom.LinkType, _ *string, _ int) ([]*taskdom.TaskLink, bool, error) {
+	return []*taskdom.TaskLink{}, false, nil
 }
 
 func (r *fakeTaskRepo) FindTaskLinkByID(_ context.Context, _ uuid.UUID) (*taskdom.TaskLink, error) {
@@ -360,6 +376,22 @@ func TestUpdateSprint_ActivateSprint(t *testing.T) {
 	}
 	if updated.Status != sprintdom.SprintStatusActive {
 		t.Errorf("expected status active, got %q", updated.Status)
+	}
+}
+
+func TestUpdateSprint_IfVersionRefusesAStaleWrite(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeSprintRepo()
+	svc := sprintsvc.New(repo, newFakeTaskRepo(), nil)
+	sp, _ := svc.CreateSprint(ctx, sprintdom.CreateSprintInput{ProjectID: uuid.New(), Name: "S", Status: sprintdom.SprintStatusPlanned})
+	repo.sprints[sp.ID].Version = 3
+
+	stale, fresh := int64(2), int64(3)
+	if _, err := svc.UpdateSprint(ctx, sp.ProjectID, sp.ID, sprintdom.UpdateSprintInput{Name: "stale", IfVersion: &stale}); !errors.Is(err, sprintdom.ErrVersionConflict) {
+		t.Fatalf("a stale version must conflict, got %v", err)
+	}
+	if updated, err := svc.UpdateSprint(ctx, sp.ProjectID, sp.ID, sprintdom.UpdateSprintInput{Name: "fresh", IfVersion: &fresh}); err != nil || updated.Name != "fresh" {
+		t.Fatalf("the current version must apply: %v %v", updated, err)
 	}
 }
 
@@ -543,12 +575,12 @@ func TestListSprints_ReturnsProjectSprints(t *testing.T) {
 		t.Fatalf("create other sprint: %v", err)
 	}
 
-	sprints, err := svc.ListSprints(ctx, projectID)
+	sprints, _, total, err := svc.ListSprints(ctx, projectID, sprintdom.SprintFilter{}, nil, 30)
 	if err != nil {
 		t.Fatalf("list sprints: %v", err)
 	}
-	if len(sprints) != 3 {
-		t.Errorf("expected 3 sprints for project, got %d", len(sprints))
+	if len(sprints) != 3 || total != 3 {
+		t.Errorf("expected 3 sprints for project, got %d (total %d)", len(sprints), total)
 	}
 }
 
@@ -761,3 +793,7 @@ func (r *fakeTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdo
 func (r *fakeTaskRepo) ProjectIsLive(context.Context, uuid.UUID) (bool, error) { return true, nil }
 
 func (r *fakeTaskRepo) CountTasksOfType(context.Context, uuid.UUID) (int, error) { return 0, nil }
+
+func (r *fakeTaskRepo) ListGroupColumns(_ context.Context, _ uuid.UUID, _ taskdom.TaskFilter, _, _ string) ([]taskdom.GroupColumn, error) {
+	return nil, nil
+}

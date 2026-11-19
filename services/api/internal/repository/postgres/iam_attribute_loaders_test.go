@@ -54,11 +54,11 @@ func TestIAMAttributeLoaders(t *testing.T) {
 			pgExec(t, db, `INSERT INTO task_assignees (task_id, member_id) VALUES ($1, $2)`, task, m)
 		}
 		l := loaders["task"]
-		got := loadSorted(t, l, task.String(), p.String(), "task.sprint_id", "task.status_id", "task.type_id", "task.assignee_id")
+		got := loadSorted(t, l, task.String(), p.String(), "task.sprint_id", "task.status_id", "task.status_category", "task.type_id", "task.assignee_id")
 		wantAssign := []string{u.String(), a.String()}
 		sort.Strings(wantAssign)
 		want := map[string][]string{
-			"task.sprint_id": {sprint.String()}, "task.status_id": {status.String()},
+			"task.sprint_id": {sprint.String()}, "task.status_id": {status.String()}, "task.status_category": {"todo"},
 			"task.type_id": {typ.String()}, "task.assignee_id": wantAssign,
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -190,7 +190,7 @@ func TestIAMAttributeLoaders(t *testing.T) {
 		conv := uuid.New()
 		pgExec(t, db, `INSERT INTO agent_conversations (id, agent_id, project_id, trigger_type, triggered_by_member_id, environment_id)
 			VALUES ($1,$2,$3,'chat_message',$4,$5)`, conv, ag, p, fx.member(p, fx.user(false), false), env)
-		if got := loadSorted(t, loaders["conversation"], conv.String(), p.String(), "conversation.environment_id"); !reflect.DeepEqual(got, map[string][]string{"conversation.environment_id": {env.String()}}) {
+		if got := loadSorted(t, loaders["conversation"], conv.String(), p.String(), "conversation.environment_id", "conversation.agent_id"); !reflect.DeepEqual(got, map[string][]string{"conversation.environment_id": {env.String()}, "conversation.agent_id": {ag.String()}}) {
 			t.Fatalf("conversation: %v", got)
 		}
 	})

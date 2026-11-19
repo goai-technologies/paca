@@ -30,10 +30,7 @@ const (
 // memberReader resolves project_members rows.
 type memberReader interface {
 	FindMemberByID(ctx context.Context, memberID uuid.UUID) (*projectdom.ProjectMember, error)
-	FindMemberByUserProject(ctx context.Context, userID, projectID uuid.UUID) (*projectdom.ProjectMember, error)
-	// FindMemberByActor resolves an actor to a project member: the agent's
-	// member record when agentID is non-nil, otherwise the human user's.
-	FindMemberByActor(ctx context.Context, projectID, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error)
+	FindMember(ctx context.Context, projectID, accountID uuid.UUID) (*projectdom.ProjectMember, error)
 }
 
 // agentTaskTrigger creates an agent conversation when a task is assigned to an agent member.
@@ -208,11 +205,13 @@ type assignmentStreamPayload struct {
 	ProjectID           string `json:"project_id"`
 	NewAssigneeMemberID string `json:"new_assignee_member_id"`
 	OldAssigneeMemberID string `json:"old_assignee_member_id,omitempty"`
-	ActorUserID         string `json:"actor_user_id"`
-	// ActorAgentID is set when the assignment was made by an AI agent
-	// (an agent-authenticated API request) rather than a human.
-	ActorAgentID   string `json:"actor_agent_id,omitempty"`
-	AutomationName string `json:"automation_name,omitempty"`
+	ActorID             string `json:"actor_id"`
+	// LegacyActorUserID is what producers called actor_id before it was
+	// renamed; read only so entries still queued across the upgrade resolve.
+	// Remove it (and the fallback in handle) once the stream has drained after
+	// the release that introduced actor_id, i.e. one release later.
+	LegacyActorUserID string `json:"actor_user_id,omitempty"`
+	AutomationName    string `json:"automation_name,omitempty"`
 }
 
 // maxPromptLabelLen caps how much of a project-controlled label (automation
@@ -321,38 +320,33 @@ func (c *NotificationConsumer) handle(msg redis.XMessage) {
 		c.ack(ctx, msg.ID)
 		return
 	}
-	actorUserID, err := uuid.Parse(p.ActorUserID)
+	if p.ActorID == "" {
+		p.ActorID = p.LegacyActorUserID
+	}
+	actorID, err := uuid.Parse(p.ActorID)
 	if err != nil {
-		c.log.Warn("notification consumer: invalid actor_user_id", "id", msg.ID)
+		c.log.Warn("notification consumer: invalid actor_id", "id", msg.ID)
 		c.ack(ctx, msg.ID)
 		return
-	}
-	var actorAgentID *uuid.UUID
-	if p.ActorAgentID != "" {
-		if parsed, err := uuid.Parse(p.ActorAgentID); err == nil {
-			actorAgentID = &parsed
-		} else {
-			c.log.Warn("notification consumer: invalid actor_agent_id", "id", msg.ID)
-		}
 	}
 
 	// Determine whether the assignee is an agent member.
 	// Agent members have no user_id, so sending them a notification would
-	// violate the FK constraint on notifications.recipient_user_id. Instead,
+	// violate the FK constraint on notifications.recipient_account_id. Instead,
 	// we publish a trigger to the AI agent and skip the human notification.
 	if c.memberRepo != nil && c.agentSvc != nil {
 		member, err := c.memberRepo.FindMemberByID(ctx, newAssigneeMemberID)
 		if err == nil && member.IsAgent() && member.AgentID != nil {
-			// actorUserID is userdom.SystemActorUserID for workflow-triggered
+			// actorID is userdom.SystemActorUserID for workflow-triggered
 			// assignments, which — by design — is never itself a project
 			// member, so the lookup below "failing" is the expected case
 			// there, not a bug; only warn when a genuine human actor can't be
 			// resolved to a member.
 			var actorMemberID *uuid.UUID
-			if actorMember, err := c.memberRepo.FindMemberByActor(ctx, projectID, actorUserID, actorAgentID); err == nil {
+			if actorMember, err := c.memberRepo.FindMember(ctx, projectID, actorID); err == nil {
 				actorMemberID = &actorMember.ID
-			} else if actorUserID != userdom.SystemActorUserID {
-				c.log.Warn("notification consumer: could not resolve actor to a project member", "id", msg.ID, "actor_user_id", actorUserID, "err", err)
+			} else if actorID != userdom.SystemActorUserID {
+				c.log.Warn("notification consumer: could not resolve actor to a project member", "id", msg.ID, "actor_id", actorID, "err", err)
 			}
 			conv, triggerErr := c.agentSvc.TriggerTaskAssigned(ctx, projectID, *member.AgentID, taskID, actorMemberID, p.agentAssignmentNote())
 			if triggerErr != nil {
@@ -366,7 +360,8 @@ func (c *NotificationConsumer) handle(msg redis.XMessage) {
 				if recErr := c.activityRec.RecordActivity(ctx, taskdom.RecordActivityInput{
 					TaskID:       taskID,
 					ProjectID:    projectID,
-					ActorAgentID: &agentID,
+					ActorID:      &agentID,
+					Origin:       taskdom.OriginAgent,
 					ActivityType: taskdom.ActivityTypeAgentSessionStarted,
 					Content:      content,
 				}); recErr != nil {
@@ -382,8 +377,7 @@ func (c *NotificationConsumer) handle(msg redis.XMessage) {
 		TaskID:              taskID,
 		ProjectID:           projectID,
 		NewAssigneeMemberID: newAssigneeMemberID,
-		ActorUserID:         actorUserID,
-		ActorAgentID:        actorAgentID,
+		ActorID:             actorID,
 	}); err != nil {
 		c.log.Error("notification consumer: NotifyAssigned failed", "id", msg.ID, "err", err)
 		// Do not ack — will be retried via processPending on next restart.

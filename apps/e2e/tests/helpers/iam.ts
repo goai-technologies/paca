@@ -417,17 +417,19 @@ export async function listProjectRoles(
 	request: APIRequestContext,
 	projectId: string,
 ): Promise<RoleRecord[]> {
-	const response = await request.get(`${API_URL}/projects/${projectId}/roles`);
+	const response = await request.get(
+		`${API_URL}/projects/${projectId}/roles?page_size=100`,
+	);
 	expect(response.ok()).toBeTruthy();
-	return (await response.json()).data ?? [];
+	return (await response.json()).data.items ?? [];
 }
 
 export async function listGlobalRoles(
 	request: APIRequestContext,
 ): Promise<RoleRecord[]> {
-	const response = await request.get(`${API_URL}/admin/roles`);
+	const response = await request.get(`${API_URL}/admin/roles?page_size=100`);
 	expect(response.ok()).toBeTruthy();
-	return (await response.json()).data ?? [];
+	return (await response.json()).data.items ?? [];
 }
 
 /** Creates a workspace role and returns it (the raw response is for refusals). */

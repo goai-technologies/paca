@@ -16,6 +16,7 @@
         "conversations:read", "conversations:write",
         "docs:read", "docs:write",
         "environments:connect", "environments:read", "environments:write",
+        "git:read", "git:write",
         "project.members:read",
         "sprints:read", "sprints:write",
         "tasks:read", "tasks:write",

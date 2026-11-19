@@ -427,6 +427,11 @@ func (r *fakeTaskRepo) FindTaskByNumber(_ context.Context, projectID uuid.UUID, 
 	return nil, taskdom.ErrTaskNotFound
 }
 
+// FindTaskByKey resolves by project prefix, which this fake does not model.
+func (r *fakeTaskRepo) FindTaskByKey(_ context.Context, _ string, _ int64) (*taskdom.Task, error) {
+	return nil, taskdom.ErrTaskNotFound
+}
+
 func (r *fakeTaskRepo) CreateTask(_ context.Context, t *taskdom.Task) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -570,7 +575,11 @@ func newFakeSprintRepoIT() *fakeSprintRepoIT {
 	return &fakeSprintRepoIT{sprints: make(map[uuid.UUID]*sprintdom.Sprint)}
 }
 
-func (r *fakeSprintRepoIT) ListSprints(_ context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error) {
+func (r *fakeSprintRepoIT) ListSprints(ctx context.Context, projectID uuid.UUID, _ sprintdom.SprintFilter, _ *string, _ int) ([]*sprintdom.Sprint, bool, int, error) {
+	out, err := r.ListAllSprints(ctx, projectID)
+	return out, false, len(out), err
+}
+func (r *fakeSprintRepoIT) ListAllSprints(_ context.Context, projectID uuid.UUID) ([]*sprintdom.Sprint, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []*sprintdom.Sprint
@@ -694,8 +703,16 @@ func (r *fakeTaskRepo) DeleteCustomFieldDefinition(_ context.Context, id uuid.UU
 
 // -- fakeTaskRepo: TaskLink methods --
 
-func (r *fakeTaskRepo) ListTaskLinks(_ context.Context, _ uuid.UUID) ([]*taskdom.TaskLink, error) {
+func (r *fakeTaskRepo) ListTaskLinks(_ context.Context, _ uuid.UUID, _ *string, _ int) ([]*taskdom.TaskLink, bool, int, error) {
+	return []*taskdom.TaskLink{}, false, 0, nil
+}
+
+func (r *fakeTaskRepo) ListAllTaskLinks(_ context.Context, _ uuid.UUID) ([]*taskdom.TaskLink, error) {
 	return []*taskdom.TaskLink{}, nil
+}
+
+func (r *fakeTaskRepo) ListProjectTaskLinks(_ context.Context, _ uuid.UUID, _ taskdom.LinkType, _ *string, _ int) ([]*taskdom.TaskLink, bool, error) {
+	return []*taskdom.TaskLink{}, false, nil
 }
 
 func (r *fakeTaskRepo) FindTaskLinkByID(_ context.Context, _ uuid.UUID) (*taskdom.TaskLink, error) {
@@ -743,18 +760,11 @@ func newFakeTaskActivityRepo() *fakeTaskActivityRepo {
 // resolves, since that identity is never itself a project member.
 type fakeActivityMemberRepo struct{}
 
-func (r *fakeActivityMemberRepo) FindMemberByActor(_ context.Context, _, actorID uuid.UUID, agentID *uuid.UUID) (*projectdom.ProjectMember, error) {
-	if agentID != nil {
-		return &projectdom.ProjectMember{ID: *agentID}, nil
-	}
+func (r *fakeActivityMemberRepo) FindMember(_ context.Context, _, actorID uuid.UUID) (*projectdom.ProjectMember, error) {
 	if actorID == userdom.SystemActorUserID {
 		return nil, projectdom.ErrMemberNotFound
 	}
 	return &projectdom.ProjectMember{ID: actorID}, nil
-}
-
-func (r *fakeActivityMemberRepo) FindMemberByAgent(_ context.Context, _, _ uuid.UUID) (*projectdom.ProjectMember, error) {
-	return nil, projectdom.ErrMemberNotFound
 }
 
 // ---------------------------------------------------------------------------
@@ -4247,3 +4257,7 @@ func (r *fakeTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdo
 func (r *fakeTaskRepo) ProjectIsLive(context.Context, uuid.UUID) (bool, error) { return true, nil }
 
 func (r *fakeTaskRepo) CountTasksOfType(context.Context, uuid.UUID) (int, error) { return 0, nil }
+
+func (r *fakeTaskRepo) ListGroupColumns(_ context.Context, _ uuid.UUID, _ taskdom.TaskFilter, _, _ string) ([]taskdom.GroupColumn, error) {
+	return nil, nil
+}

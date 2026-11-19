@@ -45,8 +45,11 @@ import (
 	authsvc "github.com/Paca-AI/api/internal/service/auth"
 	automationsvc "github.com/Paca-AI/api/internal/service/automation"
 	docsvc "github.com/Paca-AI/api/internal/service/doc"
+	exportsvc "github.com/Paca-AI/api/internal/service/export"
+	mfasvc "github.com/Paca-AI/api/internal/service/mfa"
 	projectsvc "github.com/Paca-AI/api/internal/service/project"
 	rolesvc "github.com/Paca-AI/api/internal/service/role"
+	serviceaccountsvc "github.com/Paca-AI/api/internal/service/serviceaccount"
 	sprintsvc "github.com/Paca-AI/api/internal/service/sprint"
 	ssosvc "github.com/Paca-AI/api/internal/service/sso"
 	tasksvc "github.com/Paca-AI/api/internal/service/task"
@@ -271,13 +274,20 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 		RefreshTTL:        e2eRefreshTTL,
 		RefreshSessionTTL: e2eRefreshSessionTTL,
 	}
+	// The login gate and SSO-only policy, wired as in bootstrap/app.go. Its
+	// default policy restricts no one, so it changes nothing for tests that
+	// never set one. No encryptor: TOTP enrollment is unavailable, as on an
+	// instance without ENCRYPTION_KEY.
+	mfaService := mfasvc.New(pgRepo.NewMFARepository(db), nil, "Paca")
+	authService.WithLoginGate(mfaService)
+	userService.WithPasswordPolicy(mfaService)
 	authHandler := handler.NewAuthHandler(authService, cookieCfg)
 	// Empty public URL: the callback URL is derived from the request's
 	// Host, i.e. this test server's own address.
-	ssoHandler := handler.NewSSOHandler(
-		ssosvc.New(pgRepo.NewSSORepository(db), redisRepo.NewSSOStateStore(redisClient, 10*time.Minute),
-			userRepo, userService, authService, log),
-		authHandler, "")
+	ssoService := ssosvc.New(pgRepo.NewSSORepository(db), redisRepo.NewSSOStateStore(redisClient, 10*time.Minute),
+		userRepo, userService, authService, log).WithIPCheck(mfaService).WithPasswordPolicy(mfaService)
+	mfaService.WithSSOProviders(ssoService)
+	ssoHandler := handler.NewSSOHandler(ssoService, authHandler, "")
 	engine := router.New(router.Deps{
 		TokenManager:        tm,
 		APIKeyAuth:          apiKeyService,
@@ -289,6 +299,7 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 		Health:              handler.NewHealthHandler(),
 		Auth:                authHandler,
 		SSO:                 ssoHandler,
+		MFA:                 handler.NewMFAHandler(mfaService, userRepo),
 		User:                handler.NewUserHandler(userService),
 		Role:                handler.NewRoleHandler(roleService),
 		RoleAttachments:     httpmw.NewRoleServiceAttachments(roleService),
@@ -304,15 +315,28 @@ func newE2EEnv(t *testing.T) *e2eEnv {
 			// Records which fields a human explicitly set, so the Jev
 			// autofill consumer never overwrites them — as in bootstrap/app.go.
 			handler.WithTaskAutofillRepository(taskRepo)),
-		Sprint:       handler.NewSprintHandler(sprintService, viewService),
-		Document:     handler.NewDocumentHandler(docService, docActivityService),
+		Sprint: handler.NewSprintHandler(sprintService, viewService),
+		// The list scoper as in bootstrap/app.go: without it document lists and
+		// the change feed would not be narrowed to what the caller may read.
+		Document: handler.NewDocumentHandler(docService, docActivityService).
+			WithDocListScoper(authorizer).
+			WithDocAuthorizer(authorizer).
+			WithDocChanges(docsvc.NewChangesService(docRepo)),
 		View:         handler.NewViewHandler(viewService),
 		Attachment:   handler.NewAttachmentHandler(attachmentService),
 		APIKey:       handler.NewAPIKeyHandler(apiKeyService),
 		Automation:   handler.NewAutomationHandler(automationService),
 		Agent:        handler.NewAgentHandler(agentService, "", "", "").WithMemberRepo(projectRepo).WithActivityLister(activityLog),
 		Conversation: handler.NewConversationHandler(agentService).WithMemberRepo(projectRepo),
-		Log:          log,
+		// Only the list/read paths of exports are exercised: nothing here
+		// builds or downloads one, so no object store is attached.
+		ProjectExport: handler.NewProjectExportHandler(exportsvc.New(
+			pgRepo.NewProjectExportRepository(db), projectRepo, projectRepo, taskRepo, sprintRepo,
+			docRepo, pgRepo.NewActivityRepository(db), nil, "", publisher, log)),
+		ProjectActivity: handler.NewProjectActivityHandler(activityLog, attachmentService),
+		ServiceAccount: handler.NewServiceAccountHandler(
+			serviceaccountsvc.New(pgRepo.NewServiceAccountRepository(db)), apiKeyService),
+		Log: log,
 	})
 
 	srv := httptest.NewServer(engine)

@@ -16,8 +16,9 @@ type Service interface {
 	// Returns an apierr.CodeProjectExportInProgress error when one is already
 	// queued or running.
 	RequestExport(ctx context.Context, projectID, requestedBy uuid.UUID) (*ProjectExport, error)
-	// List returns the project's recent exports, newest first.
-	List(ctx context.Context, projectID uuid.UUID) ([]*ProjectExport, error)
+	// List returns one numbered page (1-indexed) of the project's exports,
+	// newest first, with the total number of exports.
+	List(ctx context.Context, projectID uuid.UUID, page, pageSize int) ([]*ProjectExport, int, error)
 	// Get returns one export of the project.
 	Get(ctx context.Context, projectID, exportID uuid.UUID) (*ProjectExport, error)
 	// DownloadURL returns a short-lived presigned URL for a completed,
