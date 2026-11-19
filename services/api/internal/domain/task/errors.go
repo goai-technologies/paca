@@ -66,4 +66,11 @@ var (
 	// the built-in system actor, which is never itself a project member, so
 	// there is no member to attribute the comment to.
 	ErrCommentActorUnidentified = errors.New("activity: request has no identifiable project member")
+
+	// Cross-project move errors.
+	ErrTaskMoveSameProject = errors.New("task move: source and target project are the same")
+	// ErrTaskMoveCommitmentsProject: moving into or out of the workspace
+	// Commitments project is rejected — that catalog has its own invariants.
+	ErrTaskMoveCommitmentsProject = errors.New("task move: cannot move into or out of the Commitments project")
+	ErrTaskMoveTargetNotFound     = errors.New("task move: target project not found")
 )

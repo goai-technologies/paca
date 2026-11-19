@@ -151,6 +151,12 @@ type TaskService interface {
 	UpdateTaskAtomic(ctx context.Context, projectID, id uuid.UUID, decide func(current *Task) (in UpdateTaskInput, ok bool)) (*Task, error)
 	// DeleteTask removes the task identified by id, verifying it belongs to projectID.
 	DeleteTask(ctx context.Context, projectID, id uuid.UUID) error
+	// MoveToProject relocates the task and its full descendant subtask tree
+	// from sourceProjectID into targetProjectID in one transaction. The same
+	// task ids are kept (comments, attachments, history follow); each task
+	// gets a new task_number in the destination. Project-scoped fields are
+	// remapped or cleared — see Repository.MoveTaskTreeToProject.
+	MoveToProject(ctx context.Context, sourceProjectID, taskID, targetProjectID uuid.UUID) (*Task, error)
 	// ListAssignedTasks returns open (non-done) tasks assigned to any of
 	// memberIDs, across their respective projects — see
 	// Repository.ListAssignedTasks for the keyset-pagination contract.

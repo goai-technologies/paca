@@ -24,6 +24,10 @@ const (
 	ActivityTypeTaskUpdated ActivityType = "task.updated"
 	// ActivityTypeTaskDeleted is recorded when a task is soft-deleted.
 	ActivityTypeTaskDeleted ActivityType = "task.deleted"
+	// ActivityTypeTaskMoved is recorded when a task (and its subtask tree)
+	// is relocated to another project. Content carries
+	// {from_project_id, to_project_id, from_project_name?, to_project_name?}.
+	ActivityTypeTaskMoved ActivityType = "task.moved"
 
 	// --- Attachment events ---------------------------------------------------
 

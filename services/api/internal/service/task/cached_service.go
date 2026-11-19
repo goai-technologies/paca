@@ -300,6 +300,11 @@ func (c *CachedService) DeleteTask(ctx context.Context, projectID, id uuid.UUID)
 	return c.svc.DeleteTask(ctx, projectID, id)
 }
 
+// MoveToProject delegates directly to the underlying service (not cached).
+func (c *CachedService) MoveToProject(ctx context.Context, sourceProjectID, taskID, targetProjectID uuid.UUID) (*taskdom.Task, error) {
+	return c.svc.MoveToProject(ctx, sourceProjectID, taskID, targetProjectID)
+}
+
 // --- Custom Field Definitions ------------------------------------------------
 
 // ListCustomFieldDefinitions returns custom field definitions for a project,

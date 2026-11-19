@@ -332,6 +332,12 @@ export function TaskDetailModal({
 						onOpenChange(false);
 					}
 				}}
+				onMoved={(targetProjectId) => {
+					navigate({
+						to: "/projects/$projectId/tasks/$taskId",
+						params: { projectId: targetProjectId, taskId: task.id },
+					});
+				}}
 			/>
 
 			{/* ── Body: stacks on mobile, side-by-side on lg+ ── */}

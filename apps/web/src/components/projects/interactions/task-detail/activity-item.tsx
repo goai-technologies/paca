@@ -178,6 +178,20 @@ export function activityDescription(
 			return t("taskDetail.activity.created");
 		case "task.deleted":
 			return t("taskDetail.activity.deleted");
+		case "task.moved": {
+			const fromName =
+				typeof content.from_project_name === "string"
+					? content.from_project_name
+					: undefined;
+			const toName =
+				typeof content.to_project_name === "string"
+					? content.to_project_name
+					: undefined;
+			if (fromName && toName) {
+				return t("taskDetail.activity.movedFromTo", { from: fromName, to: toName });
+			}
+			return t("taskDetail.activity.moved");
+		}
 		case "task.updated": {
 			const changes = content.changes as FieldChange[] | undefined;
 			if (changes && changes.length === 1) {

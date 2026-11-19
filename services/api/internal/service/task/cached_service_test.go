@@ -190,6 +190,9 @@ func (s *stubTaskSvc) UpdateTaskAtomic(_ context.Context, _, id uuid.UUID, decid
 }
 
 func (s *stubTaskSvc) DeleteTask(_ context.Context, _, _ uuid.UUID) error { return nil }
+func (s *stubTaskSvc) MoveToProject(_ context.Context, _, _, _ uuid.UUID) (*taskdom.Task, error) {
+	return nil, nil
+}
 
 // CustomFieldDefinition methods
 

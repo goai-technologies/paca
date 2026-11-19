@@ -792,6 +792,19 @@ export async function deleteTask(
 	await apiClient.instance.delete(`/projects/${projectId}/tasks/${taskId}`);
 }
 
+/** Relocates a task (and its subtask tree) into another project. */
+export async function moveTaskToProject(
+	projectId: string,
+	taskId: string,
+	targetProjectId: string,
+): Promise<Task> {
+	const { data } = await apiClient.instance.post<SuccessEnvelope<Task>>(
+		`/projects/${projectId}/tasks/${taskId}/move`,
+		{ target_project_id: targetProjectId },
+	);
+	return data.data;
+}
+
 export const SUBTASKS_PAGE_SIZE = 50;
 
 export async function listSubtasks(

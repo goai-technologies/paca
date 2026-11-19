@@ -350,6 +350,11 @@ func (r CreateTaskRequest) NormalizedDescription() json.RawMessage {
 	return *r.Description
 }
 
+// MoveTaskToProjectRequest is the body for POST /projects/:projectId/tasks/:taskId/move.
+type MoveTaskToProjectRequest struct {
+	TargetProjectID uuid.UUID `json:"target_project_id"`
+}
+
 // UpdateTaskRequest is the body for PATCH /projects/:projectId/tasks/:taskId.
 // Only fields present in the JSON body are applied; absent fields are left unchanged.
 // For Tags and CustomFields, a nil pointer means absent (don't update); a non-nil

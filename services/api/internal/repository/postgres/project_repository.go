@@ -85,7 +85,7 @@ func (r *ProjectRepository) List(ctx context.Context, offset, limit int) ([]*pro
 	}
 
 	var records []projectRecord
-	if err := r.db.SelectContext(ctx, &records, `SELECT `+projectSelectCols+` FROM projects WHERE deleted_at IS NULL ORDER BY created_at ASC OFFSET $1 LIMIT $2`, offset, limit); err != nil {
+	if err := r.db.SelectContext(ctx, &records, `SELECT `+projectSelectCols+` FROM projects WHERE deleted_at IS NULL ORDER BY LOWER(name) ASC, id ASC LIMIT $1 OFFSET $2`, limit, offset); err != nil {
 		return nil, 0, fmt.Errorf("project repo: list: %w", err)
 	}
 
@@ -115,7 +115,7 @@ func (r *ProjectRepository) ListAccessible(ctx context.Context, userID uuid.UUID
 		SELECT `+projectSelectColsQualified+` FROM projects
 		JOIN project_members ON project_members.project_id = projects.id
 		WHERE project_members.account_id = $1 AND project_members.deleted_at IS NULL AND projects.deleted_at IS NULL
-		ORDER BY projects.created_at ASC OFFSET $2 LIMIT $3`, userID.String(), offset, limit); err != nil {
+		ORDER BY LOWER(projects.name) ASC, projects.id ASC LIMIT $2 OFFSET $3`, userID.String(), limit, offset); err != nil {
 		return nil, 0, fmt.Errorf("project repo: list accessible: %w", err)
 	}
 

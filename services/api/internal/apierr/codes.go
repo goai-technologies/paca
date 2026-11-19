@@ -105,6 +105,12 @@ const (
 	CodeTaskParentCycleDetected Code = "TASK_PARENT_CYCLE_DETECTED"
 	// CodeTaskAssignmentModeInvalid indicates an invalid assignment_mode value.
 	CodeTaskAssignmentModeInvalid Code = "TASK_ASSIGNMENT_MODE_INVALID"
+	// CodeTaskMoveSameProject indicates source and target project are the same.
+	CodeTaskMoveSameProject Code = "TASK_MOVE_SAME_PROJECT"
+	// CodeTaskMoveCommitmentsProject indicates a move into/out of the Commitments project.
+	CodeTaskMoveCommitmentsProject Code = "TASK_MOVE_COMMITMENTS_PROJECT"
+	// CodeTaskMoveTargetNotFound indicates the target project does not exist.
+	CodeTaskMoveTargetNotFound Code = "TASK_MOVE_TARGET_NOT_FOUND"
 
 	// CodeTaskTypeNotFound indicates the requested task type does not exist.
 	CodeTaskTypeNotFound Code = "TASK_TYPE_NOT_FOUND"

@@ -72,6 +72,24 @@ export function TaskActivityPane({
 					return t("taskDetail.activity.created");
 				case "task.deleted":
 					return t("taskDetail.activity.deleted");
+				case "task.moved": {
+					const fromName =
+						typeof (c as Record<string, unknown>).from_project_name ===
+						"string"
+							? ((c as Record<string, unknown>).from_project_name as string)
+							: undefined;
+					const toName =
+						typeof (c as Record<string, unknown>).to_project_name === "string"
+							? ((c as Record<string, unknown>).to_project_name as string)
+							: undefined;
+					if (fromName && toName) {
+						return t("taskDetail.activity.movedFromTo", {
+							from: fromName,
+							to: toName,
+						});
+					}
+					return t("taskDetail.activity.moved");
+				}
 				case "task.updated": {
 					const changes = (c as Record<string, unknown>).changes as
 						| FieldChange[]

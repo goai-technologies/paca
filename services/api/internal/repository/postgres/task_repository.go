@@ -1776,6 +1776,251 @@ func (r *TaskRepository) DeleteTask(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// MoveTaskTreeToProject implements taskdom.TaskRepository — relocates the
+// root and its descendant subtask tree into targetProjectID.
+func (r *TaskRepository) MoveTaskTreeToProject(ctx context.Context, sourceProjectID, rootTaskID, targetProjectID uuid.UUID) (*taskdom.Task, error) {
+	var movedRoot *taskdom.Task
+	err := WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
+		var ids []string
+		if err := tx.SelectContext(ctx, &ids, `
+			WITH RECURSIVE subtree AS (
+				SELECT id FROM tasks
+				WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL
+				UNION ALL
+				SELECT t.id FROM tasks t
+				JOIN subtree s ON t.parent_task_id = s.id
+				WHERE t.project_id = $2 AND t.deleted_at IS NULL
+			)
+			SELECT id FROM tasks WHERE id IN (SELECT id FROM subtree) FOR UPDATE`,
+			rootTaskID.String(), sourceProjectID.String()); err != nil {
+			return fmt.Errorf("task repo: move tree lock: %w", err)
+		}
+		if len(ids) == 0 {
+			return taskdom.ErrTaskNotFound
+		}
+		movedSet := make(map[string]struct{}, len(ids))
+		for _, id := range ids {
+			movedSet[id] = struct{}{}
+		}
+
+		// Snapshot assignees before any deletes.
+		assigneesByTask := make(map[string][]string, len(ids))
+		for _, idStr := range ids {
+			var memberIDs []string
+			if err := tx.SelectContext(ctx, &memberIDs,
+				`SELECT member_id FROM task_assignees WHERE task_id = $1`, idStr); err != nil {
+				return fmt.Errorf("task repo: move tree assignees: %w", err)
+			}
+			assigneesByTask[idStr] = memberIDs
+		}
+
+		var defaultTypeID, defaultStatusID *string
+		var dt string
+		switch err := tx.GetContext(ctx, &dt,
+			`SELECT id FROM task_types WHERE project_id = $1 AND is_default = true LIMIT 1`,
+			targetProjectID.String()); {
+		case err == nil:
+			defaultTypeID = &dt
+		case errors.Is(err, sql.ErrNoRows):
+			// no default type
+		default:
+			return fmt.Errorf("task repo: move tree default type: %w", err)
+		}
+		var ds string
+		switch err := tx.GetContext(ctx, &ds,
+			`SELECT id FROM task_statuses WHERE project_id = $1 AND is_default = true LIMIT 1`,
+			targetProjectID.String()); {
+		case err == nil:
+			defaultStatusID = &ds
+		case errors.Is(err, sql.ErrNoRows):
+			// no default status
+		default:
+			return fmt.Errorf("task repo: move tree default status: %w", err)
+		}
+
+		mapMember := func(oldMemberID string) *string {
+			var matched string
+			err := tx.GetContext(ctx, &matched, `
+				SELECT tm.id FROM project_members om
+				JOIN project_members tm
+				  ON tm.account_id = om.account_id
+				 AND tm.project_id = $2
+				 AND tm.deleted_at IS NULL
+				WHERE om.id = $1 AND om.deleted_at IS NULL
+				LIMIT 1`, oldMemberID, targetProjectID.String())
+			if err != nil {
+				return nil
+			}
+			return &matched
+		}
+
+		for _, idStr := range ids {
+			var rec taskRecord
+			if err := tx.GetContext(ctx, &rec, `SELECT `+taskCols+` FROM tasks WHERE id = $1`, idStr); err != nil {
+				return fmt.Errorf("task repo: move tree load: %w", err)
+			}
+
+			var number int64
+			if err := tx.GetContext(ctx, &number, `
+				INSERT INTO task_counters (project_id, last_value) VALUES ($1, 1)
+				ON CONFLICT (project_id) DO UPDATE SET last_value = task_counters.last_value + 1
+				RETURNING last_value`, targetProjectID.String()); err != nil {
+				return fmt.Errorf("task repo: move tree counter: %w", err)
+			}
+
+			var newTypeID *string
+			if rec.TaskTypeID != nil {
+				var matched string
+				err := tx.GetContext(ctx, &matched, `
+					SELECT tt2.id FROM task_types tt1
+					JOIN task_types tt2 ON LOWER(tt2.name) = LOWER(tt1.name) AND tt2.project_id = $2
+					WHERE tt1.id = $1
+					LIMIT 1`, *rec.TaskTypeID, targetProjectID.String())
+				if err == nil {
+					newTypeID = &matched
+				} else if !errors.Is(err, sql.ErrNoRows) {
+					return fmt.Errorf("task repo: move tree type map: %w", err)
+				}
+			}
+			if newTypeID == nil {
+				newTypeID = defaultTypeID
+			}
+
+			var newStatusID *string
+			if rec.StatusID != nil {
+				var matched string
+				err := tx.GetContext(ctx, &matched, `
+					SELECT ts2.id FROM task_statuses ts1
+					JOIN task_statuses ts2
+					  ON LOWER(ts2.name) = LOWER(ts1.name)
+					 AND ts2.category = ts1.category
+					 AND ts2.project_id = $2
+					WHERE ts1.id = $1
+					LIMIT 1`, *rec.StatusID, targetProjectID.String())
+				if errors.Is(err, sql.ErrNoRows) {
+					err = tx.GetContext(ctx, &matched, `
+						SELECT ts2.id FROM task_statuses ts1
+						JOIN task_statuses ts2
+						  ON LOWER(ts2.name) = LOWER(ts1.name)
+						 AND ts2.project_id = $2
+						WHERE ts1.id = $1
+						LIMIT 1`, *rec.StatusID, targetProjectID.String())
+				}
+				if err == nil {
+					newStatusID = &matched
+				} else if !errors.Is(err, sql.ErrNoRows) {
+					return fmt.Errorf("task repo: move tree status map: %w", err)
+				}
+			}
+			if newStatusID == nil {
+				newStatusID = defaultStatusID
+			}
+
+			var newReporter *string
+			if rec.ReporterID != nil {
+				newReporter = mapMember(*rec.ReporterID)
+			}
+
+			var newParent *string
+			if rec.ParentTaskID != nil {
+				if _, ok := movedSet[*rec.ParentTaskID]; ok {
+					newParent = rec.ParentTaskID
+				}
+			}
+
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE tasks SET
+				  project_id = $1,
+				  task_number = $2,
+				  task_type_id = $3,
+				  status_id = $4,
+				  sprint_id = NULL,
+				  parent_task_id = $5,
+				  reporter_id = $6,
+				  commitment_task_id = NULL,
+				  home_project_id = NULL,
+				  updated_at = NOW()
+				WHERE id = $7`,
+				targetProjectID.String(), number, newTypeID, newStatusID,
+				newParent, newReporter, idStr,
+			); err != nil {
+				return fmt.Errorf("task repo: move tree update: %w", err)
+			}
+
+			if _, err := tx.ExecContext(ctx, `DELETE FROM task_assignees WHERE task_id = $1`, idStr); err != nil {
+				return fmt.Errorf("task repo: move tree clear assignees: %w", err)
+			}
+			for _, oldMember := range assigneesByTask[idStr] {
+				if nm := mapMember(oldMember); nm != nil {
+					if _, err := tx.ExecContext(ctx,
+						`INSERT INTO task_assignees (task_id, member_id, assigned_at) VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`,
+						idStr, *nm); err != nil {
+						return fmt.Errorf("task repo: move tree assignee: %w", err)
+					}
+				}
+			}
+
+			// Follow-up rows that file the task under its project.
+			for _, q := range []string{
+				`UPDATE activities SET project_id = $1 WHERE entity_type = 'task' AND entity_id = $2`,
+				`UPDATE notifications SET project_id = $1 WHERE task_id = $2`,
+				`UPDATE agent_conversations SET project_id = $1 WHERE task_id = $2`,
+				`UPDATE page_annotations SET project_id = $1 WHERE task_id = $2`,
+			} {
+				if _, err := tx.ExecContext(ctx, q, targetProjectID.String(), idStr); err != nil {
+					return fmt.Errorf("task repo: move tree follow-up: %w", err)
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM view_task_positions WHERE task_id = $1`, idStr); err != nil {
+				return fmt.Errorf("task repo: move tree view positions: %w", err)
+			}
+		}
+
+		// Drop links that would become cross-project (exactly one end moved).
+		idArgs := make([]any, len(ids))
+		placeholders := make([]string, len(ids))
+		for i, id := range ids {
+			idArgs[i] = id
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		inList := strings.Join(placeholders, ",")
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
+			DELETE FROM task_links WHERE
+			  (source_task_id IN (%[1]s) AND target_task_id NOT IN (%[1]s))
+			  OR (target_task_id IN (%[1]s) AND source_task_id NOT IN (%[1]s))`, inList),
+			idArgs...); err != nil {
+			return fmt.Errorf("task repo: move tree links: %w", err)
+		}
+
+		var rootRec taskRecord
+		if err := tx.GetContext(ctx, &rootRec, `SELECT `+taskCols+` FROM tasks WHERE id = $1`, rootTaskID.String()); err != nil {
+			return fmt.Errorf("task repo: move tree reload root: %w", err)
+		}
+		t, err := toTaskEntity(&rootRec)
+		if err != nil {
+			return err
+		}
+		t.AssigneeIDs = []uuid.UUID{}
+		var memberIDs []string
+		if err := tx.SelectContext(ctx, &memberIDs,
+			`SELECT member_id FROM task_assignees WHERE task_id = $1 ORDER BY assigned_at ASC`,
+			rootTaskID.String()); err != nil {
+			return fmt.Errorf("task repo: move tree reload assignees: %w", err)
+		}
+		for _, mid := range memberIDs {
+			if parsed, err := uuid.Parse(mid); err == nil {
+				t.AssigneeIDs = append(t.AssigneeIDs, parsed)
+			}
+		}
+		movedRoot = t
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return movedRoot, nil
+}
+
 // BulkMoveSprintTasks reassigns all non-done tasks that belong to sourceSprintID
 // to targetSprintID (nil = backlog) in a single UPDATE statement.
 func (r *TaskRepository) BulkMoveSprintTasks(ctx context.Context, projectID, sourceSprintID uuid.UUID, targetSprintID *uuid.UUID) error {

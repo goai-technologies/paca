@@ -79,6 +79,9 @@ func (permissiveTaskRepo) UpdateTaskAtomic(_ context.Context, id uuid.UUID, deci
 	return next, nil
 }
 func (permissiveTaskRepo) DeleteTask(context.Context, uuid.UUID) error { return nil }
+func (permissiveTaskRepo) MoveTaskTreeToProject(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (*taskdom.Task, error) {
+	return nil, nil
+}
 func (permissiveTaskRepo) BulkMoveSprintTasks(context.Context, uuid.UUID, uuid.UUID, *uuid.UUID) error {
 	return nil
 }

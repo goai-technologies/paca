@@ -467,6 +467,49 @@ func (r *fakeTaskRepo) DeleteTask(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (r *fakeTaskRepo) MoveTaskTreeToProject(_ context.Context, sourceProjectID, rootTaskID, targetProjectID uuid.UUID) (*taskdom.Task, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.tasks[rootTaskID]
+	if !ok || t.DeletedAt != nil || t.ProjectID != sourceProjectID {
+		return nil, taskdom.ErrTaskNotFound
+	}
+	// Collect subtree (BFS).
+	queue := []uuid.UUID{rootTaskID}
+	moved := map[uuid.UUID]*taskdom.Task{}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		cur := r.tasks[id]
+		if cur == nil || cur.DeletedAt != nil || cur.ProjectID != sourceProjectID {
+			continue
+		}
+		cp := *cur
+		moved[id] = &cp
+		for _, child := range r.tasks {
+			if child.ParentTaskID != nil && *child.ParentTaskID == id && child.DeletedAt == nil {
+				queue = append(queue, child.ID)
+			}
+		}
+	}
+	for id, cp := range moved {
+		cp.ProjectID = targetProjectID
+		cp.SprintID = nil
+		cp.CommitmentTaskID = nil
+		cp.HomeProjectID = nil
+		if id == rootTaskID {
+			if cp.ParentTaskID != nil {
+				if _, ok := moved[*cp.ParentTaskID]; !ok {
+					cp.ParentTaskID = nil
+				}
+			}
+		}
+		r.tasks[id] = cp
+	}
+	out := *r.tasks[rootTaskID]
+	return &out, nil
+}
+
 // CountTasks returns the total number of matching tasks without cursor/limit.
 func (r *fakeTaskRepo) CountTasks(_ context.Context, projectID uuid.UUID, filter taskdom.TaskFilter) (int64, error) {
 	r.mu.RLock()

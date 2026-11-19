@@ -180,6 +180,9 @@ func (r *fakeTaskRepo) DeleteTask(_ context.Context, id uuid.UUID) error {
 	delete(r.tasks, id)
 	return nil
 }
+func (r *fakeTaskRepo) MoveTaskTreeToProject(_ context.Context, _, _, _ uuid.UUID) (*taskdom.Task, error) {
+	return nil, nil
+}
 
 // CreateStatus is a test helper to seed a TaskStatus into the fake.
 func (r *fakeTaskRepo) CreateStatus(_ context.Context, s *taskdom.TaskStatus) error {
