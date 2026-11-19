@@ -22,6 +22,7 @@ export interface CustomFieldDef {
 		| "LongText";
 	required?: boolean;
 	options?: CustomFieldOption[];
+	option_source?: string;
 	/** Visible lines for LongText fields. */
 	rows?: number;
 }

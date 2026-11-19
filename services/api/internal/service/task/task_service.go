@@ -1085,6 +1085,14 @@ func (s *Service) CreateCustomFieldDefinition(ctx context.Context, in taskdom.Cr
 		rows = taskdom.ClampLongTextRows(in.Rows)
 	}
 
+	optionSource := taskdom.OptionSourceManual
+	if in.OptionSource != "" {
+		if !taskdom.ValidOptionSource(in.OptionSource) {
+			return nil, taskdom.ErrCustomFieldOptionSourceInvalid
+		}
+		optionSource = in.OptionSource
+	}
+
 	now := time.Now()
 	f := &taskdom.CustomFieldDefinition{
 		ID:          uuid.New(),
@@ -1093,6 +1101,7 @@ func (s *Service) CreateCustomFieldDefinition(ctx context.Context, in taskdom.Cr
 		DisplayName: displayName,
 		FieldType:   in.FieldType,
 		Options:     opts,
+		OptionSource: optionSource,
 		IsRequired:  in.IsRequired,
 		UseInSearch: in.UseInSearch,
 		Rows:        rows,
@@ -1129,6 +1138,12 @@ func (s *Service) UpdateCustomFieldDefinition(ctx context.Context, projectID, id
 	}
 	if in.Options != nil {
 		f.Options = in.Options
+	}
+	if in.OptionSource != nil {
+		if !taskdom.ValidOptionSource(*in.OptionSource) {
+			return nil, taskdom.ErrCustomFieldOptionSourceInvalid
+		}
+		f.OptionSource = *in.OptionSource
 	}
 	if in.IsRequired != nil {
 		f.IsRequired = *in.IsRequired

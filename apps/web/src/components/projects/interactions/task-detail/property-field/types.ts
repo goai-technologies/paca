@@ -91,6 +91,8 @@ export interface PropertyFieldProps {
 	customRawValue?: unknown;
 	onCustomChange?: (value: unknown) => void;
 	customOptions?: CustomFieldOption[];
+	customOptionSource?: string;
+	projectId?: string;
 	customRows?: number;
 
 	hidden?: boolean;

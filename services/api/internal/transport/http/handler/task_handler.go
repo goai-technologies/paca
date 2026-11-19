@@ -1855,15 +1855,25 @@ func (h *TaskHandler) CreateCustomFieldDefinition(w http.ResponseWriter, r *http
 		return
 	}
 
+	optionSource := taskdom.OptionSourceManual
+	if req.OptionSource != nil && *req.OptionSource != "" {
+		if !taskdom.ValidOptionSource(*req.OptionSource) {
+			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid option_source"))
+			return
+		}
+		optionSource = *req.OptionSource
+	}
+
 	f, err := h.svc.CreateCustomFieldDefinition(r.Context(), taskdom.CreateCustomFieldDefinitionInput{
-		ProjectID:   projectID,
-		FieldKey:    req.FieldKey,
-		DisplayName: req.DisplayName,
-		FieldType:   req.FieldType,
-		Options:     req.CustomFieldOptionsToDomain(),
-		IsRequired:  req.IsRequired,
-		UseInSearch: req.UseInSearch,
-		Rows:        req.Rows,
+		ProjectID:    projectID,
+		FieldKey:     req.FieldKey,
+		DisplayName:  req.DisplayName,
+		FieldType:    req.FieldType,
+		Options:      req.CustomFieldOptionsToDomain(),
+		OptionSource: optionSource,
+		IsRequired:   req.IsRequired,
+		UseInSearch:  req.UseInSearch,
+		Rows:         req.Rows,
 	})
 	if err != nil {
 		presenter.Error(w, r, err)
@@ -1890,13 +1900,21 @@ func (h *TaskHandler) UpdateCustomFieldDefinition(w http.ResponseWriter, r *http
 		return
 	}
 
+	if req.OptionSource != nil && *req.OptionSource != "" {
+		if !taskdom.ValidOptionSource(*req.OptionSource) {
+			presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid option_source"))
+			return
+		}
+	}
+
 	f, err := h.svc.UpdateCustomFieldDefinition(r.Context(), projectID, fieldID, taskdom.UpdateCustomFieldDefinitionInput{
-		DisplayName: req.DisplayName,
-		FieldType:   req.FieldType,
-		Options:     req.CustomFieldOptionsToDomain(),
-		IsRequired:  req.IsRequired,
-		UseInSearch: req.UseInSearch,
-		Rows:        req.Rows,
+		DisplayName:  req.DisplayName,
+		FieldType:    req.FieldType,
+		Options:      req.CustomFieldOptionsToDomain(),
+		OptionSource: req.OptionSource,
+		IsRequired:   req.IsRequired,
+		UseInSearch:  req.UseInSearch,
+		Rows:         req.Rows,
 	})
 	if err != nil {
 		presenter.Error(w, r, err)

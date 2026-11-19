@@ -2208,20 +2208,21 @@ func toTaskEntity(r *taskRecord) (*taskdom.Task, error) {
 // --- Custom Field Definitions -----------------------------------------------
 
 type customFieldDefinitionRecord struct {
-	ID          string    `db:"id"`
-	ProjectID   string    `db:"project_id"`
-	FieldKey    string    `db:"field_key"`
-	DisplayName string    `db:"display_name"`
-	FieldType   string    `db:"field_type"`
-	Options     []byte    `db:"options"`
-	IsRequired  bool      `db:"is_required"`
-	UseInSearch bool      `db:"use_in_search"`
-	Rows        int       `db:"rows"`
-	CreatedAt   time.Time `db:"created_at"`
-	UpdatedAt   time.Time `db:"updated_at"`
+	ID           string    `db:"id"`
+	ProjectID    string    `db:"project_id"`
+	FieldKey     string    `db:"field_key"`
+	DisplayName  string    `db:"display_name"`
+	FieldType    string    `db:"field_type"`
+	Options      []byte    `db:"options"`
+	OptionSource string    `db:"option_source"`
+	IsRequired   bool      `db:"is_required"`
+	UseInSearch  bool      `db:"use_in_search"`
+	Rows         int       `db:"rows"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
 }
 
-const customFieldCols = `id, project_id, field_key, display_name, field_type, options, is_required, use_in_search, rows, created_at, updated_at`
+const customFieldCols = `id, project_id, field_key, display_name, field_type, options, option_source, is_required, use_in_search, rows, created_at, updated_at`
 
 // ListCustomFieldDefinitions returns all custom field definitions for a project ordered by display_name.
 func (r *TaskRepository) ListCustomFieldDefinitions(ctx context.Context, projectID uuid.UUID) ([]*taskdom.CustomFieldDefinition, error) {
@@ -2259,11 +2260,15 @@ func (r *TaskRepository) CreateCustomFieldDefinition(ctx context.Context, f *tas
 	if err != nil {
 		return err
 	}
+	optionSource := f.OptionSource
+	if optionSource == "" {
+		optionSource = taskdom.OptionSourceManual
+	}
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO custom_field_definitions (id, project_id, field_key, display_name, field_type, options, is_required, use_in_search, rows, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		INSERT INTO custom_field_definitions (id, project_id, field_key, display_name, field_type, options, option_source, is_required, use_in_search, rows, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		f.ID.String(), f.ProjectID.String(), f.FieldKey, f.DisplayName,
-		string(f.FieldType), opts, f.IsRequired, f.UseInSearch, f.Rows, f.CreatedAt, f.UpdatedAt,
+		string(f.FieldType), opts, optionSource, f.IsRequired, f.UseInSearch, f.Rows, f.CreatedAt, f.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -2280,10 +2285,14 @@ func (r *TaskRepository) UpdateCustomFieldDefinition(ctx context.Context, f *tas
 	if err != nil {
 		return err
 	}
+	optionSource := f.OptionSource
+	if optionSource == "" {
+		optionSource = taskdom.OptionSourceManual
+	}
 	_, err = r.db.ExecContext(ctx, `
-		UPDATE custom_field_definitions SET display_name=$1, field_type=$2, options=$3, is_required=$4, use_in_search=$5, rows=$6, updated_at=$7
-		WHERE id=$8`,
-		f.DisplayName, string(f.FieldType), opts, f.IsRequired, f.UseInSearch, f.Rows, f.UpdatedAt, f.ID.String(),
+		UPDATE custom_field_definitions SET display_name=$1, field_type=$2, options=$3, option_source=$4, is_required=$5, use_in_search=$6, rows=$7, updated_at=$8
+		WHERE id=$9`,
+		f.DisplayName, string(f.FieldType), opts, optionSource, f.IsRequired, f.UseInSearch, f.Rows, f.UpdatedAt, f.ID.String(),
 	)
 	if err != nil {
 		return fmt.Errorf("custom field repo: update: %w", err)
@@ -2390,18 +2399,24 @@ func toCustomFieldEntity(r *customFieldDefinitionRecord) (*taskdom.CustomFieldDe
 		return nil, fmt.Errorf("custom field repo: unmarshal options: %w", err)
 	}
 
+	optionSource := r.OptionSource
+	if optionSource == "" {
+		optionSource = taskdom.OptionSourceManual
+	}
+
 	return &taskdom.CustomFieldDefinition{
-		ID:          id,
-		ProjectID:   pid,
-		FieldKey:    r.FieldKey,
-		DisplayName: r.DisplayName,
-		FieldType:   taskdom.FieldType(r.FieldType),
-		Options:     opts,
-		IsRequired:  r.IsRequired,
-		UseInSearch: r.UseInSearch,
-		Rows:        r.Rows,
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
+		ID:           id,
+		ProjectID:    pid,
+		FieldKey:     r.FieldKey,
+		DisplayName:  r.DisplayName,
+		FieldType:    taskdom.FieldType(r.FieldType),
+		Options:      opts,
+		OptionSource: optionSource,
+		IsRequired:   r.IsRequired,
+		UseInSearch:  r.UseInSearch,
+		Rows:         r.Rows,
+		CreatedAt:    r.CreatedAt,
+		UpdatedAt:    r.UpdatedAt,
 	}, nil
 }
 

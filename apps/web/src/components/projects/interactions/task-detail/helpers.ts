@@ -46,6 +46,7 @@ export function mapApiFieldToUi(
 		field_type: API_TO_UI_FIELD_TYPE[apiField.field_type] ?? "Text",
 		required: apiField.is_required,
 		options: apiField.options,
+		option_source: apiField.option_source,
 		rows: apiField.rows,
 	};
 }

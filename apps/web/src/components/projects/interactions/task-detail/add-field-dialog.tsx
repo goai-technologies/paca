@@ -70,6 +70,7 @@ export function AddFieldDialog({
 	const [fieldKey, setFieldKey] = useState("");
 	const [keyManual, setKeyManual] = useState(false);
 	const [fieldType, setFieldType] = useState<UiFieldType>("Text");
+	const [optionSource, setOptionSource] = useState<"manual" | "project_members">("manual");
 	const [required, setRequired] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
 
@@ -78,6 +79,7 @@ export function AddFieldDialog({
 		setFieldKey("");
 		setKeyManual(false);
 		setFieldType("Text");
+		setOptionSource("manual");
 		setRequired(false);
 		setSubmitting(false);
 	};
@@ -95,6 +97,10 @@ export function AddFieldDialog({
 					field_key: key,
 					field_type: apiFieldType,
 					is_required: required,
+					option_source:
+						fieldType === "Select" || fieldType === "MultiSelect"
+							? optionSource
+							: "manual",
 					options:
 						fieldType === "Select" || fieldType === "MultiSelect"
 							? []
@@ -119,6 +125,10 @@ export function AddFieldDialog({
 				field_key: key,
 				field_type: fieldType,
 				required,
+				option_source:
+					fieldType === "Select" || fieldType === "MultiSelect"
+						? optionSource
+						: "manual",
 				options: [],
 			});
 			reset();
@@ -222,6 +232,30 @@ export function AddFieldDialog({
 							onCheckedChange={setRequired}
 						/>
 					</div>
+
+					{/* Project Members Option Source toggle */}
+					{(fieldType === "Select" || fieldType === "MultiSelect") && (
+						<div className="flex items-center justify-between rounded-xl border border-border/20 bg-muted/15 px-4 py-3">
+							<div className="space-y-0.5">
+								<Label
+									htmlFor="add-field-option-source"
+									className="font-medium text-xs"
+								>
+									{t("settings.customFields.optionSourceProjectMembers")}
+								</Label>
+								<p className="text-[11px] text-muted-foreground/70">
+									{t("settings.customFields.optionSourceProjectMembersHint")}
+								</p>
+							</div>
+							<Switch
+								id="add-field-option-source"
+								checked={optionSource === "project_members"}
+								onCheckedChange={(checked) =>
+									setOptionSource(checked ? "project_members" : "manual")
+								}
+							/>
+						</div>
+					)}
 				</div>
 
 				<DialogFooter>
