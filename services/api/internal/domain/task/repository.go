@@ -103,6 +103,16 @@ type TaskRepository interface {
 	// the caller does in between (e.g. a slow external API call).
 	UpdateTaskAtomic(ctx context.Context, id uuid.UUID, decide func(current *Task) (*Task, error)) (*Task, error)
 	DeleteTask(ctx context.Context, id uuid.UUID) error
+	// MoveTaskTreeToProject relocates rootTaskID and every descendant whose
+	// parent chain stays inside sourceProjectID into targetProjectID. Same
+	// task ids are kept; each gets a new task_number; type/status are matched
+	// by name (else destination defaults); sprint is cleared; assignees/
+	// reporter are remapped by account when the account is a member of the
+	// target (else dropped); follow-up project_id rows are updated; view
+	// positions are dropped; cross-set task_links are deleted. The root's
+	// parent_task_id is cleared when its parent is outside the moved set.
+	// Returns the relocated root task.
+	MoveTaskTreeToProject(ctx context.Context, sourceProjectID, rootTaskID, targetProjectID uuid.UUID) (*Task, error)
 	// BulkMoveSprintTasks reassigns all non-done tasks in sourceSprintID to
 	// targetSprintID. A nil targetSprintID moves tasks to the backlog (sprint_id = NULL).
 	// Tasks whose status has category "done" are not moved.

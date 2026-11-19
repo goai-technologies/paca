@@ -1401,6 +1401,17 @@
 				"description": "This permanently deletes \"{{title}}\" and all of its data. This action cannot be undone.",
 				"cancel": "Cancel",
 				"delete": "Delete"
+			},
+			"moveToProject": "Move to project",
+			"moveDialog": {
+				"title": "Move task to another project?",
+				"description": "\"{{title}}\" and its subtasks will move to the selected project. Comments, attachments, and history are kept. The task id prefix/number may change. Sprint and cross-project links are cleared.",
+				"searchPlaceholder": "Search projects…",
+				"noProjects": "No other projects available",
+				"cancel": "Cancel",
+				"confirm": "Move",
+				"moving": "Moving…",
+				"error": "Could not move the task. Try again."
 			}
 		},
 		"properties": {
@@ -1614,7 +1625,9 @@
 			"madeChange": "made a change",
 			"descriptionChangeDiff": "Description change diff",
 			"autoAssignSkippedLowConfidence": "couldn't confidently pick an assignee ({{confidence}}% confidence) — left the task unassigned",
-			"autoAssignSkipped": "skipped auto-assign — left the task unassigned"
+			"autoAssignSkipped": "skipped auto-assign — left the task unassigned",
+			"moved": "moved this task to another project",
+			"movedFromTo": "moved this task from \"{{from}}\" to \"{{to}}\""
 		},
 		"searchableList": {
 			"searchPlaceholder": "Search…",

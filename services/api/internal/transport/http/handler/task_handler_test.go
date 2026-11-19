@@ -311,6 +311,19 @@ func (f *fakeTaskSvc) DeleteTask(_ context.Context, _, id uuid.UUID) error {
 	return nil
 }
 
+func (f *fakeTaskSvc) MoveToProject(_ context.Context, sourceProjectID, taskID, targetProjectID uuid.UUID) (*taskdom.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tasks[taskID]
+	if !ok || t.ProjectID != sourceProjectID {
+		return nil, taskdom.ErrTaskNotFound
+	}
+	cp := *t
+	cp.ProjectID = targetProjectID
+	f.tasks[taskID] = &cp
+	return &cp, nil
+}
+
 // -- CustomFieldDefinitionService --
 
 func (f *fakeTaskSvc) ListCustomFieldDefinitions(_ context.Context, _ uuid.UUID) ([]*taskdom.CustomFieldDefinition, error) {

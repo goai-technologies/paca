@@ -1000,6 +1000,39 @@ func (s *Service) DeleteTask(ctx context.Context, projectID, id uuid.UUID) error
 	return s.repo.DeleteTask(ctx, id)
 }
 
+// MoveToProject relocates the task and its descendant subtask tree into
+// targetProjectID. See taskdom.TaskService.MoveToProject.
+func (s *Service) MoveToProject(ctx context.Context, sourceProjectID, taskID, targetProjectID uuid.UUID) (*taskdom.Task, error) {
+	if sourceProjectID == targetProjectID {
+		return nil, taskdom.ErrTaskMoveSameProject
+	}
+	if locked, err := s.isCommitmentsProject(ctx, sourceProjectID); err != nil {
+		return nil, err
+	} else if locked {
+		return nil, taskdom.ErrTaskMoveCommitmentsProject
+	}
+	if locked, err := s.isCommitmentsProject(ctx, targetProjectID); err != nil {
+		return nil, err
+	} else if locked {
+		return nil, taskdom.ErrTaskMoveCommitmentsProject
+	}
+	live, err := s.repo.ProjectIsLive(ctx, targetProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if !live {
+		return nil, taskdom.ErrTaskMoveTargetNotFound
+	}
+	t, err := s.repo.FindTaskByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if t.ProjectID != sourceProjectID {
+		return nil, taskdom.ErrTaskNotFound
+	}
+	return s.repo.MoveTaskTreeToProject(ctx, sourceProjectID, taskID, targetProjectID)
+}
+
 // --- Custom Field Definitions -----------------------------------------------
 
 // ListCustomFieldDefinitions returns all custom field definitions for a project.

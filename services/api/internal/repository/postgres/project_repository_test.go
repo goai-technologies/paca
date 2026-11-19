@@ -171,3 +171,41 @@ func TestProjectRepository_List_ExcludesSoftDeleted(t *testing.T) {
 		t.Errorf("expected only alive project %s, got %v", alive.ID, ids)
 	}
 }
+
+func TestProjectRepository_List_OrdersByNameCaseInsensitive(t *testing.T) {
+	db := openProjectRepoTestDB(t)
+	repo := NewProjectRepository(db)
+	ctx := context.Background()
+
+	// Insert out of alphabetical / creation order to prove List sorts by name.
+	type named struct {
+		name   string
+		prefix string
+	}
+	projects := []named{{"Zebra", "ZEB"}, {"alpha", "ALP"}, {"Beta", "BET"}}
+	for i, np := range projects {
+		p := testProject(uuid.New(), np.prefix)
+		p.Name = np.name
+		p.CreatedAt = time.Now().UTC().Truncate(time.Second).Add(time.Duration(i) * time.Second)
+		if err := repo.Create(ctx, p, projectdom.ProjectSetup{}); err != nil {
+			t.Fatalf("Create %s: %v", np.name, err)
+		}
+	}
+
+	got, total, err := repo.List(ctx, 0, 10)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("expected total 3, got %d", total)
+	}
+	want := []string{"alpha", "Beta", "Zebra"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d projects, got %d", len(want), len(got))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("List[%d] = %q, want %q", i, got[i].Name, name)
+		}
+	}
+}

@@ -638,6 +638,7 @@ func New(deps Deps) http.Handler {
 					r.With(require.ProjectEntity("task", "taskId", resTask, iam.ActionTasksRead)).Get("/{taskId}", deps.Task.GetTask)
 					r.With(require.ProjectEntity("task", "taskId", resTask, iam.ActionTasksWrite), require.TaskChange()).Patch("/{taskId}", deps.Task.UpdateTask)
 					r.With(require.ProjectEntity("task", "taskId", resTask, iam.ActionTasksWrite)).Delete("/{taskId}", deps.Task.DeleteTask)
+					r.With(require.ProjectEntity("task", "taskId", resTask, iam.ActionTasksWrite)).Post("/{taskId}/move", deps.Task.MoveTask)
 
 					if deps.Agent != nil {
 						r.With(require.ProjectEntity("task", "taskId", resTask, iam.ActionTasksWrite)).Post("/{taskId}/write-with-ai", deps.Agent.WriteTaskDescriptionWithAI)

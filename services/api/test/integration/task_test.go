@@ -523,6 +523,10 @@ func (r *fakeTaskRepo) UpdateTaskAtomic(_ context.Context, id uuid.UUID, decide 
 	return next, nil
 }
 
+func (r *fakeTaskRepo) MoveTaskTreeToProject(_ context.Context, _, _, _ uuid.UUID) (*taskdom.Task, error) {
+	return nil, nil
+}
+
 func (r *fakeTaskRepo) DeleteTask(_ context.Context, id uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -43,6 +43,7 @@ type TaskHandler struct {
 	avatarSvc       attachmentdom.AvatarService
 	notificationSvc notificationdom.Service
 	autofillRepo    taskdom.AutofillRepository
+	authorizer      *iam.Authorizer
 }
 
 // NewTaskHandler returns a TaskHandler wired to the task service, view service,
@@ -89,6 +90,12 @@ func WithTaskNotificationService(svc notificationdom.Service) TaskHandlerOption 
 	}
 }
 
+// WithTaskAuthorizer wires IAM checks that span a second project (e.g. move
+// destination tasks:write). Without it, MoveTask denies the target check.
+func WithTaskAuthorizer(a *iam.Authorizer) TaskHandlerOption {
+	return func(h *TaskHandler) { h.authorizer = a }
+}
+
 // toActivityResponse maps a to an ActivityResponse and, if an AvatarService
 // is configured, resolves the actor's avatar keys into presigned display URLs.
 func (h *TaskHandler) toActivityResponse(ctx context.Context, a *taskdom.Activity) dto.ActivityResponse {
@@ -116,6 +123,8 @@ type projectServiceForAssigned interface {
 	// ListMembers is used to resolve the people behind a page of tasks
 	// when a list request asks for include=assignees,reporter.
 	ListMembers(ctx context.Context, projectID uuid.UUID, limit int, cursorAfter *string, filter projectdom.MemberFilter) ([]*projectdom.ProjectMember, bool, error)
+	// GetByID resolves a project name for activity copy (e.g. task.moved).
+	GetByID(ctx context.Context, id uuid.UUID) (*projectdom.Project, error)
 }
 
 // WithTaskAssignedProjectService wires the project service used by
@@ -1586,6 +1595,88 @@ func (h *TaskHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	presenter.OK(w, r, map[string]any{"message": "task deleted"})
+}
+
+// MoveTask handles POST /projects/:projectId/tasks/:taskId/move.
+// Source tasks:write is enforced by route middleware; this handler also
+// requires tasks:write on the target project collection.
+func (h *TaskHandler) MoveTask(w http.ResponseWriter, r *http.Request) {
+	projectID, err := parseProjectID(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	taskID, err := parseTaskID(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	var req dto.MoveTaskToProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid request body"))
+		return
+	}
+	if req.TargetProjectID == uuid.Nil {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "target_project_id is required"))
+		return
+	}
+
+	if h.authorizer == nil {
+		presenter.Error(w, r, apierr.New(apierr.CodeForbidden, "not allowed to move tasks into the target project"))
+		return
+	}
+	p, err := middleware.IAMPrincipalFrom(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	targetResource := "project/" + req.TargetProjectID.String() + "/task/*"
+	authRes, err := h.authorizer.Authorize(r.Context(), p, string(iam.ActionTasksWrite), targetResource)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	if !authRes.Allowed {
+		presenter.Error(w, r, apierr.New(apierr.CodeForbidden, "not allowed to move tasks into the target project"))
+		return
+	}
+
+	moved, err := h.svc.MoveToProject(r.Context(), projectID, taskID, req.TargetProjectID)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+
+	if actorID, ok := middleware.ActorIDFromContext(r.Context()); ok {
+		agentID, _ := middleware.AgentIDFromContext(r.Context())
+		var agentIDPtr *uuid.UUID
+		if agentID != uuid.Nil {
+			agentIDPtr = &agentID
+		}
+		payload := map[string]string{
+			"from_project_id": projectID.String(),
+			"to_project_id":   req.TargetProjectID.String(),
+		}
+		if h.projectSvc != nil {
+			if from, err := h.projectSvc.GetByID(r.Context(), projectID); err == nil && from != nil {
+				payload["from_project_name"] = from.Name
+			}
+			if to, err := h.projectSvc.GetByID(r.Context(), req.TargetProjectID); err == nil && to != nil {
+				payload["to_project_name"] = to.Name
+			}
+		}
+		content, _ := json.Marshal(payload)
+		_ = h.activitySvc.RecordActivity(r.Context(), taskdom.RecordActivityInput{
+			TaskID:       taskID,
+			ProjectID:    req.TargetProjectID,
+			ActorID:      &actorID,
+			ActorAgentID: agentIDPtr,
+			ActivityType: taskdom.ActivityTypeTaskMoved,
+			Content:      content,
+		})
+	}
+
+	presenter.OK(w, r, dto.TaskFromEntity(moved))
 }
 
 // --- helpers ----------------------------------------------------------------
