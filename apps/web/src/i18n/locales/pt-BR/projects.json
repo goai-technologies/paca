@@ -2420,7 +2420,18 @@
 		},
 		"timeline": {
 			"title": "Linha do tempo",
-			"description": "Épicos e planejamento de longo prazo em um gráfico de Gantt."
+			"description": "Épicos e planejamento de longo prazo em um gráfico de Gantt.",
+			"sortByLabel": "Ordenar por",
+			"sortAscending": "Crescente",
+			"sortDescending": "Decrescente",
+			"sortOptions": {
+				"cardId": "ID do cartão",
+				"priority": "Prioridade",
+				"status": "Status",
+				"createdAt": "Data de criação",
+				"updatedAt": "Data de atualização",
+				"assignee": "Responsável"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "Sprint não encontrado ou acesso negado.",

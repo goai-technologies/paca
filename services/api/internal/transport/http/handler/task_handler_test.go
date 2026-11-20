@@ -1271,9 +1271,9 @@ func TestTaskHandler_CreateTask_CreatedByUserID_OverridesActor(t *testing.T) {
 	w := doTaskRequestWithActor(r, http.MethodPost,
 		fmt.Sprintf("/projects/%s/tasks", projectID),
 		map[string]any{
-			"title":               "Garuda-attributed task",
-			"created_by_user_id":  alice.String(),
-			"assignee_ids":        []string{uuid.New().String()},
+			"title":              "Garuda-attributed task",
+			"created_by_user_id": alice.String(),
+			"assignee_ids":       []string{uuid.New().String()},
 		},
 		authActor,
 	)

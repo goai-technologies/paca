@@ -1761,6 +1761,33 @@ func TestViewService_BulkMoveTasks_WrongProject_ReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestViewService_UserViewConfig_SortDirection(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeViewRepo()
+	svc := sprintsvc.NewViewService(repo, permissiveSprintRepo{}, permissiveTaskRepo{}, nil)
+
+	projectID := uuid.New()
+	userA := uuid.New()
+	view := seedProjectView(t, svc, projectID, sprintdom.ViewConfig{SortBy: "card_id", SortDirection: "asc"})
+
+	personal := sprintdom.ViewConfig{SortBy: "created_at", SortDirection: "desc"}
+	got, err := svc.SetUserViewConfig(ctx, projectID, view.ID, userA, personal)
+	if err != nil {
+		t.Fatalf("SetUserViewConfig: %v", err)
+	}
+	if got.Config.SortDirection != "desc" {
+		t.Errorf("returned view config sort_direction = %q, want 'desc'", got.Config.SortDirection)
+	}
+
+	shared, err := repo.FindViewByID(ctx, view.ID)
+	if err != nil {
+		t.Fatalf("FindViewByID: %v", err)
+	}
+	if shared.Config.SortDirection != "asc" {
+		t.Errorf("shared sort_direction leaked: got %q, want 'asc'", shared.Config.SortDirection)
+	}
+}
+
 func (permissiveTaskRepo) ListCommitmentWork(context.Context, uuid.UUID) ([]*taskdom.Task, error) {
 	return nil, nil
 }

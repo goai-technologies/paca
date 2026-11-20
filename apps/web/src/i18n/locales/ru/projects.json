@@ -2440,7 +2440,18 @@
 		},
 		"timeline": {
 			"title": "Таймлайн",
-			"description": "Эпики и долгосрочное планирование на диаграмме Ганта."
+			"description": "Эпики и долгосрочное планирование на диаграмме Ганта.",
+			"sortByLabel": "Сортировка",
+			"sortAscending": "По возрастанию",
+			"sortDescending": "По убыванию",
+			"sortOptions": {
+				"cardId": "ID карточки",
+				"priority": "Приоритет",
+				"status": "Статус",
+				"createdAt": "Дата создания",
+				"updatedAt": "Дата изменения",
+				"assignee": "Исполнитель"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "Спринт не найден или доступ запрещён.",
