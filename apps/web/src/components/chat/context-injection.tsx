@@ -209,7 +209,6 @@ function ContextPickerDialog({
 						<Search />
 					</InputGroupAddon>
 					<InputGroupInput
-						// biome-ignore lint/a11y/noAutofocus: the search box is the point of opening the dialog
 						autoFocus
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}

@@ -27,9 +27,9 @@ var (
 	ErrStatusInUseByAutomation = errors.New("task status: still referenced by an automation")
 	ErrStatusIsDefault         = errors.New("task status: the default status cannot be deleted")
 
-	ErrCustomFieldNotFound    = errors.New("custom field: not found")
-	ErrCustomFieldKeyInvalid  = errors.New("custom field: key is empty or invalid")
-	ErrCustomFieldKeyTaken    = errors.New("custom field: key already in use within project")
+	ErrCustomFieldNotFound            = errors.New("custom field: not found")
+	ErrCustomFieldKeyInvalid          = errors.New("custom field: key is empty or invalid")
+	ErrCustomFieldKeyTaken            = errors.New("custom field: key already in use within project")
 	ErrCustomFieldTypeInvalid         = errors.New("custom field: invalid field type")
 	ErrCustomFieldNameInvalid         = errors.New("custom field: display name is empty or invalid")
 	ErrCustomFieldOptionSourceInvalid = errors.New("custom field: invalid option source")

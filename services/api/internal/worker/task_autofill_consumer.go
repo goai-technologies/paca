@@ -1,4 +1,3 @@
-
 package worker
 
 import (

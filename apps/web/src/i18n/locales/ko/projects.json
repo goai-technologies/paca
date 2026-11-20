@@ -1401,7 +1401,13 @@
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
 			},
 			"rowsLabel": "표시 줄 수",
-			"rowsHint": "편집 시 표시되는 줄 수({{min}}–{{max}})."
+			"rowsHint": "편집 시 표시되는 줄 수({{min}}–{{max}}).",
+			"optionSourceLabel": "옵션 출처",
+			"optionSourceManual": "사용자 지정 옵션",
+			"optionSourceProjectMembers": "프로젝트 팀 / 멤버",
+			"optionSourceProjectMembersHint": "이 프로젝트의 모든 활성 팀 멤버를 선택 가능한 옵션으로 자동 제공합니다.",
+			"optionSourceTeamBadge": "팀",
+			"populateFromMembers": "프로젝트 멤버 추가"
 		},
 		"jev": {
 			"title": "Jev AI",

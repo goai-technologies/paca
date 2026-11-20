@@ -70,7 +70,9 @@ export function AddFieldDialog({
 	const [fieldKey, setFieldKey] = useState("");
 	const [keyManual, setKeyManual] = useState(false);
 	const [fieldType, setFieldType] = useState<UiFieldType>("Text");
-	const [optionSource, setOptionSource] = useState<"manual" | "project_members">("manual");
+	const [optionSource, setOptionSource] = useState<
+		"manual" | "project_members"
+	>("manual");
 	const [required, setRequired] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
 

@@ -1401,7 +1401,13 @@
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
 			},
 			"rowsLabel": "Lignes visibles",
-			"rowsHint": "Nombre de lignes affichées lors de la modification ({{min}}–{{max}})."
+			"rowsHint": "Nombre de lignes affichées lors de la modification ({{min}}–{{max}}).",
+			"optionSourceLabel": "Source des options",
+			"optionSourceManual": "Options personnalisées",
+			"optionSourceProjectMembers": "Équipe / membres du projet",
+			"optionSourceProjectMembersHint": "Propose automatiquement tous les membres actifs de l'équipe du projet sous forme d'options sélectionnables.",
+			"optionSourceTeamBadge": "Équipe",
+			"populateFromMembers": "Ajouter des membres du projet"
 		},
 		"jev": {
 			"title": "Jev IA",

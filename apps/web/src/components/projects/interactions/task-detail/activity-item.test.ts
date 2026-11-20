@@ -58,7 +58,9 @@ describe("describeTaskChange with custom fields", () => {
 			emptyNames,
 			mockT as never,
 		);
-		expect(result).toMatch(/^changed Development Completion Date from .+ to .+/);
+		expect(result).toMatch(
+			/^changed Development Completion Date from .+ to .+/,
+		);
 		expect(result).toContain("2026");
 	});
 
@@ -107,4 +109,3 @@ describe("describeTaskChange with custom fields", () => {
 		expect(result).toBe("updated custom fields");
 	});
 });
-

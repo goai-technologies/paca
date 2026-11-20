@@ -1095,18 +1095,18 @@ func (s *Service) CreateCustomFieldDefinition(ctx context.Context, in taskdom.Cr
 
 	now := time.Now()
 	f := &taskdom.CustomFieldDefinition{
-		ID:          uuid.New(),
-		ProjectID:   in.ProjectID,
-		FieldKey:    fieldKey,
-		DisplayName: displayName,
-		FieldType:   in.FieldType,
-		Options:     opts,
+		ID:           uuid.New(),
+		ProjectID:    in.ProjectID,
+		FieldKey:     fieldKey,
+		DisplayName:  displayName,
+		FieldType:    in.FieldType,
+		Options:      opts,
 		OptionSource: optionSource,
-		IsRequired:  in.IsRequired,
-		UseInSearch: in.UseInSearch,
-		Rows:        rows,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		IsRequired:   in.IsRequired,
+		UseInSearch:  in.UseInSearch,
+		Rows:         rows,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	if err := s.repo.CreateCustomFieldDefinition(ctx, f); err != nil {

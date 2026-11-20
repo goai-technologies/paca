@@ -1401,7 +1401,13 @@
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
 			},
 			"rowsLabel": "表示行数",
-			"rowsHint": "編集時に表示する行数（{{min}}〜{{max}}）。"
+			"rowsHint": "編集時に表示する行数（{{min}}〜{{max}}）。",
+			"optionSourceLabel": "選択肢のソース",
+			"optionSourceManual": "カスタム選択肢",
+			"optionSourceProjectMembers": "プロジェクトチーム / メンバー",
+			"optionSourceProjectMembersHint": "このプロジェクトのアクティブな全チームメンバーを選択肢として自動的に提供します。",
+			"optionSourceTeamBadge": "チーム",
+			"populateFromMembers": "プロジェクトメンバーを追加"
 		},
 		"jev": {
 			"title": "Jev AI",
