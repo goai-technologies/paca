@@ -2266,6 +2266,11 @@
 			"renameView": "Renomear visão",
 			"deleteView": "Excluir visão",
 			"searchTasksPlaceholder": "Buscar tarefas…",
+			"export": "Exportar",
+			"exporting": "Exportando…",
+			"exportProject": "Baixar tarefas do projeto (Commitment, Effort, Priority, QA, Dev)",
+			"exportReady": "{{count}} tarefas exportadas",
+			"exportFailed": "Não foi possível exportar as tarefas. Tente novamente.",
 			"pluginNotAvailable": "Plugin não disponível",
 			"columnsTruncated": "Somente as primeiras {{max}} colunas são exibidas; algumas tarefas não estão em nenhuma coluna. Restrinja a visualização com um filtro para ver o restante.",
 			"viewErrors": {
