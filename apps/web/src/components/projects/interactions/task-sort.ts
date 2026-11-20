@@ -25,7 +25,6 @@ export const TIMELINE_SORT_OPTIONS: {
 	key: TimelineSortField;
 	labelKey: string;
 }[] = [
-	{ key: "manual", labelKey: "layout.timeline.sortOptions.manual" },
 	{ key: "card_id", labelKey: "layout.timeline.sortOptions.cardId" },
 	{ key: "priority", labelKey: "layout.timeline.sortOptions.priority" },
 	{ key: "status", labelKey: "layout.timeline.sortOptions.status" },

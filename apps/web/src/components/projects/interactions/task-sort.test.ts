@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Task } from "@/lib/interaction-api";
 import type { ProjectMember, TaskStatus } from "@/lib/project-api";
-import { sortTasks } from "./task-sort";
+import { sortTasks, TIMELINE_SORT_OPTIONS } from "./task-sort";
 
 function mockTask(partial: Partial<Task>): Task {
 	return {
@@ -19,10 +19,24 @@ function mockTask(partial: Partial<Task>): Task {
 }
 
 describe("task-sort", () => {
+	it("does not include manual in dropdown sort options", () => {
+		const keys = TIMELINE_SORT_OPTIONS.map((opt) => opt.key);
+		expect(keys).not.toContain("manual");
+		expect(keys).toEqual([
+			"card_id",
+			"priority",
+			"status",
+			"created_at",
+			"updated_at",
+			"assignee",
+		]);
+	});
+
 	it("returns identical order when field is manual or empty", () => {
 		const t1 = mockTask({ id: "1", task_number: 10 });
 		const t2 = mockTask({ id: "2", task_number: 5 });
 		expect(sortTasks([t1, t2], "manual")).toEqual([t1, t2]);
+		expect(sortTasks([t1, t2], "")).toEqual([t1, t2]);
 		expect(sortTasks([t1, t2], undefined)).toEqual([t1, t2]);
 	});
 

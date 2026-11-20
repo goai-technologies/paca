@@ -2424,7 +2424,6 @@
 			"sortAscending": "升序",
 			"sortDescending": "降序",
 			"sortOptions": {
-				"manual": "手动",
 				"cardId": "卡片 ID",
 				"priority": "优先级",
 				"status": "状态",

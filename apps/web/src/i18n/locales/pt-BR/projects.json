@@ -2425,7 +2425,6 @@
 			"sortAscending": "Crescente",
 			"sortDescending": "Decrescente",
 			"sortOptions": {
-				"manual": "Manual",
 				"cardId": "ID do cartão",
 				"priority": "Prioridade",
 				"status": "Status",

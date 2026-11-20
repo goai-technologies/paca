@@ -2424,7 +2424,6 @@
 			"sortAscending": "오름차순",
 			"sortDescending": "내림차순",
 			"sortOptions": {
-				"manual": "수동",
 				"cardId": "카드 ID",
 				"priority": "우선순위",
 				"status": "상태",
