@@ -1401,7 +1401,13 @@
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
 			},
 			"rowsLabel": "표시 줄 수",
-			"rowsHint": "편집 시 표시되는 줄 수({{min}}–{{max}})."
+			"rowsHint": "편집 시 표시되는 줄 수({{min}}–{{max}}).",
+			"optionSourceLabel": "옵션 출처",
+			"optionSourceManual": "사용자 지정 옵션",
+			"optionSourceProjectMembers": "프로젝트 팀 / 멤버",
+			"optionSourceProjectMembersHint": "이 프로젝트의 모든 활성 팀 멤버를 선택 가능한 옵션으로 자동 제공합니다.",
+			"optionSourceTeamBadge": "팀",
+			"populateFromMembers": "프로젝트 멤버 추가"
 		},
 		"jev": {
 			"title": "Jev AI",
@@ -2419,7 +2425,18 @@
 		},
 		"timeline": {
 			"title": "타임라인",
-			"description": "간트 차트에서 에픽과 장기 계획을 관리하세요."
+			"description": "간트 차트에서 에픽과 장기 계획을 관리하세요.",
+			"sortByLabel": "정렬 기준",
+			"sortAscending": "오름차순",
+			"sortDescending": "내림차순",
+			"sortOptions": {
+				"cardId": "카드 ID",
+				"priority": "우선순위",
+				"status": "상태",
+				"createdAt": "생성일",
+				"updatedAt": "수정일",
+				"assignee": "담당자"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "스프린트를 찾을 수 없거나 접근 권한이 없습니다.",

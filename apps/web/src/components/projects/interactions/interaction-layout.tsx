@@ -2282,6 +2282,22 @@ export function InteractionLayout({
 						onMoveToColumn={canEdit ? handleMoveToColumn : undefined}
 						onRescheduleTask={canEdit ? handleRescheduleTask : undefined}
 						zoom={activeViewConfig?.gantt_zoom}
+						sortBy={activeViewConfig?.sort_by}
+						sortDirection={activeViewConfig?.sort_direction}
+						onSortChange={
+							isRealView && activeView
+								? (newSortBy: string, direction: "asc" | "desc") =>
+										updateViewConfigMutation.mutate({
+											viewId: activeView.id,
+											config: {
+												...(activeView.config ?? {}),
+												sort_by: newSortBy,
+												sort_direction: direction,
+											},
+										})
+								: undefined
+						}
+						taskIdPrefix={taskIdPrefix}
 						onZoomChange={
 							isRealView && activeView
 								? (zoom: GanttZoom) =>

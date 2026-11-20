@@ -216,6 +216,7 @@ export interface ViewConfig {
 	column_by?: string;
 	swimlanes?: string;
 	sort_by?: string;
+	sort_direction?: "asc" | "desc";
 	field_sum?: string;
 	slice_by?: string;
 	filters?: ViewFilters;

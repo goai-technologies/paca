@@ -221,6 +221,7 @@ type ViewConfig struct {
 	ColumnBy         string       `json:"column_by,omitempty"`
 	Swimlanes        string       `json:"swimlanes,omitempty"`
 	SortBy           string       `json:"sort_by,omitempty"`
+	SortDirection    string       `json:"sort_direction,omitempty"`
 	FieldSum         string       `json:"field_sum,omitempty"`
 	SliceBy          string       `json:"slice_by,omitempty"`
 	Filters          *ViewFilters `json:"filters,omitempty"`

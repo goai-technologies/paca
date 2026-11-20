@@ -49,6 +49,7 @@ type ViewConfigDTO struct {
 	ColumnBy         string          `json:"column_by,omitempty"`
 	Swimlanes        string          `json:"swimlanes,omitempty"`
 	SortBy           string          `json:"sort_by,omitempty"`
+	SortDirection    string          `json:"sort_direction,omitempty"`
 	FieldSum         string          `json:"field_sum,omitempty"`
 	SliceBy          string          `json:"slice_by,omitempty"`
 	Filters          *ViewFiltersDTO `json:"filters,omitempty"`
@@ -102,6 +103,7 @@ func viewConfigToDTO(cfg sprintdom.ViewConfig) ViewConfigDTO {
 		ColumnBy:          cfg.ColumnBy,
 		Swimlanes:         cfg.Swimlanes,
 		SortBy:            cfg.SortBy,
+		SortDirection:     cfg.SortDirection,
 		FieldSum:          cfg.FieldSum,
 		SliceBy:           cfg.SliceBy,
 		Filters:           cfg.Filters,
@@ -151,6 +153,7 @@ func toViewConfig(d *ViewConfigDTO) sprintdom.ViewConfig {
 		ColumnBy:          d.ColumnBy,
 		Swimlanes:         d.Swimlanes,
 		SortBy:            d.SortBy,
+		SortDirection:     d.SortDirection,
 		FieldSum:          d.FieldSum,
 		SliceBy:           d.SliceBy,
 		Filters:           d.Filters,

@@ -1415,7 +1415,13 @@
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
 			},
 			"rowsLabel": "Видимые строки",
-			"rowsHint": "Количество строк при редактировании ({{min}}–{{max}})."
+			"rowsHint": "Количество строк при редактировании ({{min}}–{{max}}).",
+			"optionSourceLabel": "Источник вариантов",
+			"optionSourceManual": "Пользовательские варианты",
+			"optionSourceProjectMembers": "Команда / участники проекта",
+			"optionSourceProjectMembersHint": "Автоматически предлагает всех активных участников этого проекта в качестве вариантов выбора.",
+			"optionSourceTeamBadge": "Команда",
+			"populateFromMembers": "Добавить участников проекта"
 		},
 		"jev": {
 			"title": "Jev ИИ",
@@ -2440,7 +2446,18 @@
 		},
 		"timeline": {
 			"title": "Таймлайн",
-			"description": "Эпики и долгосрочное планирование на диаграмме Ганта."
+			"description": "Эпики и долгосрочное планирование на диаграмме Ганта.",
+			"sortByLabel": "Сортировка",
+			"sortAscending": "По возрастанию",
+			"sortDescending": "По убыванию",
+			"sortOptions": {
+				"cardId": "ID карточки",
+				"priority": "Приоритет",
+				"status": "Статус",
+				"createdAt": "Дата создания",
+				"updatedAt": "Дата изменения",
+				"assignee": "Исполнитель"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "Спринт не найден или доступ запрещён.",

@@ -549,6 +549,9 @@ func mergeViewConfig(shared, override sprintdom.ViewConfig) sprintdom.ViewConfig
 	if override.SortBy != "" {
 		out.SortBy = override.SortBy
 	}
+	if override.SortDirection != "" {
+		out.SortDirection = override.SortDirection
+	}
 	if override.FieldSum != "" {
 		out.FieldSum = override.FieldSum
 	}
@@ -598,6 +601,9 @@ func diffViewConfig(shared, desired sprintdom.ViewConfig) sprintdom.ViewConfig {
 	}
 	if desired.SortBy != shared.SortBy {
 		out.SortBy = desired.SortBy
+	}
+	if desired.SortDirection != shared.SortDirection {
+		out.SortDirection = desired.SortDirection
 	}
 	if desired.FieldSum != shared.FieldSum {
 		out.FieldSum = desired.FieldSum

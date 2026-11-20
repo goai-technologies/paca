@@ -1356,6 +1356,12 @@
 			"fieldTypeLabel": "Field type",
 			"fieldTypeImmutableHint": "Field type cannot be changed after creation.",
 			"optionsLabel": "Options",
+			"optionSourceLabel": "Option source",
+			"optionSourceManual": "Custom options",
+			"optionSourceProjectMembers": "Project team / members",
+			"optionSourceProjectMembersHint": "Automatically offers all active team members in this project as selectable options.",
+			"optionSourceTeamBadge": "Team",
+			"populateFromMembers": "Add project members",
 			"addOptionPlaceholder": "Add option…",
 			"addOption": "Add",
 			"optionColorLabel": "Option color",
@@ -2420,7 +2426,18 @@
 		},
 		"timeline": {
 			"title": "Timeline",
-			"description": "Epics and long-horizon planning on a Gantt chart."
+			"description": "Epics and long-horizon planning on a Gantt chart.",
+			"sortByLabel": "Sort by",
+			"sortAscending": "Ascending",
+			"sortDescending": "Descending",
+			"sortOptions": {
+				"cardId": "Card ID",
+				"priority": "Priority",
+				"status": "Status",
+				"createdAt": "Created Date",
+				"updatedAt": "Updated Date",
+				"assignee": "Assignee"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "Sprint not found or access denied.",

@@ -430,10 +430,14 @@ export const BUILTIN_COLUMN_BY = [
 
 export const BUILTIN_SORT_BY = [
 	{ key: "manual", labelKey: "viewUtils.sortBy.manual" },
+	{ key: "card_id", labelKey: "layout.timeline.sortOptions.cardId" },
 	{ key: "importance", labelKey: "viewUtils.sortBy.importance" },
+	{ key: "status", labelKey: "layout.timeline.sortOptions.status" },
+	{ key: "created", labelKey: "viewUtils.sortBy.created" },
+	{ key: "updated_at", labelKey: "layout.timeline.sortOptions.updatedAt" },
+	{ key: "assignee", labelKey: "layout.timeline.sortOptions.assignee" },
 	{ key: "story_points", labelKey: "viewUtils.sortBy.storyPoints" },
 	{ key: "title", labelKey: "viewUtils.sortBy.title" },
-	{ key: "created", labelKey: "viewUtils.sortBy.created" },
 	{ key: "start_date", labelKey: "viewUtils.sortBy.startDate" },
 	{ key: "due_date", labelKey: "viewUtils.sortBy.dueDate" },
 ] as const satisfies { key: string; labelKey: string }[];

@@ -258,23 +258,25 @@ type CustomFieldDefinitionService interface {
 // CreateCustomFieldDefinitionInput carries fields required to create a custom
 // field definition.
 type CreateCustomFieldDefinitionInput struct {
-	ProjectID   uuid.UUID
-	FieldKey    string
-	DisplayName string
-	FieldType   FieldType
-	Options     []CustomFieldOption
-	IsRequired  bool
-	UseInSearch bool
-	Rows        int
+	ProjectID    uuid.UUID
+	FieldKey     string
+	DisplayName  string
+	FieldType    FieldType
+	Options      []CustomFieldOption
+	OptionSource string
+	IsRequired   bool
+	UseInSearch  bool
+	Rows         int
 }
 
 // UpdateCustomFieldDefinitionInput carries mutable custom field definition
 // fields.
 type UpdateCustomFieldDefinitionInput struct {
-	DisplayName string
-	FieldType   *FieldType
-	Options     []CustomFieldOption
-	IsRequired  *bool
-	UseInSearch *bool
-	Rows        *int
+	DisplayName  string
+	FieldType    *FieldType
+	Options      []CustomFieldOption
+	OptionSource *string
+	IsRequired   *bool
+	UseInSearch  *bool
+	Rows         *int
 }

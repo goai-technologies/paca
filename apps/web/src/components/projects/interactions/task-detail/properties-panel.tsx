@@ -540,6 +540,8 @@ export function PropertiesPanel({
 							});
 						}}
 						customOptions={cf.options}
+						customOptionSource={cf.option_source}
+						projectId={task.project_id}
 						customRows={cf.rows}
 						canEdit={canEdit}
 					/>

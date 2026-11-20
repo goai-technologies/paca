@@ -1352,6 +1352,12 @@
 			"fieldTypeLabel": "Tipo de campo",
 			"fieldTypeImmutableHint": "El tipo de campo no se puede cambiar después de crearlo.",
 			"optionsLabel": "Opciones",
+			"optionSourceLabel": "Origen de opciones",
+			"optionSourceManual": "Opciones personalizadas",
+			"optionSourceProjectMembers": "Equipo / miembros del proyecto",
+			"optionSourceProjectMembersHint": "Ofrece automáticamente a todos los miembros activos del equipo como opciones seleccionables.",
+			"optionSourceTeamBadge": "Equipo",
+			"populateFromMembers": "Añadir miembros del proyecto",
 			"addOptionPlaceholder": "Añadir opción…",
 			"addOption": "Añadir",
 			"optionColorLabel": "Color de la opción",
@@ -2420,7 +2426,18 @@
 		},
 		"timeline": {
 			"title": "Cronología",
-			"description": "Épicas y planificación a largo plazo en un diagrama de Gantt."
+			"description": "Épicas y planificación a largo plazo en un diagrama de Gantt.",
+			"sortByLabel": "Ordenar por",
+			"sortAscending": "Ascendente",
+			"sortDescending": "Descendente",
+			"sortOptions": {
+				"cardId": "ID de tarjeta",
+				"priority": "Prioridad",
+				"status": "Estado",
+				"createdAt": "Fecha de creación",
+				"updatedAt": "Fecha de actualización",
+				"assignee": "Asignado"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "Sprint no encontrado o acceso denegado.",

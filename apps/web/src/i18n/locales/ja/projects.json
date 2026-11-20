@@ -1401,7 +1401,13 @@
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
 			},
 			"rowsLabel": "表示行数",
-			"rowsHint": "編集時に表示する行数（{{min}}〜{{max}}）。"
+			"rowsHint": "編集時に表示する行数（{{min}}〜{{max}}）。",
+			"optionSourceLabel": "選択肢のソース",
+			"optionSourceManual": "カスタム選択肢",
+			"optionSourceProjectMembers": "プロジェクトチーム / メンバー",
+			"optionSourceProjectMembersHint": "このプロジェクトのアクティブな全チームメンバーを選択肢として自動的に提供します。",
+			"optionSourceTeamBadge": "チーム",
+			"populateFromMembers": "プロジェクトメンバーを追加"
 		},
 		"jev": {
 			"title": "Jev AI",
@@ -2420,7 +2426,18 @@
 		},
 		"timeline": {
 			"title": "タイムライン",
-			"description": "ガントチャート上でのエピックと長期的な計画。"
+			"description": "ガントチャート上でのエピックと長期的な計画。",
+			"sortByLabel": "並び替え",
+			"sortAscending": "昇順",
+			"sortDescending": "降順",
+			"sortOptions": {
+				"cardId": "カードID",
+				"priority": "優先度",
+				"status": "ステータス",
+				"createdAt": "作成日",
+				"updatedAt": "更新日",
+				"assignee": "担当者"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "スプリントが見つからないか、アクセスが拒否されました。",

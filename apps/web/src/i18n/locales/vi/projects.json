@@ -1401,7 +1401,13 @@
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
 			},
 			"rowsLabel": "Số dòng hiển thị",
-			"rowsHint": "Số dòng hiển thị khi chỉnh sửa ({{min}}–{{max}})."
+			"rowsHint": "Số dòng hiển thị khi chỉnh sửa ({{min}}–{{max}}).",
+			"optionSourceLabel": "Nguồn tùy chọn",
+			"optionSourceManual": "Tùy chọn tùy chỉnh",
+			"optionSourceProjectMembers": "Nhóm / thành viên dự án",
+			"optionSourceProjectMembersHint": "Tự động cung cấp tất cả thành viên đang hoạt động trong dự án làm tùy chọn có thể chọn.",
+			"optionSourceTeamBadge": "Nhóm",
+			"populateFromMembers": "Thêm thành viên dự án"
 		},
 		"jev": {
 			"title": "Jev AI",
@@ -2419,7 +2425,18 @@
 		},
 		"timeline": {
 			"title": "Dòng thời gian",
-			"description": "Epic và kế hoạch dài hạn trên biểu đồ Gantt."
+			"description": "Epic và kế hoạch dài hạn trên biểu đồ Gantt.",
+			"sortByLabel": "Sắp xếp theo",
+			"sortAscending": "Tăng dần",
+			"sortDescending": "Giảm dần",
+			"sortOptions": {
+				"cardId": "Mã thẻ",
+				"priority": "Độ ưu tiên",
+				"status": "Trạng thái",
+				"createdAt": "Ngày tạo",
+				"updatedAt": "Ngày cập nhật",
+				"assignee": "Người thực hiện"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "Không tìm thấy sprint hoặc bạn không có quyền truy cập.",

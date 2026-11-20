@@ -33,7 +33,6 @@ export function KbdChord({
 	return (
 		<span className={cn("inline-flex items-center gap-0.5", className)}>
 			{caps.map((cap, i) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: static, order-stable list of 1-3 keycaps
 				<Kbd key={i}>{cap}</Kbd>
 			))}
 		</span>

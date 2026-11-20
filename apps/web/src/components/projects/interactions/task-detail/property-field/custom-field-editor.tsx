@@ -1,6 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
 import { CalendarDays } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { CustomFieldOption } from "@/lib/project-api";
+import {
+	type CustomFieldOption,
+	projectMembersListQueryOptions,
+} from "@/lib/project-api";
 import { FieldValue } from "../primitives";
 import { CheckboxEditor } from "./checkbox-editor";
 import { SingleDateEditor } from "./date-editor";
@@ -18,6 +22,8 @@ export function CustomFieldEditor({
 	rawValue,
 	canEdit,
 	options = [],
+	optionSource = "manual",
+	projectId,
 	rows,
 	onChange,
 }: {
@@ -33,10 +39,19 @@ export function CustomFieldEditor({
 	rawValue: unknown;
 	canEdit: boolean;
 	options?: CustomFieldOption[];
+	optionSource?: string;
+	projectId?: string;
 	rows?: number;
 	onChange?: (value: unknown) => void;
 }) {
 	const { t } = useTranslation("projects");
+
+	const isMembersSource = optionSource === "project_members";
+	const { data: members = [] } = useQuery({
+		...projectMembersListQueryOptions(projectId ?? ""),
+		enabled: Boolean(projectId) && isMembersSource,
+	});
+
 	switch (customType) {
 		case "Text":
 			return (
@@ -83,34 +98,80 @@ export function CustomFieldEditor({
 				/>
 			);
 		case "Select": {
-			const selectOptions: SelectOption[] = options.map((o) => ({
-				value: o.value,
-				label: o.value,
-				colorDot: o.color ?? undefined,
-			}));
-			const currentVal = rawValue != null ? String(rawValue) : null;
+			const selectOptions: SelectOption[] = isMembersSource
+				? members.map((m) => {
+						const name = m.full_name || m.username;
+						return {
+							value: name,
+							label: name,
+							hint: m.full_name && m.username ? `@${m.username}` : undefined,
+						};
+					})
+				: options.map((o) => ({
+						value: o.value,
+						label: o.value,
+						colorDot: o.color ?? undefined,
+					}));
+
+			const currentRaw = rawValue != null ? String(rawValue) : null;
+			let resolvedVal = currentRaw;
+			if (isMembersSource && currentRaw) {
+				const match = members.find(
+					(m) =>
+						m.id === currentRaw ||
+						m.user_id === currentRaw ||
+						(m.full_name || m.username) === currentRaw,
+				);
+				if (match) {
+					resolvedVal = match.full_name || match.username;
+				}
+			}
+
 			if (!canEdit) {
-				return <FieldValue empty={!currentVal}>{currentVal}</FieldValue>;
+				return <FieldValue empty={!resolvedVal}>{resolvedVal}</FieldValue>;
 			}
 			return (
 				<SelectEditor
-					value={currentVal}
+					value={resolvedVal}
 					options={selectOptions}
 					onChange={(v) => onChange?.(v)}
 				/>
 			);
 		}
 		case "MultiSelect": {
-			const selectOptions: SelectOption[] = options.map((o) => ({
-				value: o.value,
-				label: o.value,
-				colorDot: o.color ?? undefined,
-			}));
-			const currentVal = Array.isArray(rawValue)
+			const selectOptions: SelectOption[] = isMembersSource
+				? members.map((m) => {
+						const name = m.full_name || m.username;
+						return {
+							value: name,
+							label: name,
+							hint: m.full_name && m.username ? `@${m.username}` : undefined,
+						};
+					})
+				: options.map((o) => ({
+						value: o.value,
+						label: o.value,
+						colorDot: o.color ?? undefined,
+					}));
+
+			const rawArr = Array.isArray(rawValue)
 				? rawValue.filter((v): v is string => typeof v === "string")
 				: typeof rawValue === "string" && rawValue
 					? [rawValue]
 					: [];
+
+			const currentVal = isMembersSource
+				? rawArr.map((v) => {
+						const match = members.find(
+							(m) =>
+								m.id === v ||
+								m.user_id === v ||
+								(m.full_name || m.username) === v,
+						);
+						return match ? match.full_name || match.username : v;
+					})
+				: rawArr;
+
 			return (
 				<MultiSelectEditor
 					value={currentVal}

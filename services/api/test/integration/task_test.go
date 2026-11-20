@@ -496,6 +496,10 @@ func (r *fakeTaskRepo) UpdateTaskFields(_ context.Context, t *taskdom.Task, fiel
 			next.Tags = t.Tags
 		case taskdom.TaskFieldAssignmentMode:
 			next.AssignmentMode = t.AssignmentMode
+		case taskdom.TaskFieldCommitment:
+			next.CommitmentTaskID = t.CommitmentTaskID
+		case taskdom.TaskFieldHomeProject:
+			next.HomeProjectID = t.HomeProjectID
 		}
 	}
 	next.UpdatedAt = t.UpdatedAt

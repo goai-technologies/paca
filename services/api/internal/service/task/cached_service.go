@@ -275,7 +275,6 @@ func (c *CachedService) GetTaskByKey(ctx context.Context, prefix string, taskNum
 	return c.svc.GetTaskByKey(ctx, prefix, taskNumber)
 }
 
-// CreateTask delegates directly to the underlying service (not cached).
 // ListCommitmentWork passes through: the result spans projects, so no
 // project-scoped cache entry applies.
 func (c *CachedService) ListCommitmentWork(ctx context.Context, commitmentID uuid.UUID) ([]*taskdom.Task, error) {
@@ -291,6 +290,7 @@ func (c *CachedService) PrepareCommitmentsProject(ctx context.Context, projectID
 	return err
 }
 
+// CreateTask delegates directly to the underlying service (not cached).
 func (c *CachedService) CreateTask(ctx context.Context, in taskdom.CreateTaskInput) (*taskdom.Task, error) {
 	return c.svc.CreateTask(ctx, in)
 }

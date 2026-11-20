@@ -501,40 +501,43 @@ func (o *CustomFieldOptionDTO) UnmarshalJSON(data []byte) error {
 // CreateCustomFieldDefinitionRequest is the body for
 // POST /projects/:projectId/custom-fields.
 type CreateCustomFieldDefinitionRequest struct {
-	FieldKey    string                 `json:"field_key" binding:"required"`
-	DisplayName string                 `json:"display_name" binding:"required"`
-	FieldType   taskdom.FieldType      `json:"field_type" binding:"required"`
-	Options     []CustomFieldOptionDTO `json:"options"`
-	IsRequired  bool                   `json:"is_required"`
-	UseInSearch bool                   `json:"use_in_search"`
-	Rows        int                    `json:"rows"`
+	FieldKey     string                 `json:"field_key" binding:"required"`
+	DisplayName  string                 `json:"display_name" binding:"required"`
+	FieldType    taskdom.FieldType      `json:"field_type" binding:"required"`
+	Options      []CustomFieldOptionDTO `json:"options"`
+	OptionSource *string                `json:"option_source"`
+	IsRequired   bool                   `json:"is_required"`
+	UseInSearch  bool                   `json:"use_in_search"`
+	Rows         int                    `json:"rows"`
 }
 
 // UpdateCustomFieldDefinitionRequest is the body for
 // PATCH /projects/:projectId/custom-fields/:fieldId.
 type UpdateCustomFieldDefinitionRequest struct {
-	DisplayName string                 `json:"display_name"`
-	FieldType   *taskdom.FieldType     `json:"field_type"`
-	Options     []CustomFieldOptionDTO `json:"options"`
-	IsRequired  *bool                  `json:"is_required"`
-	UseInSearch *bool                  `json:"use_in_search"`
-	Rows        *int                   `json:"rows"`
+	DisplayName  string                 `json:"display_name"`
+	FieldType    *taskdom.FieldType     `json:"field_type"`
+	Options      []CustomFieldOptionDTO `json:"options"`
+	OptionSource *string                `json:"option_source"`
+	IsRequired   *bool                  `json:"is_required"`
+	UseInSearch  *bool                  `json:"use_in_search"`
+	Rows         *int                   `json:"rows"`
 }
 
 // CustomFieldDefinitionResponse is the public representation of a custom
 // field definition.
 type CustomFieldDefinitionResponse struct {
-	ID          uuid.UUID              `json:"id"`
-	ProjectID   uuid.UUID              `json:"project_id"`
-	FieldKey    string                 `json:"field_key"`
-	DisplayName string                 `json:"display_name"`
-	FieldType   taskdom.FieldType      `json:"field_type"`
-	Options     []CustomFieldOptionDTO `json:"options"`
-	IsRequired  bool                   `json:"is_required"`
-	UseInSearch bool                   `json:"use_in_search"`
-	Rows        int                    `json:"rows"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	ID           uuid.UUID              `json:"id"`
+	ProjectID    uuid.UUID              `json:"project_id"`
+	FieldKey     string                 `json:"field_key"`
+	DisplayName  string                 `json:"display_name"`
+	FieldType    taskdom.FieldType      `json:"field_type"`
+	Options      []CustomFieldOptionDTO `json:"options"`
+	OptionSource string                 `json:"option_source"`
+	IsRequired   bool                   `json:"is_required"`
+	UseInSearch  bool                   `json:"use_in_search"`
+	Rows         int                    `json:"rows"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
 // customFieldOptionsToDomain maps request DTOs to domain options.
@@ -567,18 +570,23 @@ func CustomFieldDefinitionFromEntity(f *taskdom.CustomFieldDefinition) CustomFie
 	for i, o := range f.Options {
 		opts[i] = CustomFieldOptionDTO{Value: o.Value, Color: o.Color}
 	}
+	optionSource := f.OptionSource
+	if optionSource == "" {
+		optionSource = taskdom.OptionSourceManual
+	}
 	return CustomFieldDefinitionResponse{
-		ID:          f.ID,
-		ProjectID:   f.ProjectID,
-		FieldKey:    f.FieldKey,
-		DisplayName: f.DisplayName,
-		FieldType:   f.FieldType,
-		Options:     opts,
-		IsRequired:  f.IsRequired,
-		UseInSearch: f.UseInSearch,
-		Rows:        f.Rows,
-		CreatedAt:   f.CreatedAt,
-		UpdatedAt:   f.UpdatedAt,
+		ID:           f.ID,
+		ProjectID:    f.ProjectID,
+		FieldKey:     f.FieldKey,
+		DisplayName:  f.DisplayName,
+		FieldType:    f.FieldType,
+		Options:      opts,
+		OptionSource: optionSource,
+		IsRequired:   f.IsRequired,
+		UseInSearch:  f.UseInSearch,
+		Rows:         f.Rows,
+		CreatedAt:    f.CreatedAt,
+		UpdatedAt:    f.UpdatedAt,
 	}
 }
 

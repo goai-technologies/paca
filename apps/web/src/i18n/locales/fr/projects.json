@@ -1401,7 +1401,13 @@
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
 			},
 			"rowsLabel": "Lignes visibles",
-			"rowsHint": "Nombre de lignes affichées lors de la modification ({{min}}–{{max}})."
+			"rowsHint": "Nombre de lignes affichées lors de la modification ({{min}}–{{max}}).",
+			"optionSourceLabel": "Source des options",
+			"optionSourceManual": "Options personnalisées",
+			"optionSourceProjectMembers": "Équipe / membres du projet",
+			"optionSourceProjectMembersHint": "Propose automatiquement tous les membres actifs de l'équipe du projet sous forme d'options sélectionnables.",
+			"optionSourceTeamBadge": "Équipe",
+			"populateFromMembers": "Ajouter des membres du projet"
 		},
 		"jev": {
 			"title": "Jev IA",
@@ -2420,7 +2426,18 @@
 		},
 		"timeline": {
 			"title": "Chronologie",
-			"description": "Epics et planification à long terme sur un diagramme de Gantt."
+			"description": "Epics et planification à long terme sur un diagramme de Gantt.",
+			"sortByLabel": "Trier par",
+			"sortAscending": "Croissant",
+			"sortDescending": "Décroissant",
+			"sortOptions": {
+				"cardId": "ID de carte",
+				"priority": "Priorité",
+				"status": "Statut",
+				"createdAt": "Date de création",
+				"updatedAt": "Date de mise à jour",
+				"assignee": "Assigné"
+			}
 		},
 		"sprintDetail": {
 			"notFound": "Sprint introuvable ou accès refusé.",
