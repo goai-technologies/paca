@@ -44,6 +44,7 @@ import {
 	deleteCustomFieldDefinition,
 	type FieldType,
 	listProjectMembers,
+	projectMembersListQueryOptions,
 	updateCustomFieldDefinition,
 } from "@/lib/project-api";
 import { cn } from "@/lib/utils";
@@ -146,6 +147,33 @@ function CreateCustomFieldDialog({
 	const [options, setOptions] = useState<CustomFieldOption[]>([]);
 	const [newOption, setNewOption] = useState("");
 	const [error, setError] = useState<string | null>(null);
+
+	const { data: projectMembers = [] } = useQuery(
+		projectMembersListQueryOptions(projectId),
+	);
+
+	const handleSelectFieldType = (ft: UIFieldType) => {
+		setFieldType(ft);
+		if ((ft === "Select" || ft === "MultiSelect") && options.length === 0) {
+			if (projectMembers.length > 0) {
+				const memberOptions = projectMembers
+					.map((m) => m.full_name || m.username)
+					.filter((name): name is string => Boolean(name))
+					.map((value) => ({ value }));
+				setOptions(memberOptions);
+			} else {
+				void listProjectMembers(projectId, { pageSize: 100 })
+					.then((res) => {
+						const memberOptions = res.items
+							.map((m) => m.full_name || m.username)
+							.filter((name): name is string => Boolean(name))
+							.map((value) => ({ value }));
+						if (memberOptions.length > 0) setOptions(memberOptions);
+					})
+					.catch(() => {});
+			}
+		}
+	};
 
 	const reset = () => {
 		setDisplayName("");
@@ -274,7 +302,7 @@ function CreateCustomFieldDialog({
 								<button
 									key={ft}
 									type="button"
-									onClick={() => setFieldType(ft)}
+									onClick={() => handleSelectFieldType(ft)}
 									className={cn(
 										"rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
 										fieldType === ft
@@ -325,11 +353,31 @@ function CreateCustomFieldDialog({
 							</div>
 
 							{optionSource === "project_members" ? (
-								<div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
-									<Users className="size-4 shrink-0 text-primary mt-0.5" />
-									<p>
-										{t("settings.customFields.optionSourceProjectMembersHint")}
-									</p>
+								<div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+									<div className="flex items-start gap-2.5">
+										<Users className="size-4 shrink-0 text-primary mt-0.5" />
+										<p>
+											{t("settings.customFields.optionSourceProjectMembersHint")}
+										</p>
+									</div>
+									{projectMembers.length > 0 && (
+										<div className="pt-2 border-t border-primary/10">
+											<p className="text-[11px] font-semibold text-foreground/80 mb-1.5">
+												Active team members ({projectMembers.length}):
+											</p>
+											<div className="flex flex-wrap gap-1">
+												{projectMembers.map((m) => (
+													<span
+														key={m.id}
+														className="inline-flex items-center gap-1 rounded bg-background/80 px-2 py-0.5 text-[11px] border border-border/40 text-foreground font-medium"
+													>
+														<span className="size-1.5 rounded-full bg-emerald-500" />
+														{m.full_name || m.username}
+													</span>
+												))}
+											</div>
+										</div>
+									)}
 								</div>
 							) : (
 								<div className="space-y-1.5">
@@ -706,11 +754,31 @@ function EditCustomFieldDialog({
 							</div>
 
 							{optionSource === "project_members" ? (
-								<div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
-									<Users className="size-4 shrink-0 text-primary mt-0.5" />
-									<p>
-										{t("settings.customFields.optionSourceProjectMembersHint")}
-									</p>
+								<div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+									<div className="flex items-start gap-2.5">
+										<Users className="size-4 shrink-0 text-primary mt-0.5" />
+										<p>
+											{t("settings.customFields.optionSourceProjectMembersHint")}
+										</p>
+									</div>
+									{projectMembers.length > 0 && (
+										<div className="pt-2 border-t border-primary/10">
+											<p className="text-[11px] font-semibold text-foreground/80 mb-1.5">
+												Active team members ({projectMembers.length}):
+											</p>
+											<div className="flex flex-wrap gap-1">
+												{projectMembers.map((m) => (
+													<span
+														key={m.id}
+														className="inline-flex items-center gap-1 rounded bg-background/80 px-2 py-0.5 text-[11px] border border-border/40 text-foreground font-medium"
+													>
+														<span className="size-1.5 rounded-full bg-emerald-500" />
+														{m.full_name || m.username}
+													</span>
+												))}
+											</div>
+										</div>
+									)}
 								</div>
 							) : (
 								<div className="space-y-1.5">
