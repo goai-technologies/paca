@@ -5,9 +5,9 @@ import {
 	isBlocksContent,
 	textToBlocks,
 } from "@/components/shared/comment-blocknote";
-import { displayDate } from "./property-field/helpers";
 import { timeAgo } from "@/lib/time-ago";
 import { cn } from "@/lib/utils";
+import { displayDate } from "./property-field/helpers";
 import type { ActivityEntry } from "./types";
 
 export type ActivityNameMaps = {
