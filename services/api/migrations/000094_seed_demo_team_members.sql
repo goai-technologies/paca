@@ -3,49 +3,49 @@
 
 BEGIN;
 
--- 1. Alex Morgan
+-- 1. Niyata Bhat
 INSERT INTO accounts (id, kind, name, description)
-VALUES ('11111111-1111-1111-1111-111111111111', 'user', 'Alex Morgan', 'Frontend Lead')
+VALUES ('11111111-1111-1111-1111-111111111111', 'user', 'Niyata Bhat', 'Frontend Lead')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO users (id, username, password_hash, email, kind)
-VALUES ('11111111-1111-1111-1111-111111111111', 'alexmorgan', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'alex.morgan@paca.ai', 'user')
+VALUES ('11111111-1111-1111-1111-111111111111', 'niyatabhat', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'niyata.bhat@goai.solutions', 'user')
 ON CONFLICT (id) DO NOTHING;
 
--- 2. Sarah Chen
+-- 2. Tejesh
 INSERT INTO accounts (id, kind, name, description)
-VALUES ('22222222-2222-2222-2222-222222222222', 'user', 'Sarah Chen', 'Backend Engineer')
+VALUES ('22222222-2222-2222-2222-222222222222', 'user', 'Tejesh', 'Backend Engineer')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO users (id, username, password_hash, email, kind)
-VALUES ('22222222-2222-2222-2222-222222222222', 'sarahchen', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'sarah.chen@paca.ai', 'user')
+VALUES ('22222222-2222-2222-2222-222222222222', 'tejesh', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'tejesh@goai.solutions', 'user')
 ON CONFLICT (id) DO NOTHING;
 
--- 3. David Kim
+-- 3. Sachin Kumar
 INSERT INTO accounts (id, kind, name, description)
-VALUES ('33333333-3333-3333-3333-333333333333', 'user', 'David Kim', 'Full Stack Developer')
+VALUES ('33333333-3333-3333-3333-333333333333', 'user', 'Sachin Kumar', 'Full Stack Developer')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO users (id, username, password_hash, email, kind)
-VALUES ('33333333-3333-3333-3333-333333333333', 'davidkim', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'david.kim@paca.ai', 'user')
+VALUES ('33333333-3333-3333-3333-333333333333', 'sachinkumar', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'sachin.kumar@goai.solutions', 'user')
 ON CONFLICT (id) DO NOTHING;
 
--- 4. Emily Watson
+-- 4. Prakruti V
 INSERT INTO accounts (id, kind, name, description)
-VALUES ('44444444-4444-4444-4444-444444444444', 'user', 'Emily Watson', 'Product Designer')
+VALUES ('44444444-4444-4444-4444-444444444444', 'user', 'Prakruti V', 'Product Designer')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO users (id, username, password_hash, email, kind)
-VALUES ('44444444-4444-4444-4444-444444444444', 'emilywatson', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'emily.watson@paca.ai', 'user')
+VALUES ('44444444-4444-4444-4444-444444444444', 'prakruti', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'prakruti.v@goai.solutions', 'user')
 ON CONFLICT (id) DO NOTHING;
 
--- 5. Michael Scott
+-- 5. Mohammed Samiwala
 INSERT INTO accounts (id, kind, name, description)
-VALUES ('55555555-5555-5555-5555-555555555555', 'user', 'Michael Scott', 'Engineering Manager')
+VALUES ('55555555-5555-5555-5555-555555555555', 'user', 'Mohammed Samiwala', 'Engineering Manager')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO users (id, username, password_hash, email, kind)
-VALUES ('55555555-5555-5555-5555-555555555555', 'michaelscott', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'michael.scott@paca.ai', 'user')
+VALUES ('55555555-5555-5555-5555-555555555555', 'mohammedsami', '$2a$10$7LmUtT9fUBEdNdEvD1RdquHU5Xavg05ayNGwENlh4NFJq7JSwjJE6', 'mohammed.samiwala@goai.solutions', 'user')
 ON CONFLICT (id) DO NOTHING;
 
 -- Attach to all projects as project members
