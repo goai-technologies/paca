@@ -139,7 +139,9 @@ function CreateCustomFieldDialog({
 	const [fieldKey, setFieldKey] = useState("");
 	const [keyManuallyEdited, setKeyManuallyEdited] = useState(false);
 	const [fieldType, setFieldType] = useState<UIFieldType>("Text");
-	const [optionSource, setOptionSource] = useState<"manual" | "project_members">("manual");
+	const [optionSource, setOptionSource] = useState<
+		"manual" | "project_members"
+	>("manual");
 	const [importingMembers, setImportingMembers] = useState(false);
 	const [required, setRequired] = useState(false);
 	const [useInSearch, setUseInSearch] = useState(false);
@@ -357,7 +359,9 @@ function CreateCustomFieldDialog({
 									<div className="flex items-start gap-2.5">
 										<Users className="size-4 shrink-0 text-primary mt-0.5" />
 										<p>
-											{t("settings.customFields.optionSourceProjectMembersHint")}
+											{t(
+												"settings.customFields.optionSourceProjectMembersHint",
+											)}
 										</p>
 									</div>
 									{projectMembers.length > 0 && (
@@ -389,11 +393,19 @@ function CreateCustomFieldDialog({
 											onClick={async () => {
 												setImportingMembers(true);
 												try {
-													const res = await listProjectMembers(projectId, { pageSize: 100 });
-													const existing = new Set(options.map((o) => o.value.trim().toLowerCase()));
+													const res = await listProjectMembers(projectId, {
+														pageSize: 100,
+													});
+													const existing = new Set(
+														options.map((o) => o.value.trim().toLowerCase()),
+													);
 													const toAdd = res.items
 														.map((m) => m.full_name || m.username)
-														.filter((name) => name && !existing.has(name.trim().toLowerCase()))
+														.filter(
+															(name) =>
+																name &&
+																!existing.has(name.trim().toLowerCase()),
+														)
 														.map((value) => ({ value }));
 													if (toAdd.length > 0) {
 														setOptions([...options, ...toAdd]);
@@ -423,7 +435,9 @@ function CreateCustomFieldDialog({
 														updated[i] = { ...updated[i], color };
 														setOptions(updated);
 													}}
-													triggerLabel={t("settings.customFields.optionColorLabel")}
+													triggerLabel={t(
+														"settings.customFields.optionColorLabel",
+													)}
 													customColorTitle={t(
 														"taskStatuses.formDialog.customColorTitle",
 													)}
@@ -433,7 +447,10 @@ function CreateCustomFieldDialog({
 													value={opt.value}
 													onChange={(e) => {
 														const updated = [...options];
-														updated[i] = { ...updated[i], value: e.target.value };
+														updated[i] = {
+															...updated[i],
+															value: e.target.value,
+														};
 														setOptions(updated);
 													}}
 													className="text-xs h-8"
@@ -455,7 +472,10 @@ function CreateCustomFieldDialog({
 												onChange={(e) => setNewOption(e.target.value)}
 												onKeyDown={(e) => {
 													if (e.key === "Enter" && newOption.trim()) {
-														setOptions([...options, { value: newOption.trim() }]);
+														setOptions([
+															...options,
+															{ value: newOption.trim() },
+														]);
 														setNewOption("");
 													}
 												}}
@@ -592,15 +612,19 @@ function EditCustomFieldDialog({
 	const [options, setOptions] = useState<CustomFieldOption[]>(
 		field?.options ?? [],
 	);
-	const [optionSource, setOptionSource] = useState<"manual" | "project_members">(
-		(field?.option_source as "manual" | "project_members") ?? "manual",
-	);
+	const [optionSource, setOptionSource] = useState<
+		"manual" | "project_members"
+	>((field?.option_source as "manual" | "project_members") ?? "manual");
 	const [importingMembers, setImportingMembers] = useState(false);
 	const [required, setRequired] = useState(field?.is_required ?? false);
 	const [useInSearch, setUseInSearch] = useState(field?.use_in_search ?? false);
 	const [rows, setRows] = useState(field?.rows ?? DEFAULT_ROWS);
 	const [newOption, setNewOption] = useState("");
 	const [error, setError] = useState<string | null>(null);
+
+	const { data: projectMembers = [] } = useQuery(
+		projectMembersListQueryOptions(projectId),
+	);
 
 	useEffect(() => {
 		setDisplayName(field?.display_name ?? "");
@@ -625,10 +649,12 @@ function EditCustomFieldDialog({
 			return updateCustomFieldDefinition(projectId, field.id, {
 				display_name: displayName.trim(),
 				options:
-					(field.field_type === "select" || field.field_type === "multi_select") &&
+					(field.field_type === "select" ||
+						field.field_type === "multi_select") &&
 					optionSource === "manual"
 						? options
-						: field.field_type === "select" || field.field_type === "multi_select"
+						: field.field_type === "select" ||
+								field.field_type === "multi_select"
 							? []
 							: undefined,
 				option_source:
@@ -758,7 +784,9 @@ function EditCustomFieldDialog({
 									<div className="flex items-start gap-2.5">
 										<Users className="size-4 shrink-0 text-primary mt-0.5" />
 										<p>
-											{t("settings.customFields.optionSourceProjectMembersHint")}
+											{t(
+												"settings.customFields.optionSourceProjectMembersHint",
+											)}
 										</p>
 									</div>
 									{projectMembers.length > 0 && (
@@ -790,11 +818,19 @@ function EditCustomFieldDialog({
 											onClick={async () => {
 												setImportingMembers(true);
 												try {
-													const res = await listProjectMembers(projectId, { pageSize: 100 });
-													const existing = new Set(options.map((o) => o.value.trim().toLowerCase()));
+													const res = await listProjectMembers(projectId, {
+														pageSize: 100,
+													});
+													const existing = new Set(
+														options.map((o) => o.value.trim().toLowerCase()),
+													);
 													const toAdd = res.items
 														.map((m) => m.full_name || m.username)
-														.filter((name) => name && !existing.has(name.trim().toLowerCase()))
+														.filter(
+															(name) =>
+																name &&
+																!existing.has(name.trim().toLowerCase()),
+														)
 														.map((value) => ({ value }));
 													if (toAdd.length > 0) {
 														setOptions([...options, ...toAdd]);
@@ -824,7 +860,9 @@ function EditCustomFieldDialog({
 														updated[i] = { ...updated[i], color };
 														setOptions(updated);
 													}}
-													triggerLabel={t("settings.customFields.optionColorLabel")}
+													triggerLabel={t(
+														"settings.customFields.optionColorLabel",
+													)}
 													customColorTitle={t(
 														"taskStatuses.formDialog.customColorTitle",
 													)}
@@ -834,7 +872,10 @@ function EditCustomFieldDialog({
 													value={opt.value}
 													onChange={(e) => {
 														const updated = [...options];
-														updated[i] = { ...updated[i], value: e.target.value };
+														updated[i] = {
+															...updated[i],
+															value: e.target.value,
+														};
 														setOptions(updated);
 													}}
 													className="text-xs h-8"
@@ -856,7 +897,10 @@ function EditCustomFieldDialog({
 												onChange={(e) => setNewOption(e.target.value)}
 												onKeyDown={(e) => {
 													if (e.key === "Enter" && newOption.trim()) {
-														setOptions([...options, { value: newOption.trim() }]);
+														setOptions([
+															...options,
+															{ value: newOption.trim() },
+														]);
 														setNewOption("");
 													}
 												}}

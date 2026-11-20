@@ -147,14 +147,14 @@ type CustomFieldOption struct {
 // CustomFieldDefinition is a project-level schema entry that describes one
 // extra field that can be stored in Task.CustomFields under FieldKey.
 type CustomFieldDefinition struct {
-	ID          uuid.UUID
-	ProjectID   uuid.UUID
-	FieldKey    string
-	DisplayName string
-	FieldType   FieldType
-	Options     []CustomFieldOption // populated for select / multi_select types
-	OptionSource string             // "manual" | "project_members"
-	IsRequired  bool
+	ID           uuid.UUID
+	ProjectID    uuid.UUID
+	FieldKey     string
+	DisplayName  string
+	FieldType    FieldType
+	Options      []CustomFieldOption // populated for select / multi_select types
+	OptionSource string              // "manual" | "project_members"
+	IsRequired   bool
 	// Rows is the number of visible lines of a long_text field's editor.
 	Rows int
 	// UseInSearch makes task search also match this field's stored value.
