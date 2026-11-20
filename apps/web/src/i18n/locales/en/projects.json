@@ -2268,7 +2268,7 @@
 			"searchTasksPlaceholder": "Search tasks…",
 			"export": "Export",
 			"exporting": "Exporting…",
-			"exportProject": "Download tasks (Commitment, Effort, Priority, QA, Dev fields)",
+			"exportProject": "Download all project tasks (Commitment, Effort, Priority, QA, Dev fields)",
 			"exportReady": "Exported {{count}} tasks",
 			"exportFailed": "Could not export tasks. Please try again.",
 			"pluginNotAvailable": "Plugin not available",

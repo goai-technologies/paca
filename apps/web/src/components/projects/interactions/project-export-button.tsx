@@ -5,10 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { showErrorToast } from "@/lib/notify";
-import {
-	buildProjectTasksCsv,
-	downloadCsv,
-} from "@/lib/task-csv-export";
+import { buildProjectTasksCsv, downloadCsv } from "@/lib/task-csv-export";
 import { cn } from "@/lib/utils";
 
 /**
@@ -45,9 +42,7 @@ export function ProjectExportButton({
 	if (!canExport) return null;
 
 	const isBusy = exportMutation.isPending;
-	const label = isBusy
-		? t("layout.shell.exporting")
-		: t("layout.shell.export");
+	const label = isBusy ? t("layout.shell.exporting") : t("layout.shell.export");
 
 	return (
 		<button

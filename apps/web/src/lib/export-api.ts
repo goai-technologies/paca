@@ -137,7 +137,7 @@ function fileNameFromUrl(url: string): string | undefined {
 			"response-content-disposition",
 		);
 		if (!disposition) return undefined;
-		const match = /filename\*?=(?:UTF-8''|")?([^\";]+)"?/i.exec(disposition);
+		const match = /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(disposition);
 		return match?.[1] ? decodeURIComponent(match[1]) : undefined;
 	} catch {
 		return undefined;

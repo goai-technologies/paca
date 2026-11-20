@@ -50,16 +50,12 @@ const CUSTOM_FIELD_ALIASES: Record<
 	],
 };
 
-const PRIORITY_LABELS = [
-	"None",
-	"Low",
-	"Medium",
-	"High",
-	"Critical",
-] as const;
+const PRIORITY_LABELS = ["None", "Low", "Medium", "High", "Critical"] as const;
 
 function neutralizeFormula(value: string): string {
-	return /^[=+\-@]/.test(value) ? `'${value}` : value;
+	// Match server export (csv.go): neutralize formula triggers including
+	// leading tab/CR that spreadsheets strip before formula detection.
+	return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
 function csvEscape(value: string): string {
@@ -175,7 +171,7 @@ export async function buildProjectTasksCsv(projectId: string): Promise<{
 
 	const date = new Date().toISOString().slice(0, 10);
 	const safeName = (project.name || "project")
-		.replace(/[^\w\-]+/g, "-")
+		.replace(/[^\w-]+/g, "-")
 		.replace(/-+/g, "-")
 		.replace(/^-|-$/g, "")
 		.toLowerCase();

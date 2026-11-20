@@ -2265,6 +2265,11 @@
 			"renameView": "Đổi tên chế độ xem",
 			"deleteView": "Xóa chế độ xem",
 			"searchTasksPlaceholder": "Tìm kiếm nhiệm vụ…",
+			"export": "Xuất",
+			"exporting": "Đang xuất…",
+			"exportProject": "Tải xuống nhiệm vụ dự án (Commitment, Effort, Priority, QA, Dev)",
+			"exportReady": "Đã xuất {{count}} nhiệm vụ",
+			"exportFailed": "Không thể xuất nhiệm vụ. Vui lòng thử lại.",
 			"pluginNotAvailable": "Plugin không khả dụng",
 			"columnsTruncated": "Chỉ hiển thị {{max}} cột đầu tiên; một số tác vụ không nằm trong cột nào. Hãy thu hẹp chế độ xem bằng bộ lọc để xem phần còn lại.",
 			"viewErrors": {

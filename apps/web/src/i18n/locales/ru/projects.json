@@ -2286,6 +2286,11 @@
 			"renameView": "Переименовать представление",
 			"deleteView": "Удалить представление",
 			"searchTasksPlaceholder": "Поиск задач…",
+			"export": "Экспорт",
+			"exporting": "Экспорт…",
+			"exportProject": "Скачать задачи проекта (Commitment, Effort, Priority, QA, Dev)",
+			"exportReady": "Экспортировано задач: {{count}}",
+			"exportFailed": "Не удалось экспортировать задачи. Попробуйте ещё раз.",
 			"pluginNotAvailable": "Плагин недоступен",
 			"columnsTruncated": "Показаны только первые {{max}} столбцов; некоторые задачи не попали ни в один столбец. Сузьте представление фильтром, чтобы увидеть остальное.",
 			"viewErrors": {

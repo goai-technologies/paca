@@ -2266,6 +2266,11 @@
 			"renameView": "ビュー名を変更",
 			"deleteView": "ビューを削除",
 			"searchTasksPlaceholder": "タスクを検索…",
+			"export": "エクスポート",
+			"exporting": "エクスポート中…",
+			"exportProject": "プロジェクトのタスクをダウンロード（Commitment、Effort、Priority、QA、Dev）",
+			"exportReady": "{{count}} 件のタスクをエクスポートしました",
+			"exportFailed": "タスクをエクスポートできませんでした。もう一度お試しください。",
 			"pluginNotAvailable": "プラグインを利用できません",
 			"columnsTruncated": "最初の{{max}}列のみ表示されています。一部のタスクはどの列にも表示されません。フィルターで絞り込むと残りを確認できます。",
 			"viewErrors": {
