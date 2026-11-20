@@ -210,7 +210,12 @@ export function AddFieldDialog({
 							onValueChange={(next) => {
 								// Re-pressing the active type would empty the group; keep one.
 								const value = next[0];
-								if (value) setFieldType(value as UiFieldType);
+								if (value) {
+									setFieldType(value as UiFieldType);
+									if (value === "Select" || value === "MultiSelect") {
+										setOptionSource("project_members");
+									}
+								}
 							}}
 						>
 							{FIELD_TYPES.map((ft) => (
