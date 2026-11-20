@@ -1401,7 +1401,13 @@
 				"description": "Ask a project admin to grant you the project.settings.custom_fields.read permission."
 			},
 			"rowsLabel": "可见行数",
-			"rowsHint": "编辑时显示的行数（{{min}}–{{max}}）。"
+			"rowsHint": "编辑时显示的行数（{{min}}–{{max}}）。",
+			"optionSourceLabel": "选项来源",
+			"optionSourceManual": "自定义选项",
+			"optionSourceProjectMembers": "项目团队 / 成员",
+			"optionSourceProjectMembersHint": "自动将该项目中的所有活跃团队成员提供为可选选项。",
+			"optionSourceTeamBadge": "团队",
+			"populateFromMembers": "添加项目成员"
 		},
 		"jev": {
 			"title": "Jev AI",

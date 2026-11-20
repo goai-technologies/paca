@@ -74,7 +74,11 @@ describe("GanttView nested tasks", () => {
 		fireEvent.click(
 			screen
 				.getAllByRole("button")
-				.find((b) => b.getAttribute("aria-expanded") !== null) as HTMLElement,
+				.find(
+					(b) =>
+						b.getAttribute("aria-expanded") !== null &&
+						b.getAttribute("data-slot") !== "dropdown-menu-trigger",
+				) as HTMLElement,
 		);
 		expect(await screen.findByText("Child task")).toBeTruthy();
 		expect(get.mock.calls[0][1].params.parent_task_id).toBe("epic-1");
