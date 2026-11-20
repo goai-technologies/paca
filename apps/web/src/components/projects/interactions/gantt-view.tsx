@@ -254,7 +254,8 @@ export function GanttView({
 	const [overTaskId, setOverTaskId] = useState<string | null>(null);
 	const [activeSortBy, setActiveSortBy] = useState<string>(() => {
 		if (sortByProp && sortByProp !== "manual") return sortByProp;
-		if (viewConfig?.sort_by && viewConfig.sort_by !== "manual") return viewConfig.sort_by;
+		if (viewConfig?.sort_by && viewConfig.sort_by !== "manual")
+			return viewConfig.sort_by;
 		if (typeof window !== "undefined" && projectId) {
 			const saved = localStorage.getItem(`paca:timeline:sort_by:${projectId}`);
 			if (saved && saved !== "manual") return saved;
@@ -310,13 +311,14 @@ export function GanttView({
 	);
 	const activeSortLabel: string = activeSortOption
 		? String((t as (k: string) => string)(activeSortOption.labelKey))
-		: String(
-				(t as (k: string) => string)("layout.timeline.sortByLabel"),
-			);
+		: String((t as (k: string) => string)("layout.timeline.sortByLabel"));
 
 	const isStatusGrouping = !columnBy || columnBy === "status";
 	const canDrag = canEdit && !!onMoveToColumn;
-	const canReorder = manualSort && (!activeSortBy || activeSortBy === "manual") && !!onReorderTask;
+	const canReorder =
+		manualSort &&
+		(!activeSortBy || activeSortBy === "manual") &&
+		!!onReorderTask;
 	const canReschedule = canEdit && !!onRescheduleTask;
 
 	const dragStartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
