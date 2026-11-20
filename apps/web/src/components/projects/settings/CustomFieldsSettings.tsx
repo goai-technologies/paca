@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
-import { Check, Edit2, Plus, Trash2, X } from "lucide-react";
+import { Check, Edit2, Plus, Trash2, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NoPermissionState } from "@/components/shared/no-permission-state";
@@ -43,6 +43,7 @@ import {
 	customFieldsQueryOptions,
 	deleteCustomFieldDefinition,
 	type FieldType,
+	listProjectMembers,
 	updateCustomFieldDefinition,
 } from "@/lib/project-api";
 import { cn } from "@/lib/utils";
@@ -137,6 +138,8 @@ function CreateCustomFieldDialog({
 	const [fieldKey, setFieldKey] = useState("");
 	const [keyManuallyEdited, setKeyManuallyEdited] = useState(false);
 	const [fieldType, setFieldType] = useState<UIFieldType>("Text");
+	const [optionSource, setOptionSource] = useState<"manual" | "project_members">("manual");
+	const [importingMembers, setImportingMembers] = useState(false);
 	const [required, setRequired] = useState(false);
 	const [useInSearch, setUseInSearch] = useState(false);
 	const [rows, setRows] = useState(DEFAULT_ROWS);
@@ -149,6 +152,8 @@ function CreateCustomFieldDialog({
 		setFieldKey("");
 		setKeyManuallyEdited(false);
 		setFieldType("Text");
+		setOptionSource("manual");
+		setImportingMembers(false);
 		setRows(DEFAULT_ROWS);
 		setRequired(false);
 		setUseInSearch(false);
@@ -170,7 +175,14 @@ function CreateCustomFieldDialog({
 				field_key: fieldKey || slugify(displayName),
 				field_type: UI_TO_API_FIELD_TYPE[fieldType],
 				options:
-					fieldType === "Select" || fieldType === "MultiSelect" ? options : [],
+					(fieldType === "Select" || fieldType === "MultiSelect") &&
+					optionSource === "manual"
+						? options
+						: [],
+				option_source:
+					fieldType === "Select" || fieldType === "MultiSelect"
+						? optionSource
+						: "manual",
 				is_required: required,
 				use_in_search: useInSearch,
 				rows: fieldType === "LongText" ? clampRows(rows) : undefined,
@@ -278,76 +290,148 @@ function CreateCustomFieldDialog({
 
 					{/* Options editor — only for Select / MultiSelect types */}
 					{(fieldType === "Select" || fieldType === "MultiSelect") && (
-						<div className="space-y-1.5">
-							<Label>{t("settings.customFields.optionsLabel")}</Label>
-							<div className="space-y-1">
-								{options.map((opt, i) => (
-									<div
-										key={opt.value + i.toString()}
-										className="flex items-center gap-2"
-									>
-										<ColorSwatchPicker
-											value={opt.color}
-											onChange={(color) => {
-												const updated = [...options];
-												updated[i] = { ...updated[i], color };
-												setOptions(updated);
-											}}
-											triggerLabel={t("settings.customFields.optionColorLabel")}
-											customColorTitle={t(
-												"taskStatuses.formDialog.customColorTitle",
-											)}
-											clearLabel={t("settings.customFields.noColor")}
-										/>
-										<Input
-											value={opt.value}
-											onChange={(e) => {
-												const updated = [...options];
-												updated[i] = { ...updated[i], value: e.target.value };
-												setOptions(updated);
-											}}
-											className="text-xs h-8"
-										/>
-										<button
-											type="button"
-											onClick={() =>
-												setOptions(options.filter((_, j) => j !== i))
-											}
-											className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
-										>
-											<X className="size-3.5" />
-										</button>
-									</div>
-								))}
-								<div className="flex gap-2">
-									<Input
-										value={newOption}
-										onChange={(e) => setNewOption(e.target.value)}
-										onKeyDown={(e) => {
-											if (e.key === "Enter" && newOption.trim()) {
-												setOptions([...options, { value: newOption.trim() }]);
-												setNewOption("");
-											}
-										}}
-										placeholder={t(
-											"settings.customFields.addOptionPlaceholder",
-										)}
-										className="text-xs h-8"
-									/>
+						<div className="space-y-3 rounded-lg border border-border/40 bg-muted/10 p-3">
+							<div className="space-y-1.5">
+								<Label className="text-xs font-semibold">
+									{t("settings.customFields.optionSourceLabel")}
+								</Label>
+								<div className="grid grid-cols-2 gap-2">
 									<button
 										type="button"
-										disabled={!newOption.trim()}
-										onClick={() => {
-											setOptions([...options, { value: newOption.trim() }]);
-											setNewOption("");
-										}}
-										className="flex items-center gap-1 rounded-md bg-muted px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/80 disabled:opacity-40 transition-colors"
+										onClick={() => setOptionSource("manual")}
+										className={cn(
+											"flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-all",
+											optionSource === "manual"
+												? "border-primary bg-primary/10 text-primary shadow-xs"
+												: "border-border/60 text-muted-foreground hover:bg-muted/40",
+										)}
 									>
-										<Plus className="size-3" />
-										{t("settings.customFields.addOption")}
+										{t("settings.customFields.optionSourceManual")}
+									</button>
+									<button
+										type="button"
+										onClick={() => setOptionSource("project_members")}
+										className={cn(
+											"flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-all",
+											optionSource === "project_members"
+												? "border-primary bg-primary/10 text-primary shadow-xs"
+												: "border-border/60 text-muted-foreground hover:bg-muted/40",
+										)}
+									>
+										<Users className="size-3.5" />
+										{t("settings.customFields.optionSourceProjectMembers")}
 									</button>
 								</div>
 							</div>
+
+							{optionSource === "project_members" ? (
+								<div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+									<Users className="size-4 shrink-0 text-primary mt-0.5" />
+									<p>
+										{t("settings.customFields.optionSourceProjectMembersHint")}
+									</p>
+								</div>
+							) : (
+								<div className="space-y-1.5">
+									<div className="flex items-center justify-between">
+										<Label>{t("settings.customFields.optionsLabel")}</Label>
+										<button
+											type="button"
+											disabled={importingMembers}
+											onClick={async () => {
+												setImportingMembers(true);
+												try {
+													const res = await listProjectMembers(projectId, { pageSize: 100 });
+													const existing = new Set(options.map((o) => o.value.trim().toLowerCase()));
+													const toAdd = res.items
+														.map((m) => m.full_name || m.username)
+														.filter((name) => name && !existing.has(name.trim().toLowerCase()))
+														.map((value) => ({ value }));
+													if (toAdd.length > 0) {
+														setOptions([...options, ...toAdd]);
+													}
+												} catch (err) {
+													console.error("Failed to load members:", err);
+												} finally {
+													setImportingMembers(false);
+												}
+											}}
+											className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline disabled:opacity-50"
+										>
+											<Users className="size-3" />
+											{t("settings.customFields.populateFromMembers")}
+										</button>
+									</div>
+									<div className="space-y-1">
+										{options.map((opt, i) => (
+											<div
+												key={opt.value + i.toString()}
+												className="flex items-center gap-2"
+											>
+												<ColorSwatchPicker
+													value={opt.color}
+													onChange={(color) => {
+														const updated = [...options];
+														updated[i] = { ...updated[i], color };
+														setOptions(updated);
+													}}
+													triggerLabel={t("settings.customFields.optionColorLabel")}
+													customColorTitle={t(
+														"taskStatuses.formDialog.customColorTitle",
+													)}
+													clearLabel={t("settings.customFields.noColor")}
+												/>
+												<Input
+													value={opt.value}
+													onChange={(e) => {
+														const updated = [...options];
+														updated[i] = { ...updated[i], value: e.target.value };
+														setOptions(updated);
+													}}
+													className="text-xs h-8"
+												/>
+												<button
+													type="button"
+													onClick={() =>
+														setOptions(options.filter((_, j) => j !== i))
+													}
+													className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+												>
+													<X className="size-3.5" />
+												</button>
+											</div>
+										))}
+										<div className="flex gap-2">
+											<Input
+												value={newOption}
+												onChange={(e) => setNewOption(e.target.value)}
+												onKeyDown={(e) => {
+													if (e.key === "Enter" && newOption.trim()) {
+														setOptions([...options, { value: newOption.trim() }]);
+														setNewOption("");
+													}
+												}}
+												placeholder={t(
+													"settings.customFields.addOptionPlaceholder",
+												)}
+												className="text-xs h-8"
+											/>
+											<button
+												type="button"
+												disabled={!newOption.trim()}
+												onClick={() => {
+													setOptions([...options, { value: newOption.trim() }]);
+													setNewOption("");
+												}}
+												className="flex items-center gap-1 rounded-md bg-muted px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/80 disabled:opacity-40 transition-colors"
+											>
+												<Plus className="size-3" />
+												{t("settings.customFields.addOption")}
+											</button>
+										</div>
+									</div>
+								</div>
+							)}
 						</div>
 					)}
 
@@ -460,6 +544,10 @@ function EditCustomFieldDialog({
 	const [options, setOptions] = useState<CustomFieldOption[]>(
 		field?.options ?? [],
 	);
+	const [optionSource, setOptionSource] = useState<"manual" | "project_members">(
+		(field?.option_source as "manual" | "project_members") ?? "manual",
+	);
+	const [importingMembers, setImportingMembers] = useState(false);
 	const [required, setRequired] = useState(field?.is_required ?? false);
 	const [useInSearch, setUseInSearch] = useState(field?.use_in_search ?? false);
 	const [rows, setRows] = useState(field?.rows ?? DEFAULT_ROWS);
@@ -469,6 +557,9 @@ function EditCustomFieldDialog({
 	useEffect(() => {
 		setDisplayName(field?.display_name ?? "");
 		setOptions(field?.options ?? []);
+		setOptionSource(
+			(field?.option_source as "manual" | "project_members") ?? "manual",
+		);
 		setRequired(field?.is_required ?? false);
 		setUseInSearch(field?.use_in_search ?? false);
 		setRows(field?.rows ?? DEFAULT_ROWS);
@@ -486,8 +577,15 @@ function EditCustomFieldDialog({
 			return updateCustomFieldDefinition(projectId, field.id, {
 				display_name: displayName.trim(),
 				options:
-					field.field_type === "select" || field.field_type === "multi_select"
+					(field.field_type === "select" || field.field_type === "multi_select") &&
+					optionSource === "manual"
 						? options
+						: field.field_type === "select" || field.field_type === "multi_select"
+							? []
+							: undefined,
+				option_source:
+					field.field_type === "select" || field.field_type === "multi_select"
+						? optionSource
 						: undefined,
 				is_required: required,
 				use_in_search: useInSearch,
@@ -573,76 +671,148 @@ function EditCustomFieldDialog({
 
 					{(field.field_type === "select" ||
 						field.field_type === "multi_select") && (
-						<div className="space-y-1.5">
-							<Label>{t("settings.customFields.optionsLabel")}</Label>
-							<div className="space-y-1">
-								{options.map((opt, i) => (
-									<div
-										key={opt.value + i.toString()}
-										className="flex items-center gap-2"
-									>
-										<ColorSwatchPicker
-											value={opt.color}
-											onChange={(color) => {
-												const updated = [...options];
-												updated[i] = { ...updated[i], color };
-												setOptions(updated);
-											}}
-											triggerLabel={t("settings.customFields.optionColorLabel")}
-											customColorTitle={t(
-												"taskStatuses.formDialog.customColorTitle",
-											)}
-											clearLabel={t("settings.customFields.noColor")}
-										/>
-										<Input
-											value={opt.value}
-											onChange={(e) => {
-												const updated = [...options];
-												updated[i] = { ...updated[i], value: e.target.value };
-												setOptions(updated);
-											}}
-											className="text-xs h-8"
-										/>
-										<button
-											type="button"
-											onClick={() =>
-												setOptions(options.filter((_, j) => j !== i))
-											}
-											className="shrink-0 text-muted-foreground hover:text-destructive"
-										>
-											<X className="size-3.5" />
-										</button>
-									</div>
-								))}
-								<div className="flex gap-2">
-									<Input
-										value={newOption}
-										onChange={(e) => setNewOption(e.target.value)}
-										onKeyDown={(e) => {
-											if (e.key === "Enter" && newOption.trim()) {
-												setOptions([...options, { value: newOption.trim() }]);
-												setNewOption("");
-											}
-										}}
-										placeholder={t(
-											"settings.customFields.addOptionPlaceholder",
-										)}
-										className="text-xs h-8"
-									/>
+						<div className="space-y-3 rounded-lg border border-border/40 bg-muted/10 p-3">
+							<div className="space-y-1.5">
+								<Label className="text-xs font-semibold">
+									{t("settings.customFields.optionSourceLabel")}
+								</Label>
+								<div className="grid grid-cols-2 gap-2">
 									<button
 										type="button"
-										disabled={!newOption.trim()}
-										onClick={() => {
-											setOptions([...options, { value: newOption.trim() }]);
-											setNewOption("");
-										}}
-										className="flex items-center gap-1 rounded-md bg-muted px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/80 disabled:opacity-40"
+										onClick={() => setOptionSource("manual")}
+										className={cn(
+											"flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-all",
+											optionSource === "manual"
+												? "border-primary bg-primary/10 text-primary shadow-xs"
+												: "border-border/60 text-muted-foreground hover:bg-muted/40",
+										)}
 									>
-										<Plus className="size-3" />
-										{t("settings.customFields.addOption")}
+										{t("settings.customFields.optionSourceManual")}
+									</button>
+									<button
+										type="button"
+										onClick={() => setOptionSource("project_members")}
+										className={cn(
+											"flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-all",
+											optionSource === "project_members"
+												? "border-primary bg-primary/10 text-primary shadow-xs"
+												: "border-border/60 text-muted-foreground hover:bg-muted/40",
+										)}
+									>
+										<Users className="size-3.5" />
+										{t("settings.customFields.optionSourceProjectMembers")}
 									</button>
 								</div>
 							</div>
+
+							{optionSource === "project_members" ? (
+								<div className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
+									<Users className="size-4 shrink-0 text-primary mt-0.5" />
+									<p>
+										{t("settings.customFields.optionSourceProjectMembersHint")}
+									</p>
+								</div>
+							) : (
+								<div className="space-y-1.5">
+									<div className="flex items-center justify-between">
+										<Label>{t("settings.customFields.optionsLabel")}</Label>
+										<button
+											type="button"
+											disabled={importingMembers}
+											onClick={async () => {
+												setImportingMembers(true);
+												try {
+													const res = await listProjectMembers(projectId, { pageSize: 100 });
+													const existing = new Set(options.map((o) => o.value.trim().toLowerCase()));
+													const toAdd = res.items
+														.map((m) => m.full_name || m.username)
+														.filter((name) => name && !existing.has(name.trim().toLowerCase()))
+														.map((value) => ({ value }));
+													if (toAdd.length > 0) {
+														setOptions([...options, ...toAdd]);
+													}
+												} catch (err) {
+													console.error("Failed to load members:", err);
+												} finally {
+													setImportingMembers(false);
+												}
+											}}
+											className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline disabled:opacity-50"
+										>
+											<Users className="size-3" />
+											{t("settings.customFields.populateFromMembers")}
+										</button>
+									</div>
+									<div className="space-y-1">
+										{options.map((opt, i) => (
+											<div
+												key={opt.value + i.toString()}
+												className="flex items-center gap-2"
+											>
+												<ColorSwatchPicker
+													value={opt.color}
+													onChange={(color) => {
+														const updated = [...options];
+														updated[i] = { ...updated[i], color };
+														setOptions(updated);
+													}}
+													triggerLabel={t("settings.customFields.optionColorLabel")}
+													customColorTitle={t(
+														"taskStatuses.formDialog.customColorTitle",
+													)}
+													clearLabel={t("settings.customFields.noColor")}
+												/>
+												<Input
+													value={opt.value}
+													onChange={(e) => {
+														const updated = [...options];
+														updated[i] = { ...updated[i], value: e.target.value };
+														setOptions(updated);
+													}}
+													className="text-xs h-8"
+												/>
+												<button
+													type="button"
+													onClick={() =>
+														setOptions(options.filter((_, j) => j !== i))
+													}
+													className="shrink-0 text-muted-foreground hover:text-destructive"
+												>
+													<X className="size-3.5" />
+												</button>
+											</div>
+										))}
+										<div className="flex gap-2">
+											<Input
+												value={newOption}
+												onChange={(e) => setNewOption(e.target.value)}
+												onKeyDown={(e) => {
+													if (e.key === "Enter" && newOption.trim()) {
+														setOptions([...options, { value: newOption.trim() }]);
+														setNewOption("");
+													}
+												}}
+												placeholder={t(
+													"settings.customFields.addOptionPlaceholder",
+												)}
+												className="text-xs h-8"
+											/>
+											<button
+												type="button"
+												disabled={!newOption.trim()}
+												onClick={() => {
+													setOptions([...options, { value: newOption.trim() }]);
+													setNewOption("");
+												}}
+												className="flex items-center gap-1 rounded-md bg-muted px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/80 disabled:opacity-40"
+											>
+												<Plus className="size-3" />
+												{t("settings.customFields.addOption")}
+											</button>
+										</div>
+									</div>
+								</div>
+							)}
 						</div>
 					)}
 
@@ -982,8 +1152,14 @@ export function CustomFieldsSettings({
 										{field.field_key}
 									</TableCell>
 									<TableCell className="px-5">
-										<span className="inline-flex items-center rounded-md border border-border/40 bg-muted/40 px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+										<span className="inline-flex items-center gap-1 rounded-md border border-border/40 bg-muted/40 px-2 py-0.5 text-xs font-semibold text-muted-foreground">
 											{toUIFieldType(field.field_type, t)}
+											{field.option_source === "project_members" && (
+												<span className="inline-flex items-center gap-0.5 text-[10px] font-normal text-primary">
+													<Users className="size-2.5" />
+													{t("settings.customFields.optionSourceTeamBadge")}
+												</span>
+											)}
 										</span>
 									</TableCell>
 									<TableCell className="px-5">

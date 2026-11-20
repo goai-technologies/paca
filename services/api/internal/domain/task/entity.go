@@ -118,6 +118,17 @@ func ClampLongTextRows(rows int) int {
 	return rows
 }
 
+// OptionSource indicates where options come from for select / multi_select fields.
+const (
+	OptionSourceManual         = "manual"
+	OptionSourceProjectMembers = "project_members"
+)
+
+// ValidOptionSource returns true if s is a supported option source.
+func ValidOptionSource(s string) bool {
+	return s == "" || s == OptionSourceManual || s == OptionSourceProjectMembers
+}
+
 // CustomFieldOption is one selectable value of a select / multi_select
 // custom field. Color is an optional hex string (e.g. "#6366f1") used to
 // render the value as a colored badge; nil means no color was chosen and
@@ -142,6 +153,7 @@ type CustomFieldDefinition struct {
 	DisplayName string
 	FieldType   FieldType
 	Options     []CustomFieldOption // populated for select / multi_select types
+	OptionSource string             // "manual" | "project_members"
 	IsRequired  bool
 	// Rows is the number of visible lines of a long_text field's editor.
 	Rows int

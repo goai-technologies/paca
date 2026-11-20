@@ -340,8 +340,19 @@ func (f *fakeTaskSvc) GetCustomFieldDefinition(_ context.Context, _, _ uuid.UUID
 	return nil, taskdom.ErrCustomFieldNotFound
 }
 
-func (f *fakeTaskSvc) CreateCustomFieldDefinition(_ context.Context, _ taskdom.CreateCustomFieldDefinitionInput) (*taskdom.CustomFieldDefinition, error) {
-	return nil, nil
+func (f *fakeTaskSvc) CreateCustomFieldDefinition(_ context.Context, in taskdom.CreateCustomFieldDefinitionInput) (*taskdom.CustomFieldDefinition, error) {
+	return &taskdom.CustomFieldDefinition{
+		ID:           uuid.New(),
+		ProjectID:    in.ProjectID,
+		FieldKey:     in.FieldKey,
+		DisplayName:  in.DisplayName,
+		FieldType:    in.FieldType,
+		Options:      in.Options,
+		OptionSource: in.OptionSource,
+		IsRequired:   in.IsRequired,
+		UseInSearch:  in.UseInSearch,
+		Rows:         in.Rows,
+	}, nil
 }
 
 func (f *fakeTaskSvc) UpdateCustomFieldDefinition(_ context.Context, _, _ uuid.UUID, _ taskdom.UpdateCustomFieldDefinitionInput) (*taskdom.CustomFieldDefinition, error) {
@@ -2412,6 +2423,53 @@ func TestTaskHandler_CreateCustomFieldDefinition_MissingFieldType_Returns400(t *
 	)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for missing field_type, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTaskHandler_CreateCustomFieldDefinition_InvalidOptionSource_Returns400(t *testing.T) {
+	svc := newFakeTaskSvc()
+	r := buildCustomFieldRouter(svc)
+	projectID := uuid.New()
+	w := doTaskRequest(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/custom-fields", projectID),
+		map[string]any{
+			"field_key":     "team_member",
+			"display_name":  "Team Member",
+			"field_type":    "select",
+			"option_source": "invalid_source",
+		},
+	)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid option_source, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTaskHandler_CreateCustomFieldDefinition_ProjectMembersOptionSource_Succeeds(t *testing.T) {
+	svc := newFakeTaskSvc()
+	r := buildCustomFieldRouter(svc)
+	projectID := uuid.New()
+	w := doTaskRequest(r, http.MethodPost,
+		fmt.Sprintf("/projects/%s/custom-fields", projectID),
+		map[string]any{
+			"field_key":     "reviewer",
+			"display_name":  "Reviewer",
+			"field_type":    "select",
+			"option_source": "project_members",
+		},
+	)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for project_members option_source, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data struct {
+			OptionSource string `json:"option_source"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Data.OptionSource != "project_members" {
+		t.Fatalf("expected option_source 'project_members', got %q", resp.Data.OptionSource)
 	}
 }
 

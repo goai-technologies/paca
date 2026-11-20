@@ -433,6 +433,7 @@ export interface CustomFieldDefinition {
 	display_name: string;
 	field_type: FieldType;
 	options: CustomFieldOption[];
+	option_source?: "manual" | "project_members" | string;
 	is_required: boolean;
 	use_in_search: boolean;
 	/** Visible lines of a long_text field's editor. */
@@ -467,6 +468,7 @@ export async function createCustomFieldDefinition(
 		field_key: string;
 		field_type: FieldType;
 		options?: CustomFieldOption[];
+		option_source?: "manual" | "project_members" | string;
 		is_required?: boolean;
 		use_in_search?: boolean;
 		rows?: number;
@@ -484,6 +486,7 @@ export async function updateCustomFieldDefinition(
 	payload: {
 		display_name?: string;
 		options?: CustomFieldOption[];
+		option_source?: "manual" | "project_members" | string;
 		is_required?: boolean;
 		use_in_search?: boolean;
 		rows?: number;
@@ -639,6 +642,15 @@ export const projectMemberTotalQueryOptions = (projectId: string) =>
 		queryFn: async () =>
 			(await listProjectMembers(projectId, { pageSize: 1 })).total_count,
 		staleTime: 15_000,
+	});
+
+/** Full list of project members for member-based select fields and pickers. */
+export const projectMembersListQueryOptions = (projectId: string) =>
+	queryOptions({
+		queryKey: ["projects", projectId, "members", "list"],
+		queryFn: async () =>
+			(await listProjectMembers(projectId, { pageSize: 100 })).items,
+		staleTime: 30_000,
 	});
 
 /** Which of `ids` (account ids) are members of the project. */

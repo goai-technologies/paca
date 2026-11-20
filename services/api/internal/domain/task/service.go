@@ -263,6 +263,7 @@ type CreateCustomFieldDefinitionInput struct {
 	DisplayName string
 	FieldType   FieldType
 	Options     []CustomFieldOption
+	OptionSource string
 	IsRequired  bool
 	UseInSearch bool
 	Rows        int
@@ -274,6 +275,7 @@ type UpdateCustomFieldDefinitionInput struct {
 	DisplayName string
 	FieldType   *FieldType
 	Options     []CustomFieldOption
+	OptionSource *string
 	IsRequired  *bool
 	UseInSearch *bool
 	Rows        *int
