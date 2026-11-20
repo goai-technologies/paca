@@ -2445,7 +2445,6 @@
 			"sortAscending": "По возрастанию",
 			"sortDescending": "По убыванию",
 			"sortOptions": {
-				"manual": "Вручную",
 				"cardId": "ID карточки",
 				"priority": "Приоритет",
 				"status": "Статус",

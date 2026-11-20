@@ -2424,7 +2424,6 @@
 			"sortAscending": "Tăng dần",
 			"sortDescending": "Giảm dần",
 			"sortOptions": {
-				"manual": "Thủ công",
 				"cardId": "Mã thẻ",
 				"priority": "Độ ưu tiên",
 				"status": "Trạng thái",

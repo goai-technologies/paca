@@ -253,13 +253,13 @@ export function GanttView({
 	const [overGroupKey, setOverGroupKey] = useState<string | null>(null);
 	const [overTaskId, setOverTaskId] = useState<string | null>(null);
 	const [activeSortBy, setActiveSortBy] = useState<string>(() => {
-		if (sortByProp) return sortByProp;
-		if (viewConfig?.sort_by) return viewConfig.sort_by;
+		if (sortByProp && sortByProp !== "manual") return sortByProp;
+		if (viewConfig?.sort_by && viewConfig.sort_by !== "manual") return viewConfig.sort_by;
 		if (typeof window !== "undefined" && projectId) {
 			const saved = localStorage.getItem(`paca:timeline:sort_by:${projectId}`);
-			if (saved) return saved;
+			if (saved && saved !== "manual") return saved;
 		}
-		return "manual";
+		return "";
 	});
 
 	const [activeSortDir, setActiveSortDir] = useState<SortDirection>(() => {
@@ -278,7 +278,9 @@ export function GanttView({
 	});
 
 	useEffect(() => {
-		if (sortByProp && sortByProp !== activeSortBy) setActiveSortBy(sortByProp);
+		if (sortByProp !== undefined && sortByProp !== activeSortBy) {
+			setActiveSortBy(sortByProp === "manual" ? "" : sortByProp);
+		}
 	}, [sortByProp, activeSortBy]);
 
 	useEffect(() => {
@@ -309,12 +311,12 @@ export function GanttView({
 	const activeSortLabel: string = activeSortOption
 		? String((t as (k: string) => string)(activeSortOption.labelKey))
 		: String(
-				(t as (k: string) => string)("layout.timeline.sortOptions.manual"),
+				(t as (k: string) => string)("layout.timeline.sortByLabel"),
 			);
 
 	const isStatusGrouping = !columnBy || columnBy === "status";
 	const canDrag = canEdit && !!onMoveToColumn;
-	const canReorder = manualSort && activeSortBy === "manual" && !!onReorderTask;
+	const canReorder = manualSort && (!activeSortBy || activeSortBy === "manual") && !!onReorderTask;
 	const canReschedule = canEdit && !!onRescheduleTask;
 
 	const dragStartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1069,8 +1071,11 @@ export function GanttView({
 							{TIMELINE_SORT_OPTIONS.map((opt) => (
 								<DropdownMenuItem
 									key={opt.key}
-									onClick={() => handleSortChange(opt.key, activeSortDir)}
-									className="flex items-center justify-between text-xs"
+									onClick={() => {
+										const nextField = activeSortBy === opt.key ? "" : opt.key;
+										handleSortChange(nextField, activeSortDir);
+									}}
+									className="flex items-center justify-between text-xs cursor-pointer"
 								>
 									<span>
 										{String((t as (k: string) => string)(opt.labelKey))}
@@ -1083,7 +1088,7 @@ export function GanttView({
 						</DropdownMenuContent>
 					</DropdownMenu>
 
-					{activeSortBy !== "manual" && (
+					{activeSortBy && activeSortBy !== "manual" && (
 						<button
 							type="button"
 							onClick={handleToggleDirection}
@@ -1134,7 +1139,7 @@ export function GanttView({
 								<span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/55 truncate">
 									{t("layout.gantt.taskColumnLabel")}
 								</span>
-								{activeSortBy !== "manual" && (
+								{activeSortBy && activeSortBy !== "manual" && (
 									<span className="ml-1 text-[10px] font-medium text-primary/90 bg-primary/10 rounded px-1.5 py-0.5 truncate">
 										{activeSortLabel} {activeSortDir === "asc" ? "↑" : "↓"}
 									</span>
