@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Paca-AI/api/internal/apierr"
 	attachmentdom "github.com/Paca-AI/api/internal/domain/attachment"
 	settingsdom "github.com/Paca-AI/api/internal/domain/settings"
-	"github.com/Paca-AI/api/internal/apierr"
 	"github.com/Paca-AI/api/internal/transport/http/dto"
 	"github.com/Paca-AI/api/internal/transport/http/middleware"
 	"github.com/Paca-AI/api/internal/transport/http/presenter"

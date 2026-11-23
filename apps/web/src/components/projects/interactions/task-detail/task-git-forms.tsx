@@ -220,7 +220,6 @@ export function LinkChangeRequestForm({
 					disabled={link.isPending}
 					aria-invalid={!!error}
 					autoComplete="off"
-					// biome-ignore lint/a11y/noAutofocus: opened on demand by the user
 					autoFocus
 					onChange={(e) => {
 						setValue(e.target.value);
@@ -335,7 +334,6 @@ export function LinkBranchForm({
 					disabled={link.isPending}
 					aria-invalid={!!error}
 					autoComplete="off"
-					// biome-ignore lint/a11y/noAutofocus: opened on demand by the user
 					autoFocus
 					onChange={(e) => {
 						setValue(e.target.value);

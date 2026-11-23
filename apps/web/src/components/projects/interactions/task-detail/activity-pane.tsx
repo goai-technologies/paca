@@ -48,7 +48,9 @@ export function TaskActivityPane({
 	const { data: currentUser } = useQuery(currentUserQueryOptions);
 	const { data: statusesData } = useQuery(taskStatusesQueryOptions(projectId));
 	const { data: taskTypesData } = useQuery(taskTypesQueryOptions(projectId));
-	const { data: customFieldsData } = useQuery(customFieldsQueryOptions(projectId));
+	const { data: customFieldsData } = useQuery(
+		customFieldsQueryOptions(projectId),
+	);
 
 	const myMemberId = currentUser ? getMember(currentUser.id)?.id : undefined;
 
@@ -167,9 +169,7 @@ export function TaskActivityPane({
 	const handleRevert = useCallback(
 		async (entry: Activity) => {
 			const c = entry.content as Record<string, unknown> | null;
-			const changes = c?.changes as
-				| FieldChange[]
-				| undefined;
+			const changes = c?.changes as FieldChange[] | undefined;
 			if (!changes?.length) return;
 
 			const payload: Parameters<typeof updateTask>[2] = {};
@@ -242,16 +242,14 @@ export function TaskActivityPane({
 						}
 						break;
 					case "story_points":
-						payload.story_points =
-							typeof oldVal === "number" ? oldVal : null;
+						payload.story_points = typeof oldVal === "number" ? oldVal : null;
 						break;
 					default: {
 						const key =
 							ch.field_key ||
 							customFieldsData?.find(
 								(cf) =>
-									cf.display_name === ch.field ||
-									cf.field_key === ch.field,
+									cf.display_name === ch.field || cf.field_key === ch.field,
 							)?.field_key;
 						if (key) {
 							if (!payload.custom_fields) {
