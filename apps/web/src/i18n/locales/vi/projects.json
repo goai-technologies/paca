@@ -2265,6 +2265,9 @@
 			"renameView": "Đổi tên chế độ xem",
 			"deleteView": "Xóa chế độ xem",
 			"searchTasksPlaceholder": "Tìm kiếm nhiệm vụ…",
+			"cardCreated": "Đã tạo thẻ {{cardNumber}}",
+			"cardCreatedNoNum": "Đã tạo thẻ",
+			"viewCard": "Xem",
 			"pluginNotAvailable": "Plugin không khả dụng",
 			"columnsTruncated": "Chỉ hiển thị {{max}} cột đầu tiên; một số tác vụ không nằm trong cột nào. Hãy thu hẹp chế độ xem bằng bộ lọc để xem phần còn lại.",
 			"viewErrors": {

@@ -47,6 +47,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/toast";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import {
 	ApiErrorCode,
@@ -1556,7 +1557,6 @@ export function InteractionLayout({
 	);
 
 	const createTaskMutation = useMutation({
-		meta: { success: "created", subject: "task" },
 		mutationFn: async (payload: {
 			title: string;
 			statusId: string;
@@ -1581,12 +1581,36 @@ export function InteractionLayout({
 			}
 			return task;
 		},
-		onSuccess: () => {
+		onSuccess: (task) => {
 			qc.invalidateQueries({ queryKey: tasksListQueryKey });
 			// A newly created (non-done) task changes its sprint's incomplete-task
 			// count (surfaced in the Complete Sprint dialog's move-to-sprint
 			// suggestion), so refresh the sprint-scoped queries too.
 			qc.invalidateQueries({ queryKey: ["projects", projectId, "sprints"] });
+
+			if (task) {
+				qc.setQueryData(taskQueryOptions(projectId, task.id).queryKey, task);
+				const formattedCardNumber =
+					taskIdPrefix && task.task_number > 0
+						? `${taskIdPrefix}-${task.task_number}`
+						: task.task_number > 0
+							? `#${task.task_number}`
+							: "";
+
+				toast.add({
+					type: "success",
+					title: formattedCardNumber
+						? t("layout.shell.cardCreated", {
+								cardNumber: formattedCardNumber,
+							})
+						: t("layout.shell.cardCreatedNoNum"),
+					description: task.title,
+					actionProps: {
+						children: t("layout.shell.viewCard"),
+						onClick: () => handleTaskClick(task),
+					},
+				});
+			}
 		},
 	});
 

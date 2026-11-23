@@ -1649,12 +1649,14 @@ func (r *TaskRepository) CreateTask(ctx context.Context, t *taskdom.Task) error 
 
 	return WithTx(ctx, r.db, func(tx *sqlx.Tx) error {
 		// Atomically increment the per-project counter and retrieve its new value.
+		// Uses GREATEST with COALESCE(MAX(task_number)) so seeded or restored
+		// tasks never cause duplicate key collisions on uq_tasks_project_task_number.
 		var counter taskCounterRecord
 		if err := tx.GetContext(ctx, &counter, `
 			INSERT INTO task_counters (project_id, last_value)
-			VALUES ($1, 1)
+			VALUES ($1, (SELECT COALESCE(MAX(task_number), 0) + 1 FROM tasks WHERE project_id = $1))
 			ON CONFLICT (project_id) DO UPDATE
-			  SET last_value = task_counters.last_value + 1
+			  SET last_value = GREATEST(task_counters.last_value, (SELECT COALESCE(MAX(task_number), 0) FROM tasks WHERE project_id = $1)) + 1
 			RETURNING project_id, last_value`,
 			t.ProjectID.String(),
 		); err != nil {
