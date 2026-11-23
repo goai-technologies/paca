@@ -2,12 +2,14 @@ import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "@/components/ui/spinner";
+import { toast } from "@/components/ui/toast";
 
 import {
 	type ChildTaskFilters,
 	childTasksInfiniteQueryOptions,
 	createTask,
 	type Task,
+	taskQueryOptions,
 } from "@/lib/interaction-api";
 import type { TaskStatus, TaskType } from "@/lib/project-api";
 
@@ -66,7 +68,7 @@ export function SubtaskRows({
 
 	const handleAdd = async (title: string, typeId: string | null) => {
 		const todo = statuses.find((s) => s.category === "todo") ?? statuses[0];
-		await createTask(projectId, {
+		const subtask = await createTask(projectId, {
 			title,
 			task_type_id: typeId,
 			status_id: todo?.id ?? null,
@@ -74,6 +76,34 @@ export function SubtaskRows({
 			sprint_id: parent.sprint_id ?? null,
 		});
 		await qc.invalidateQueries({ queryKey: ["projects", projectId, "tasks"] });
+
+		if (subtask) {
+			qc.setQueryData(
+				taskQueryOptions(projectId, subtask.id).queryKey,
+				subtask,
+			);
+			const prefix = rowProps.taskIdPrefix ?? "";
+			const formattedCardNumber =
+				prefix && subtask.task_number > 0
+					? `${prefix}-${subtask.task_number}`
+					: subtask.task_number > 0
+						? `#${subtask.task_number}`
+						: "";
+
+			toast.add({
+				type: "success",
+				title: formattedCardNumber
+					? t("layout.shell.cardCreated", {
+							cardNumber: formattedCardNumber,
+						})
+					: t("layout.shell.cardCreatedNoNum"),
+				description: subtask.title,
+				actionProps: {
+					children: t("layout.shell.viewCard"),
+					onClick: () => onTaskClick(subtask),
+				},
+			});
+		}
 	};
 
 	if (query.isPending) {

@@ -2266,6 +2266,9 @@
 			"renameView": "Renomear visão",
 			"deleteView": "Excluir visão",
 			"searchTasksPlaceholder": "Buscar tarefas…",
+			"cardCreated": "Cartão {{cardNumber}} criado",
+			"cardCreatedNoNum": "Cartão criado",
+			"viewCard": "Ver",
 			"pluginNotAvailable": "Plugin não disponível",
 			"columnsTruncated": "Somente as primeiras {{max}} colunas são exibidas; algumas tarefas não estão em nenhuma coluna. Restrinja a visualização com um filtro para ver o restante.",
 			"viewErrors": {

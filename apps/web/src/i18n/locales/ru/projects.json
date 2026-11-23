@@ -2286,6 +2286,9 @@
 			"renameView": "Переименовать представление",
 			"deleteView": "Удалить представление",
 			"searchTasksPlaceholder": "Поиск задач…",
+			"cardCreated": "Карточка {{cardNumber}} создана",
+			"cardCreatedNoNum": "Карточка создана",
+			"viewCard": "Открыть",
 			"pluginNotAvailable": "Плагин недоступен",
 			"columnsTruncated": "Показаны только первые {{max}} столбцов; некоторые задачи не попали ни в один столбец. Сузьте представление фильтром, чтобы увидеть остальное.",
 			"viewErrors": {
