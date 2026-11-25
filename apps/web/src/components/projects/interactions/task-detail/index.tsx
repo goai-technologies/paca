@@ -262,6 +262,8 @@ export function TaskDetailModal({
 					return key.includes("tasks") || key.includes("backlog-tasks");
 				},
 			});
+			// Tag suggestions are workspace-wide — refresh after any tag edit.
+			qc.invalidateQueries({ queryKey: ["workspace", "tag-suggestions"] });
 			// A commitment's title, status or project shows in every ticket's
 			// Commitment picker.
 			if (isCommitmentType(taskType)) {

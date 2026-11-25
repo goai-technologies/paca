@@ -98,6 +98,10 @@ func (permissiveTaskRepo) ListDistinctTags(context.Context, uuid.UUID) ([]string
 	return nil, nil
 }
 
+func (permissiveTaskRepo) ListDistinctTagsByProjects(context.Context, []uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
 var _ taskdom.TaskRepository = permissiveTaskRepo{}
 
 // ---------------------------------------------------------------------------
