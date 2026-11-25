@@ -1497,14 +1497,30 @@ func (r *TaskRepository) CountOpenTasksByProjects(ctx context.Context, projectID
 // array of strings (see the tags column's containment filter above in
 // applyTaskFilter), so jsonb_array_elements_text unnests it for DISTINCT.
 func (r *TaskRepository) ListDistinctTags(ctx context.Context, projectID uuid.UUID) ([]string, error) {
+	return r.ListDistinctTagsByProjects(ctx, []uuid.UUID{projectID})
+}
+
+// ListDistinctTagsByProjects returns every distinct tag value used by any
+// non-deleted task across projectIDs, sorted alphabetically. Used by the
+// workspace-wide tag suggestion list (PE-17) so a tag created in one
+// project can be reused on cards in another.
+func (r *TaskRepository) ListDistinctTagsByProjects(ctx context.Context, projectIDs []uuid.UUID) ([]string, error) {
+	if len(projectIDs) == 0 {
+		return []string{}, nil
+	}
+	b := newQueryBuilder()
+	b.addInClause("project_id", uuidSliceToStrSlice(projectIDs))
 	var tags []string
 	query := `
 		SELECT DISTINCT tag
 		FROM tasks, LATERAL jsonb_array_elements_text(tags) AS tag
-		WHERE project_id = $1 AND deleted_at IS NULL
+		WHERE deleted_at IS NULL AND ` + strings.Join(b.whereClauses, " AND ") + `
 		ORDER BY tag ASC`
-	if err := r.db.SelectContext(ctx, &tags, query, projectID.String()); err != nil {
-		return nil, fmt.Errorf("task repo: list distinct tags: %w", err)
+	if err := r.db.SelectContext(ctx, &tags, query, b.args...); err != nil {
+		return nil, fmt.Errorf("task repo: list distinct tags by projects: %w", err)
+	}
+	if tags == nil {
+		tags = []string{}
 	}
 	return tags, nil
 }

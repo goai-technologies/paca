@@ -163,6 +163,10 @@ func (f *fakeTaskSvc) ListDistinctTags(_ context.Context, _ uuid.UUID) ([]string
 	return nil, nil
 }
 
+func (f *fakeTaskSvc) ListDistinctTagsByProjects(_ context.Context, _ []uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
 func (f *fakeTaskSvc) ListAssignedTasks(_ context.Context, memberIDs []uuid.UUID, limit int, _ *string) ([]*taskdom.Task, bool, error) {
 	f.mu.Lock()
 	f.lastAssignedMemberIDs = memberIDs

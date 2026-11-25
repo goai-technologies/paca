@@ -657,6 +657,12 @@ func (s *Service) ListDistinctTags(ctx context.Context, projectID uuid.UUID) ([]
 	return s.repo.ListDistinctTags(ctx, projectID)
 }
 
+// ListDistinctTagsByProjects returns distinct tags across projectIDs —
+// see taskdom.Repository.ListDistinctTagsByProjects.
+func (s *Service) ListDistinctTagsByProjects(ctx context.Context, projectIDs []uuid.UUID) ([]string, error) {
+	return s.repo.ListDistinctTagsByProjects(ctx, projectIDs)
+}
+
 // ListGroupColumns returns the columns of a group-by dimension — see
 // taskdom.Repository.ListGroupColumns. by is one of the taskdom.GroupBy*
 // dimensions with data-derived columns (tags, assignee, reporter) or the key of

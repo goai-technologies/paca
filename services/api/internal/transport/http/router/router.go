@@ -423,6 +423,10 @@ func New(deps Deps) http.Handler {
 				r.With(require.Global(iam.ActionProjectsCreate)).Post("/projects", deps.Project.CreateProject)
 				if deps.Task != nil {
 					r.With(require.TaskByKey(iam.ActionTasksRead)).Get("/tasks/by-key/{taskKey}", deps.Task.GetTaskByKey)
+					// Workspace-wide distinct tags across the caller's projects
+					// (PE-17 suggestions). Authenticated only — scoped inside
+					// the handler to ListAccessible projects.
+					r.Get("/tags", deps.Task.ListWorkspaceTags)
 				}
 			})
 
