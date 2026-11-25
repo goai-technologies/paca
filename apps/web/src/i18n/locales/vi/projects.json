@@ -1858,7 +1858,10 @@
 			},
 			"tagsEditor": {
 				"addTag": "Thêm thẻ",
-				"addTagPlaceholder": "Thêm thẻ..."
+				"addTagPlaceholder": "Thêm thẻ...",
+				"createTag": "Tạo \"{{tag}}\"",
+				"noSuggestions": "Không có thẻ khớp — nhập để tạo mới",
+				"loadFailed": "Không thể tải thẻ của dự án"
 			},
 			"multiSelectEditor": {
 				"addOption": "Thêm tùy chọn"

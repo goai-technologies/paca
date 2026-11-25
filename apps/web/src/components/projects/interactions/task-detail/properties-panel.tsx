@@ -299,6 +299,7 @@ export function PropertiesPanel({
 				<PropertyField
 					label={t("taskDetail.properties.tags")}
 					mode="tags"
+					projectId={task.project_id}
 					tags={task.tags ?? []}
 					onTagsChange={(tags) => onUpdate?.({ tags })}
 					canEdit={canEdit}
