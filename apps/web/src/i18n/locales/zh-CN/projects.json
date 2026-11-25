@@ -1858,7 +1858,10 @@
 			},
 			"tagsEditor": {
 				"addTag": "添加标签",
-				"addTagPlaceholder": "添加标签..."
+				"addTagPlaceholder": "添加标签...",
+				"createTag": "创建“{{tag}}”",
+				"noSuggestions": "没有匹配的标签 — 输入以创建",
+				"loadFailed": "无法加载项目标签"
 			},
 			"multiSelectEditor": {
 				"addOption": "添加选项"

@@ -1858,7 +1858,10 @@
 			},
 			"tagsEditor": {
 				"addTag": "タグを追加",
-				"addTagPlaceholder": "タグを追加..."
+				"addTagPlaceholder": "タグを追加...",
+				"createTag": "「{{tag}}」を作成",
+				"noSuggestions": "一致するタグがありません — 入力して作成",
+				"loadFailed": "プロジェクトのタグを読み込めませんでした"
 			},
 			"multiSelectEditor": {
 				"addOption": "オプションを追加"

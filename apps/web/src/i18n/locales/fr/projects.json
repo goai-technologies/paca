@@ -1858,7 +1858,10 @@
 			},
 			"tagsEditor": {
 				"addTag": "Ajouter un tag",
-				"addTagPlaceholder": "Ajouter un tag..."
+				"addTagPlaceholder": "Ajouter un tag...",
+				"createTag": "Créer « {{tag}} »",
+				"noSuggestions": "Aucune étiquette correspondante — saisissez-en une pour la créer",
+				"loadFailed": "Impossible de charger les étiquettes du projet"
 			},
 			"multiSelectEditor": {
 				"addOption": "Ajouter une option"

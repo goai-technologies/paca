@@ -1858,7 +1858,10 @@
 			},
 			"tagsEditor": {
 				"addTag": "Adicionar tag",
-				"addTagPlaceholder": "Adicionar tag..."
+				"addTagPlaceholder": "Adicionar tag...",
+				"createTag": "Criar \"{{tag}}\"",
+				"noSuggestions": "Nenhuma tag correspondente — digite para criar",
+				"loadFailed": "Não foi possível carregar as tags do projeto"
 			},
 			"multiSelectEditor": {
 				"addOption": "Adicionar opção"

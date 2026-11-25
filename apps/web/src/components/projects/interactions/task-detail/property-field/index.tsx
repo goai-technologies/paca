@@ -47,6 +47,7 @@ export function PropertyField({
 	onUsersChange,
 	tags = [],
 	onTagsChange,
+	projectId,
 	displayValue,
 	linkValue,
 	onLinkClick,
@@ -166,7 +167,12 @@ export function PropertyField({
 
 			case "tags":
 				return (
-					<TagsEditor tags={tags} canEdit={canEdit} onChange={onTagsChange} />
+					<TagsEditor
+						tags={tags}
+						projectId={projectId}
+						canEdit={canEdit}
+						onChange={onTagsChange}
+					/>
 				);
 
 			case "readonly":

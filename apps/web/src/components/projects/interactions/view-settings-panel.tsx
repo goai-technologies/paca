@@ -77,7 +77,7 @@ import { memberAvatar } from "@/lib/provider-logos";
 import { useSprintDirectory } from "@/lib/sprint-directory";
 import { cn } from "@/lib/utils";
 import { PRIORITY_LEVELS } from "./priority";
-import { ChipField } from "./task-detail/property-field/chip-field";
+import { TagSuggestionsField } from "./task-detail/property-field/tag-suggestions-field";
 import { resolveSubtaskMode } from "./use-subtask-expansion";
 import {
 	buildAllFieldOptions,
@@ -866,57 +866,26 @@ function ImportanceFilterSection({
 // ── Tags filter ────────────────────────────────────────────────────────────────
 
 function TagsFilterSection({
+	projectId,
 	tags,
 	onChange,
 }: {
+	projectId: string;
 	tags: string[];
 	onChange: (tags: string[]) => void;
 }) {
 	const { t } = useTranslation("projects");
-	const [input, setInput] = useState("");
-
-	function handleAdd(tag: string) {
-		const trimmed = tag.trim();
-		if (!trimmed || tags.includes(trimmed)) return;
-		onChange([...tags, trimmed]);
-		setInput("");
-	}
-
-	function handleRemove(tag: string) {
-		onChange(tags.filter((x) => x !== tag));
-	}
 
 	return (
 		<div className="px-3 pb-3">
-			<ChipField
-				chips={tags.map((tag) => ({ key: tag, label: tag }))}
-				onRemoveChip={handleRemove}
+			<TagSuggestionsField
+				tags={tags}
+				projectId={projectId}
 				canEdit
 				addLabel={t("layout.viewSettings.tagsFilter.addTag")}
-			>
-				<form
-					onSubmit={(e) => {
-						e.preventDefault();
-						handleAdd(input);
-					}}
-				>
-					<input
-						// biome-ignore lint/a11y/noAutofocus: intentional for popover
-						autoFocus
-						type="text"
-						value={input}
-						onChange={(e) => setInput(e.target.value)}
-						placeholder={t("layout.viewSettings.tagsFilter.addTagPlaceholder")}
-						className="w-full rounded-lg border border-border/30 bg-muted/25 px-3 py-2 text-sm placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all duration-150"
-						onKeyDown={(e) => {
-							if (e.key === "Enter") {
-								e.preventDefault();
-								handleAdd(input);
-							}
-						}}
-					/>
-				</form>
-			</ChipField>
+				placeholder={t("layout.viewSettings.tagsFilter.addTagPlaceholder")}
+				onChange={onChange}
+			/>
 		</div>
 	);
 }
@@ -1804,6 +1773,7 @@ export function ViewSettingsPanel({
 								defaultOpen={filterTags.length > 0}
 							>
 								<TagsFilterSection
+									projectId={projectId}
 									tags={filterTags}
 									onChange={(tags) =>
 										updateFilters({

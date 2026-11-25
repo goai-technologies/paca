@@ -1858,7 +1858,10 @@
 			},
 			"tagsEditor": {
 				"addTag": "태그 추가",
-				"addTagPlaceholder": "태그 추가..."
+				"addTagPlaceholder": "태그 추가...",
+				"createTag": "\"{{tag}}\" 만들기",
+				"noSuggestions": "일치하는 태그가 없습니다 — 입력하여 만들기",
+				"loadFailed": "프로젝트 태그를 불러올 수 없습니다"
 			},
 			"multiSelectEditor": {
 				"addOption": "옵션 추가"
