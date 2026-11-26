@@ -103,6 +103,31 @@ func TestViewFromEntity_FiltersRoundtrip(t *testing.T) {
 	}
 }
 
+// TestViewFromEntity_TagsFilterRoundtrip verifies tags filters survive the
+// entity → DTO mapping used when loading a saved view (PE-17).
+func TestViewFromEntity_TagsFilterRoundtrip(t *testing.T) {
+	entity := &sprintdom.SprintView{
+		ID:        uuid.New(),
+		ProjectID: uuid.New(),
+		Name:      "Board",
+		ViewType:  sprintdom.ViewTypeBoard,
+		Config: sprintdom.ViewConfig{
+			Filters: &sprintdom.ViewFilters{
+				Tags: []string{"urgent", "pdm"},
+			},
+		},
+	}
+
+	resp := dto.ViewFromEntity(entity)
+	if resp.Config.Filters == nil {
+		t.Fatal("expected non-nil Filters")
+	}
+	got := resp.Config.Filters.Tags
+	if len(got) != 2 || got[0] != "urgent" || got[1] != "pdm" {
+		t.Fatalf("Tags = %#v, want [urgent pdm]", got)
+	}
+}
+
 // TestViewFromEntity_NilFilters verifies that a nil Filters field maps to nil
 // in the DTO (no panic).
 func TestViewFromEntity_NilFilters(t *testing.T) {
