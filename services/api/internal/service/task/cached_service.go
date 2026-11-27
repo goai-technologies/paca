@@ -255,6 +255,11 @@ func (c *CachedService) ListDistinctTags(ctx context.Context, projectID uuid.UUI
 	return c.svc.ListDistinctTags(ctx, projectID)
 }
 
+// ListDistinctTagsByProjects delegates to the underlying service without caching.
+func (c *CachedService) ListDistinctTagsByProjects(ctx context.Context, projectIDs []uuid.UUID) ([]string, error) {
+	return c.svc.ListDistinctTagsByProjects(ctx, projectIDs)
+}
+
 // ListAssignedTasks delegates directly to the underlying service (not cached).
 func (c *CachedService) ListAssignedTasks(ctx context.Context, memberIDs []uuid.UUID, limit int, cursorAfter *string) ([]*taskdom.Task, bool, error) {
 	return c.svc.ListAssignedTasks(ctx, memberIDs, limit, cursorAfter)

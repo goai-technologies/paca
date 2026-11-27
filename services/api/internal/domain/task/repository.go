@@ -139,6 +139,10 @@ type TaskRepository interface {
 	// fields — must only ever suggest tags the project has already used,
 	// never invent new ones.
 	ListDistinctTags(ctx context.Context, projectID uuid.UUID) ([]string, error)
+	// ListDistinctTagsByProjects is the cross-project form of
+	// ListDistinctTags — every distinct tag across the given projects,
+	// sorted alphabetically. Used for workspace-wide tag suggestions.
+	ListDistinctTagsByProjects(ctx context.Context, projectIDs []uuid.UUID) ([]string, error)
 	// ListGroupColumns returns the groups (columns) that exist for a group-by
 	// dimension among the tasks filter matches: one per tag, per assignee, per
 	// reporter, or per distinct value of a free-valued custom field (number,

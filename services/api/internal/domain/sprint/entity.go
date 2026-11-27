@@ -212,6 +212,9 @@ type ViewFilters struct {
 	Assignees    *FilterConfig                 `json:"assignees,omitempty"`
 	Sprints      *FilterConfig                 `json:"sprints,omitempty"`
 	CustomFields map[string]*CustomFieldFilter `json:"custom_fields,omitempty"`
+	// Tags matches tasks that have ANY of these tag values (same semantics
+	// as GET /tasks?tags=…). Empty/nil means no tag filter.
+	Tags []string `json:"tags,omitempty"`
 }
 
 // ViewConfig holds the display settings for a sprint view.

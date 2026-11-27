@@ -562,6 +562,10 @@ func (r *fakeTaskRepo) ListDistinctTags(_ context.Context, _ uuid.UUID) ([]strin
 	return nil, nil
 }
 
+func (r *fakeTaskRepo) ListDistinctTagsByProjects(_ context.Context, _ []uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Task Type tests
 // ---------------------------------------------------------------------------

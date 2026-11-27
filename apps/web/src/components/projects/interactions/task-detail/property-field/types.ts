@@ -74,6 +74,8 @@ export interface PropertyFieldProps {
 
 	tags?: string[];
 	onTagsChange?: (tags: string[]) => void;
+	/** Project scope for tag suggestions (other cards' tags). */
+	projectId?: string;
 
 	displayValue?: ReactNode;
 	linkValue?: string;

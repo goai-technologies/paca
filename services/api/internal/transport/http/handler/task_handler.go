@@ -947,6 +947,41 @@ func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ListWorkspaceTags handles GET /tags. It returns every distinct tag string
+// used on non-deleted tasks across every project the caller belongs to,
+// sorted alphabetically. Powers PE-17 tag suggestions so a tag created in
+// one project can be picked when editing a card in another.
+func (h *TaskHandler) ListWorkspaceTags(w http.ResponseWriter, r *http.Request) {
+	accountID, ok := requireAccountID(w, r)
+	if !ok {
+		return
+	}
+	if h.projectSvc == nil {
+		presenter.OK(w, r, map[string]any{"items": []string{}})
+		return
+	}
+	projects, _, err := h.projectSvc.ListAccessible(r.Context(), accountID, 1, 10000)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	projectIDs := make([]uuid.UUID, 0, len(projects))
+	for _, p := range projects {
+		if p != nil {
+			projectIDs = append(projectIDs, p.ID)
+		}
+	}
+	tags, err := h.svc.ListDistinctTagsByProjects(r.Context(), projectIDs)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	presenter.OK(w, r, map[string]any{"items": tags})
+}
+
 // ListAssignedToMe handles GET /users/me/tasks. It returns open (non-done)
 // tasks assigned to the authenticated user across every project they belong
 // to, ordered by importance (most important first) then created_at (oldest

@@ -1876,7 +1876,10 @@
 			},
 			"tagsEditor": {
 				"addTag": "Добавить тег",
-				"addTagPlaceholder": "Добавить тег..."
+				"addTagPlaceholder": "Добавить тег...",
+				"createTag": "Создать «{{tag}}»",
+				"noSuggestions": "Нет подходящих тегов — введите, чтобы создать",
+				"loadFailed": "Не удалось загрузить теги проекта"
 			},
 			"multiSelectEditor": {
 				"addOption": "Добавить опцию"
