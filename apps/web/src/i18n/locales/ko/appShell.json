@@ -31,7 +31,8 @@
 		"settings": "설정",
 		"changelog": "새로운 소식",
 		"activity": "활동",
-		"serviceAccounts": "서비스 계정"
+		"serviceAccounts": "서비스 계정",
+		"globalTasks": "전역 작업"
 	},
 	"projectSwitcher": {
 		"projects": "프로젝트",

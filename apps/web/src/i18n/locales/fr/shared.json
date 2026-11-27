@@ -82,7 +82,8 @@
 			"emptyDescription": "Aucune tâche ouverte ne vous est actuellement assignée.",
 			"loadError": "Impossible de charger vos tâches. Veuillez réessayer.",
 			"loadMore": "Charger plus",
-			"loading": "Chargement…"
+			"loading": "Chargement…",
+			"globalTasks": "Tâches globales"
 		},
 		"projectsSection": {
 			"title": "Projets",

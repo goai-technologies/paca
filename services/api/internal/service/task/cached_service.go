@@ -260,6 +260,16 @@ func (c *CachedService) ListAssignedTasks(ctx context.Context, memberIDs []uuid.
 	return c.svc.ListAssignedTasks(ctx, memberIDs, limit, cursorAfter)
 }
 
+// ListTasksAcrossProjects delegates directly to the underlying service (not cached).
+func (c *CachedService) ListTasksAcrossProjects(ctx context.Context, projectIDs []uuid.UUID, filter taskdom.TaskFilter, pageSize int, sort taskdom.TaskSort) ([]*taskdom.Task, bool, error) {
+	return c.svc.ListTasksAcrossProjects(ctx, projectIDs, filter, pageSize, sort)
+}
+
+// CountTasksAcrossProjects delegates directly to the underlying service (not cached).
+func (c *CachedService) CountTasksAcrossProjects(ctx context.Context, projectIDs []uuid.UUID, filter taskdom.TaskFilter) (int64, error) {
+	return c.svc.CountTasksAcrossProjects(ctx, projectIDs, filter)
+}
+
 // GetTask delegates directly to the underlying service (not cached).
 func (c *CachedService) GetTask(ctx context.Context, projectID, id uuid.UUID) (*taskdom.Task, error) {
 	return c.svc.GetTask(ctx, projectID, id)

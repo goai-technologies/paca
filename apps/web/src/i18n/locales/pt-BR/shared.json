@@ -82,7 +82,8 @@
 			"emptyDescription": "Nenhuma tarefa aberta está atribuída a você no momento.",
 			"loadError": "Não foi possível carregar suas tarefas. Tente novamente.",
 			"loadMore": "Carregar mais",
-			"loading": "Carregando…"
+			"loading": "Carregando…",
+			"globalTasks": "Tarefas Globais"
 		},
 		"projectsSection": {
 			"title": "Projetos",

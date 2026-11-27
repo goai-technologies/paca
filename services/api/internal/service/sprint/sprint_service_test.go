@@ -250,6 +250,14 @@ func (r *fakeTaskRepo) ListAssignedTasks(_ context.Context, _ []uuid.UUID, _ int
 	return nil, false, nil
 }
 
+func (r *fakeTaskRepo) ListTasksAcrossProjects(_ context.Context, _ []uuid.UUID, _ taskdom.TaskFilter, _ int, _ taskdom.TaskSort) ([]*taskdom.Task, bool, error) {
+	return nil, false, nil
+}
+
+func (r *fakeTaskRepo) CountTasksAcrossProjects(_ context.Context, _ []uuid.UUID, _ taskdom.TaskFilter) (int64, error) {
+	return 0, nil
+}
+
 func (r *fakeTaskRepo) CountOpenTasksByProjects(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }

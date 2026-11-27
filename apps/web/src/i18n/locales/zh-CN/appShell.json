@@ -31,7 +31,8 @@
 		"settings": "设置",
 		"changelog": "最新动态",
 		"activity": "动态",
-		"serviceAccounts": "服务账号"
+		"serviceAccounts": "服务账号",
+		"globalTasks": "全局任务"
 	},
 	"projectSwitcher": {
 		"projects": "项目",

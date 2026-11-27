@@ -697,6 +697,21 @@ func (s *Service) ListAssignedTasks(ctx context.Context, memberIDs []uuid.UUID, 
 	return s.repo.ListAssignedTasks(ctx, memberIDs, limit, cursorAfter)
 }
 
+// ListTasksAcrossProjects returns a page of tasks across projectIDs matching
+// filter — see taskdom.Repository.ListTasksAcrossProjects.
+func (s *Service) ListTasksAcrossProjects(ctx context.Context, projectIDs []uuid.UUID, filter taskdom.TaskFilter, pageSize int, sort taskdom.TaskSort) ([]*taskdom.Task, bool, error) {
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	return s.repo.ListTasksAcrossProjects(ctx, projectIDs, filter, pageSize, sort)
+}
+
+// CountTasksAcrossProjects returns how many tasks across projectIDs match
+// filter — see taskdom.Repository.CountTasksAcrossProjects.
+func (s *Service) CountTasksAcrossProjects(ctx context.Context, projectIDs []uuid.UUID, filter taskdom.TaskFilter) (int64, error) {
+	return s.repo.CountTasksAcrossProjects(ctx, projectIDs, filter)
+}
+
 // GetTask returns the task with the given ID, verifying it belongs to projectID.
 func (s *Service) GetTask(ctx context.Context, projectID, id uuid.UUID) (*taskdom.Task, error) {
 	t, err := s.repo.FindTaskByID(ctx, id)

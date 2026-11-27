@@ -82,7 +82,8 @@
 			"emptyDescription": "目前没有分配给你的未完成任务。",
 			"loadError": "无法加载你的任务，请重试。",
 			"loadMore": "加载更多",
-			"loading": "加载中…"
+			"loading": "加载中…",
+			"globalTasks": "全局任务"
 		},
 		"projectsSection": {
 			"title": "项目",

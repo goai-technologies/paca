@@ -31,7 +31,8 @@
 		"settings": "Cài đặt",
 		"changelog": "Có gì mới",
 		"activity": "Hoạt động",
-		"serviceAccounts": "Tài khoản dịch vụ"
+		"serviceAccounts": "Tài khoản dịch vụ",
+		"globalTasks": "Công việc toàn cục"
 	},
 	"projectSwitcher": {
 		"projects": "Dự án",

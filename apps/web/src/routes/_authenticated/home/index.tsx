@@ -12,6 +12,7 @@ import {
 	FolderKanban,
 	GitMerge,
 	Layers,
+	ListTodo,
 	Plus,
 	Users,
 	Zap,
@@ -45,6 +46,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { useCanAccessAdmin } from "@/hooks/use-can-access-admin";
 import { usePermissions } from "@/hooks/use-permissions";
 import { ApiErrorCode, getApiErrorCode } from "@/lib/api-error";
 import { currentUserQueryOptions } from "@/lib/auth-api";
@@ -431,6 +433,7 @@ function HomePage() {
 	} = useInfiniteQuery(projectsInfiniteQueryOptions());
 	const { data: workspaceStats } = useQuery(workspaceStatsQueryOptions());
 	const { hasPermission } = usePermissions();
+	const canAccessAdmin = useCanAccessAdmin();
 	const [createOpen, setCreateOpen] = useState(false);
 
 	const canCreate = hasPermission("projects:create");
@@ -440,6 +443,7 @@ function HomePage() {
 		[projectsData],
 	);
 	const projectCount = projectsData?.pages[0]?.total ?? 0;
+
 	const openTaskCount = workspaceStats?.open_task_count ?? 0;
 	const teamMemberCount = workspaceStats?.team_member_count ?? 0;
 	const aiAgentCount = workspaceStats?.ai_agent_count ?? 0;
@@ -559,13 +563,26 @@ function HomePage() {
 				{/* My Tasks — assigned to the current user across every project */}
 				{projectCount > 0 ? (
 					<div>
-						<div className="mb-4">
-							<h2 className="font-[Syne] text-base font-bold tracking-tight">
-								{t("home.myTasks.title")}
-							</h2>
-							<p className="text-xs text-muted-foreground mt-0.5">
-								{t("home.myTasks.subtitle")}
-							</p>
+						<div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+							<div className="min-w-0">
+								<h2 className="font-[Syne] text-base font-bold tracking-tight">
+									{t("home.myTasks.title")}
+								</h2>
+								<p className="text-xs text-muted-foreground mt-0.5">
+									{t("home.myTasks.subtitle")}
+								</p>
+							</div>
+							{canAccessAdmin ? (
+								<Button
+									size="sm"
+									variant="outline"
+									className="shrink-0 gap-1.5 border-border/60 self-start"
+									render={<Link to="/admin/global-tasks" />}
+								>
+									<ListTodo className="size-3.5" />
+									{t("home.myTasks.globalTasks")}
+								</Button>
+							) : null}
 						</div>
 						<AssignedTasksList />
 					</div>

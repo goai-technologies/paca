@@ -18,6 +18,7 @@
 	"nav": {
 		"home": "Home",
 		"administration": "Administration",
+		"globalTasks": "Global Tasks",
 		"globalRoles": "Global Roles",
 		"users": "Users",
 		"plugins": "Plugins",
