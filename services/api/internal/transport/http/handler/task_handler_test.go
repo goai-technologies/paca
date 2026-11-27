@@ -38,6 +38,7 @@ type fakeTaskSvc struct {
 	customFields          []*taskdom.CustomFieldDefinition
 	lastAssignedMemberIDs []uuid.UUID
 	lastColumnsBy         string
+	lastSearchProjectIDs  []uuid.UUID
 }
 
 func newFakeTaskSvc() *fakeTaskSvc {
@@ -188,6 +189,43 @@ func (f *fakeTaskSvc) ListAssignedTasks(_ context.Context, memberIDs []uuid.UUID
 		out = out[:limit]
 	}
 	return out, false, nil
+}
+
+func (f *fakeTaskSvc) ListTasksAcrossProjects(_ context.Context, projectIDs []uuid.UUID, filter taskdom.TaskFilter, _ int, _ taskdom.TaskSort) ([]*taskdom.Task, bool, error) {
+	f.mu.Lock()
+	f.lastFilter = filter
+	f.lastSearchProjectIDs = projectIDs
+	f.mu.Unlock()
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	want := make(map[uuid.UUID]bool, len(projectIDs))
+	for _, id := range projectIDs {
+		want[id] = true
+	}
+	var out []*taskdom.Task
+	for _, t := range f.tasks {
+		if want[t.ProjectID] {
+			cp := *t
+			out = append(out, &cp)
+		}
+	}
+	return out, false, nil
+}
+
+func (f *fakeTaskSvc) CountTasksAcrossProjects(_ context.Context, projectIDs []uuid.UUID, _ taskdom.TaskFilter) (int64, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	want := make(map[uuid.UUID]bool, len(projectIDs))
+	for _, id := range projectIDs {
+		want[id] = true
+	}
+	var count int64
+	for _, t := range f.tasks {
+		if want[t.ProjectID] {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (f *fakeTaskSvc) CountOpenTasksByProjects(_ context.Context, _ []uuid.UUID) (int64, error) {
@@ -2650,5 +2688,154 @@ func TestTaskHandler_ListTaskColumns_CustomFieldAndTruncation(t *testing.T) {
 	}
 	if n := strings.Count(w.Body.String(), `"key"`); n != taskdom.MaxGroupColumns {
 		t.Errorf("returned %d columns, want %d", n, taskdom.MaxGroupColumns)
+	}
+}
+
+// SearchTasks (GET /tasks/search)
+// ---------------------------------------------------------------------------
+
+func buildSearchTasksRouter(taskSvc *fakeTaskSvc, projectSvc *mockProjectSvc, userID uuid.UUID) chi.Router {
+	h := handler.NewTaskHandler(taskSvc, &fakeViewSvcTask{}, newFakeActivitySvc(),
+		handler.WithTaskAssignedProjectService(projectSvc))
+	r := chi.NewRouter()
+	r.Use(claimsMiddleware(userID.String()))
+	r.Get("/tasks/search", h.SearchTasks)
+	return r
+}
+
+func TestTaskHandler_SearchTasks_FiltersAcrossProjects(t *testing.T) {
+	userID := uuid.New()
+	projectA := &projectdom.Project{ID: uuid.New(), Name: "A"}
+	projectB := &projectdom.Project{ID: uuid.New(), Name: "B"}
+	assigneeUser := uuid.New()
+	statusID := uuid.New()
+
+	projectSvc := &mockProjectSvc{
+		listAccessible: func(_ context.Context, uid uuid.UUID, _, _ int) ([]*projectdom.Project, int64, error) {
+			if uid != userID {
+				t.Fatalf("unexpected userID: %s", uid)
+			}
+			return []*projectdom.Project{projectA, projectB}, 2, nil
+		},
+	}
+
+	taskSvc := newFakeTaskSvc()
+	_, _ = taskSvc.CreateTask(context.Background(), taskdom.CreateTaskInput{
+		ProjectID: projectA.ID, Title: "In A", StatusID: &statusID,
+	})
+	_, _ = taskSvc.CreateTask(context.Background(), taskdom.CreateTaskInput{
+		ProjectID: projectB.ID, Title: "In B", StatusID: &statusID,
+	})
+
+	r := buildSearchTasksRouter(taskSvc, projectSvc, userID)
+
+	// All accessible projects.
+	w := doTaskRequest(r, http.MethodGet, "/tasks/search?status_ids="+statusID.String(), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(taskSvc.lastSearchProjectIDs) != 2 {
+		t.Fatalf("expected 2 project IDs, got %v", taskSvc.lastSearchProjectIDs)
+	}
+	if len(taskSvc.lastFilter.StatusIDs) != 1 || taskSvc.lastFilter.StatusIDs[0] != statusID {
+		t.Fatalf("unexpected status filter: %+v", taskSvc.lastFilter.StatusIDs)
+	}
+
+	// Narrow by project_ids.
+	w = doTaskRequest(r, http.MethodGet,
+		fmt.Sprintf("/tasks/search?project_ids=%s", projectA.ID), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("project_ids: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(taskSvc.lastSearchProjectIDs) != 1 || taskSvc.lastSearchProjectIDs[0] != projectA.ID {
+		t.Fatalf("expected only project A, got %v", taskSvc.lastSearchProjectIDs)
+	}
+
+	// assignee_user_ids + known custom fields + created/updated dates.
+	// qa_by uses values (exact display-name match) — same shape the Admin
+	// Global Filter people multi-select sends.
+	cfJSON := url.QueryEscape(`{"priority":{"values":["High"]},"qa_by":{"values":["Jane","Alex"]},"dev_completion_date":{"after":"2026-01-01","before":"2026-12-31"}}`)
+	w = doTaskRequest(r, http.MethodGet,
+		fmt.Sprintf("/tasks/search?assignee_user_ids=%s&created_after=2026-01-01&created_before=2026-01-31&updated_after=2026-02-01&custom_field_filters=%s&importance_ranges=%s&tags=alpha,beta",
+			assigneeUser,
+			cfJSON,
+			url.QueryEscape(`[{"min":50,"max":99}]`),
+		), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("combined filters: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	f := taskSvc.lastFilter
+	if len(f.AssigneeUserIDs) != 1 || f.AssigneeUserIDs[0] != assigneeUser {
+		t.Fatalf("unexpected AssigneeUserIDs: %+v", f.AssigneeUserIDs)
+	}
+	if f.CreatedAfter == nil || f.CreatedBefore == nil || f.UpdatedAfter == nil {
+		t.Fatalf("expected created/updated bounds, got after=%v before=%v updated=%v", f.CreatedAfter, f.CreatedBefore, f.UpdatedAfter)
+	}
+	if len(f.ImportanceRanges) != 1 || f.ImportanceRanges[0].Min != 50 {
+		t.Fatalf("unexpected importance: %+v", f.ImportanceRanges)
+	}
+	if len(f.Tags) != 2 {
+		t.Fatalf("unexpected tags: %+v", f.Tags)
+	}
+	if got, ok := f.CustomFieldFilters["priority"]; !ok || len(got.Values) != 1 || got.Values[0] != "High" || got.FieldType != "select" {
+		t.Fatalf("expected priority select filter, got %+v", f.CustomFieldFilters)
+	}
+	if got, ok := f.CustomFieldFilters["qa_by"]; !ok || got.FieldType != "text" || len(got.Values) != 2 || got.Values[0] != "Jane" || got.Values[1] != "Alex" {
+		t.Fatalf("expected qa_by text values filter, got %+v", f.CustomFieldFilters)
+	}
+	if got, ok := f.CustomFieldFilters["dev_completion_date"]; !ok || got.FieldType != "date" {
+		t.Fatalf("expected dev_completion_date date filter, got %+v", f.CustomFieldFilters)
+	}
+
+	// Unknown custom field key is ignored.
+	w = doTaskRequest(r, http.MethodGet,
+		"/tasks/search?custom_field_filters="+url.QueryEscape(`{"unknown_field":{"contains":"x"}}`), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unknown CF: expected 200, got %d", w.Code)
+	}
+	if len(taskSvc.lastFilter.CustomFieldFilters) != 0 {
+		t.Fatalf("expected unknown CF key ignored, got %+v", taskSvc.lastFilter.CustomFieldFilters)
+	}
+
+	// Inaccessible project_ids → empty page (not an error).
+	w = doTaskRequest(r, http.MethodGet,
+		fmt.Sprintf("/tasks/search?project_ids=%s", uuid.New()), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("inaccessible project: expected 200, got %d", w.Code)
+	}
+	var env struct {
+		Data struct {
+			Items      []any   `json:"items"`
+			TotalCount float64 `json:"total_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(env.Data.Items) != 0 || env.Data.TotalCount != 0 {
+		t.Fatalf("expected empty result for inaccessible project, got %+v", env.Data)
+	}
+}
+
+func TestTaskHandler_SearchTasks_InvalidParams(t *testing.T) {
+	userID := uuid.New()
+	projectSvc := &mockProjectSvc{
+		listAccessible: func(context.Context, uuid.UUID, int, int) ([]*projectdom.Project, int64, error) {
+			return []*projectdom.Project{{ID: uuid.New()}}, 1, nil
+		},
+	}
+	r := buildSearchTasksRouter(newFakeTaskSvc(), projectSvc, userID)
+
+	for _, q := range []string{
+		"project_ids=not-a-uuid",
+		"assignee_user_ids=bad",
+		"created_after=not-a-date",
+		"updated_before=13-40",
+		"custom_field_filters=not-json",
+	} {
+		w := doTaskRequest(r, http.MethodGet, "/tasks/search?"+q, nil)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400, got %d", q, w.Code)
+		}
 	}
 }

@@ -108,10 +108,10 @@ func (h *TaskHandler) toActivityResponse(ctx context.Context, a *taskdom.Activit
 const assignedToMeMemberLookupConcurrency = 20
 
 // projectServiceForAssigned is the minimal project-service surface used by
-// ListAssignedToMe to resolve which projects the caller belongs to and their
-// per-project member ID — task_assignees references project_members.id, not
-// the global user ID, so a membership lookup is required before the tasks
-// can be queried.
+// ListAssignedToMe and SearchTasks to resolve which projects the caller can
+// see and their per-project member ID — task_assignees references
+// project_members.id, not the global user ID, so a membership lookup is
+// required before assigned-to-me tasks can be queried.
 type projectServiceForAssigned interface {
 	ListAccessible(ctx context.Context, accountID uuid.UUID, page, pageSize int) ([]*projectdom.Project, int64, error)
 	ListAllMembers(ctx context.Context, projectID uuid.UUID) ([]*projectdom.ProjectMember, error)
@@ -692,12 +692,114 @@ func (h *TaskHandler) parseTaskFilter(r *http.Request, projectID uuid.UUID) (tas
 		}
 		filter.Tags = tags
 	}
+	if ids, err := parseQueryUUIDs(r.URL.Query().Get("assignee_user_ids")); err != nil {
+		return filter, apierr.New(apierr.CodeBadRequest, "invalid assignee_user_ids")
+	} else if len(ids) > 0 {
+		filter.AssigneeUserIDs = ids
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("created_after")); raw != "" {
+		t, ok := parseCreatedAfterBound(raw)
+		if !ok {
+			return filter, apierr.New(apierr.CodeBadRequest, "invalid created_after")
+		}
+		filter.CreatedAfter = t
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("created_before")); raw != "" {
+		t, ok := parseCreatedBeforeBound(raw)
+		if !ok {
+			return filter, apierr.New(apierr.CodeBadRequest, "invalid created_before")
+		}
+		filter.CreatedBefore = t
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("updated_after")); raw != "" {
+		t, ok := parseCreatedAfterBound(raw)
+		if !ok {
+			return filter, apierr.New(apierr.CodeBadRequest, "invalid updated_after")
+		}
+		filter.UpdatedAfter = t
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("updated_before")); raw != "" {
+		t, ok := parseCreatedBeforeBound(raw)
+		if !ok {
+			return filter, apierr.New(apierr.CodeBadRequest, "invalid updated_before")
+		}
+		filter.UpdatedBefore = t
+	}
 	if by := strings.TrimSpace(r.URL.Query().Get("group_by")); by != "" {
 		group, err := h.parseTaskGroup(r, projectID, by)
 		if err != nil {
 			return filter, err
 		}
 		filter.Group = group
+	}
+	return filter, nil
+}
+
+// knownGlobalCustomFieldTypes maps well-known custom field keys used by the
+// cross-project task search UI to their field types. Types are never taken
+// from the client — they determine SQL casts.
+var knownGlobalCustomFieldTypes = map[string]string{
+	"priority":            string(taskdom.FieldTypeSelect),
+	"qa_by":               string(taskdom.FieldTypeText),
+	"qa_start_date":       string(taskdom.FieldTypeDate),
+	"qa_end_date":         string(taskdom.FieldTypeDate),
+	"dev_completion_date": string(taskdom.FieldTypeDate),
+}
+
+// parseKnownCustomFieldFilters decodes custom_field_filters for cross-project
+// search, resolving FieldType only for knownGlobalCustomFieldTypes keys.
+// Unknown keys are silently ignored (same as project-scoped parse).
+func parseKnownCustomFieldFilters(raw string) (map[string]taskdom.CustomFieldFilterQuery, error) {
+	var parsed map[string]customFieldFilterParam
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil, apierr.New(apierr.CodeBadRequest, "invalid custom_field_filters")
+	}
+	if len(parsed) == 0 {
+		return nil, nil
+	}
+	resolved := make(map[string]taskdom.CustomFieldFilterQuery, len(parsed))
+	for key, p := range parsed {
+		ft, ok := knownGlobalCustomFieldTypes[key]
+		if !ok {
+			continue
+		}
+		resolved[key] = taskdom.CustomFieldFilterQuery{
+			FieldType: ft,
+			Values:    p.Values,
+			Min:       p.Min,
+			Max:       p.Max,
+			After:     p.After,
+			Before:    p.Before,
+			Contains:  p.Contains,
+		}
+	}
+	return resolved, nil
+}
+
+// parseSearchTaskFilter builds a TaskFilter for GET /tasks/search. Same as
+// parseTaskFilter except custom_field_filters uses known-key type resolution
+// (no single project definition list).
+func (h *TaskHandler) parseSearchTaskFilter(r *http.Request) (taskdom.TaskFilter, error) {
+	// Strip custom_field_filters so parseTaskFilter skips project-scoped CF
+	// definition lookup (uuid.Nil has none); resolve known keys ourselves.
+	q := r.URL.Query()
+	cfRaw := strings.TrimSpace(q.Get("custom_field_filters"))
+	if cfRaw != "" {
+		q.Del("custom_field_filters")
+		r2 := r.Clone(r.Context())
+		r2.URL.RawQuery = q.Encode()
+		r = r2
+	}
+	filter, err := h.parseTaskFilter(r, uuid.Nil)
+	if err != nil {
+		return filter, err
+	}
+	if cfRaw != "" {
+		cfFilters, err := parseKnownCustomFieldFilters(cfRaw)
+		if err != nil {
+			return filter, err
+		}
+		filter.CustomFieldFilters = cfFilters
 	}
 	return filter, nil
 }
@@ -813,6 +915,8 @@ func (h *TaskHandler) ListTaskColumns(w http.ResponseWriter, r *http.Request) {
 //   - tags=<tag,tag,...> (matches tasks with ANY of these tags)
 //   - group_by=<dimension>&group_key=<key> (only the tasks in one group of a
 //     group-by dimension; see taskdom.TaskGroup for the keys)
+//   - assignee_user_ids=<uuid,uuid> (match assignees by project_members.account_id)
+//   - created_after/before, updated_after/before=<YYYY-MM-DD|RFC3339>
 //   - include=assignees,reporter (embed the people behind assignee_ids /
 //     reporter_id in each task as "assignees" / "reporter")
 func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
@@ -1075,6 +1179,166 @@ func (h *TaskHandler) ListAssignedToMe(w http.ResponseWriter, r *http.Request) {
 		"items":       resp,
 		"page_size":   pageSize,
 		"next_cursor": nextCursor,
+	})
+}
+
+// SearchTasks handles GET /tasks/search — cursor-paginated tasks across every
+// project the caller may read, with the same filter query params as ListTasks
+// plus project_ids and assignee_user_ids. Powers the Admin Global Task Filter
+// on the home dashboard.
+func (h *TaskHandler) SearchTasks(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFrom(r)
+	if claims == nil {
+		presenter.Error(w, r, apierr.New(apierr.CodeUnauthenticated, "unauthenticated"))
+		return
+	}
+	accountID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid subject claim"))
+		return
+	}
+
+	pageSize, err := parsePageSize(r, 20, 100)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	include, err := parseTaskInclude(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	filter, err := h.parseSearchTaskFilter(r)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	if cursorRaw := r.URL.Query().Get("cursor"); cursorRaw != "" {
+		filter.CursorAfter = &cursorRaw
+	}
+	sort := taskdom.TaskSort{By: "created"}
+	if raw := strings.TrimSpace(r.URL.Query().Get("sort_by")); raw != "" {
+		// Cross-project search only supports built-in sorts (no per-project
+		// custom-field sort lookup).
+		switch raw {
+		case "importance", "title", "story_points", "start_date", "due_date", "created":
+			sort = taskdom.TaskSort{By: raw}
+		}
+	}
+
+	empty := func() {
+		presenter.OK(w, r, map[string]any{
+			"items":       []dto.TaskResponse{},
+			"page_size":   pageSize,
+			"next_cursor": nil,
+			"total_count": int64(0),
+		})
+	}
+
+	if h.projectSvc == nil {
+		empty()
+		return
+	}
+
+	// Scope to projects the caller can access (same surface as assigned-to-me).
+	projects, _, err := h.projectSvc.ListAccessible(r.Context(), accountID, 1, 10000)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	if len(projects) == 0 {
+		empty()
+		return
+	}
+
+	accessible := make(map[uuid.UUID]struct{}, len(projects))
+	projectIDs := make([]uuid.UUID, 0, len(projects))
+	for _, p := range projects {
+		accessible[p.ID] = struct{}{}
+		projectIDs = append(projectIDs, p.ID)
+	}
+
+	// Optional project_ids narrows to a subset of accessible projects.
+	if requested, perr := parseQueryUUIDs(r.URL.Query().Get("project_ids")); perr != nil {
+		presenter.Error(w, r, apierr.New(apierr.CodeBadRequest, "invalid project_ids"))
+		return
+	} else if len(requested) > 0 {
+		projectIDs = projectIDs[:0]
+		for _, id := range requested {
+			if _, ok := accessible[id]; ok {
+				projectIDs = append(projectIDs, id)
+			}
+		}
+		if len(projectIDs) == 0 {
+			empty()
+			return
+		}
+	}
+
+	listCtx := r.Context()
+	if h.listScoper != nil {
+		principal, perr := middleware.IAMPrincipalFrom(r)
+		if perr != nil {
+			presenter.Error(w, r, perr)
+			return
+		}
+		byProject := map[string]*iam.Node{}
+		for _, pid := range projectIDs {
+			n, serr := h.listScoper.ListScope(r.Context(), principal, string(iam.ActionTasksRead), pid.String(), "task")
+			if serr != nil {
+				presenter.Error(w, r, serr)
+				return
+			}
+			byProject[pid.String()] = n
+		}
+		listCtx = iam.WithProjectScopes(listCtx, "task", byProject)
+	}
+
+	g, gctx := errgroup.WithContext(listCtx)
+	var (
+		tasks      []*taskdom.Task
+		hasMore    bool
+		totalCount int64
+	)
+	g.Go(func() error {
+		var lerr error
+		tasks, hasMore, lerr = h.svc.ListTasksAcrossProjects(gctx, projectIDs, filter, pageSize, sort)
+		return lerr
+	})
+	g.Go(func() error {
+		var cerr error
+		// Count ignores cursor — same contract as ListTasks.
+		countFilter := filter
+		countFilter.CursorAfter = nil
+		totalCount, cerr = h.svc.CountTasksAcrossProjects(gctx, projectIDs, countFilter)
+		return cerr
+	})
+	if err := g.Wait(); err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+
+	resp := make([]dto.TaskResponse, 0, len(tasks))
+	for _, t := range tasks {
+		resp = append(resp, dto.TaskFromEntity(t))
+	}
+	if include.people {
+		if err := h.attachPeople(r.Context(), tasks, resp); err != nil {
+			presenter.Error(w, r, err)
+			return
+		}
+	}
+
+	var nextCursor *string
+	if hasMore && len(tasks) > 0 {
+		s := taskdom.EncodeTaskCursor(tasks[len(tasks)-1], sort)
+		nextCursor = &s
+	}
+	presenter.OK(w, r, map[string]any{
+		"items":       resp,
+		"page_size":   pageSize,
+		"next_cursor": nextCursor,
+		"total_count": totalCount,
 	})
 }
 

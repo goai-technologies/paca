@@ -92,6 +92,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { useBranding } from "@/hooks/use-branding";
+import { useCanAccessAdmin } from "@/hooks/use-can-access-admin";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useProjectPermissions } from "@/hooks/use-project-permissions";
 import type { ThemeMode } from "@/hooks/use-theme-mode";
@@ -2224,15 +2225,8 @@ export function AppSidebar() {
 		hasPermission(item.requiredPermission ?? "plugins:write"),
 	);
 
-	// Only shown to someone who can see Administration for another reason: a
-	// plugin with an admin page must not reveal the heading by itself.
-	const showAdminSection =
-		canAccessGlobalRoles ||
-		canAccessUsers ||
-		canAccessGlobalAgents ||
-		canAccessServiceAccounts ||
-		canAccessPlugins ||
-		canAccessSettings;
+	// Shared with the Global Tasks admin page via useCanAccessAdmin.
+	const showAdminSection = useCanAccessAdmin();
 	// Plugin-contributed admin pages get their own sidebar section, separate
 	// from core workspace administration.
 	const showPluginsSection = showAdminSection && adminPluginNavItems.length > 0;

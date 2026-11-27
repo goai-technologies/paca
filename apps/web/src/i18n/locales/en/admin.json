@@ -16,6 +16,12 @@
 			"description": "You can still create new agents using the button above."
 		}
 	},
+	"globalTasks": {
+		"header": {
+			"title": "Global Tasks",
+			"description": "Search and filter tasks across every project you can access."
+		}
+	},
 	"users": {
 		"header": {
 			"title": "User Management",

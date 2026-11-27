@@ -413,6 +413,11 @@ func New(deps Deps) http.Handler {
 				r.Use(httpmw.RequireFreshPassword())
 				r.Get("/projects", deps.Project.ListProjects)
 				r.Get("/projects/workspace-stats", deps.Project.GetWorkspaceStats)
+				// Cross-project task search — Admin Global Task Filter on Home.
+				// Scoped inside the handler to projects the caller may read.
+				if deps.Task != nil {
+					r.Get("/tasks/search", deps.Task.SearchTasks)
+				}
 				// The commitment catalog is workspace-wide on purpose: the
 				// person attaching a ticket from another project is rarely a member of the
 				// Commitments project. See handler.CommitmentHandler.

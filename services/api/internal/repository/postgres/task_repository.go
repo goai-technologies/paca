@@ -535,6 +535,20 @@ func applyTaskFilter(b *queryBuilder, filter taskdom.TaskFilter) {
 		b.args = append(b.args, filter.AssigneeID.String())
 	}
 
+	if len(filter.AssigneeUserIDs) > 0 {
+		placeholders := make([]string, len(filter.AssigneeUserIDs))
+		for i, id := range filter.AssigneeUserIDs {
+			placeholders[i] = fmt.Sprintf("$%d", b.idx)
+			b.args = append(b.args, id.String())
+			b.idx++
+		}
+		// project_members.user_id was folded into account_id (migration 000066);
+		// human members keep account_id == users.id, which is what the Global
+		// Filter sends as assignee_user_ids.
+		b.whereClauses = append(b.whereClauses,
+			"EXISTS (SELECT 1 FROM task_assignees ta JOIN project_members pm ON pm.id = ta.member_id WHERE ta.task_id = tasks.id AND pm.account_id IN ("+strings.Join(placeholders, ",")+"))")
+	}
+
 	switch {
 	case filter.TaskTypeNull:
 		b.whereClauses = append(b.whereClauses, "task_type_id IS NULL")
@@ -631,6 +645,26 @@ func applyTaskFilter(b *queryBuilder, filter taskdom.TaskFilter) {
 			parts[i] = "tags @> to_jsonb(" + p + "::text)"
 		}
 		b.whereClauses = append(b.whereClauses, "("+strings.Join(parts, " OR ")+")")
+	}
+	if filter.CreatedAfter != nil {
+		p := b.placeholder()
+		b.whereClauses = append(b.whereClauses, "created_at >= "+p)
+		b.args = append(b.args, *filter.CreatedAfter)
+	}
+	if filter.CreatedBefore != nil {
+		p := b.placeholder()
+		b.whereClauses = append(b.whereClauses, "created_at < "+p)
+		b.args = append(b.args, *filter.CreatedBefore)
+	}
+	if filter.UpdatedAfter != nil {
+		p := b.placeholder()
+		b.whereClauses = append(b.whereClauses, "updated_at >= "+p)
+		b.args = append(b.args, *filter.UpdatedAfter)
+	}
+	if filter.UpdatedBefore != nil {
+		p := b.placeholder()
+		b.whereClauses = append(b.whereClauses, "updated_at < "+p)
+		b.args = append(b.args, *filter.UpdatedBefore)
 	}
 
 	applyCustomFieldFilters(b, filter.CustomFieldFilters)
@@ -913,6 +947,21 @@ func applyCustomFieldFilters(b *queryBuilder, filters map[string]taskdom.CustomF
 				b.whereClauses = append(b.whereClauses, expr+" <= "+p)
 			}
 		case "text", "url", "long_text":
+			// Prefer exact multi-value match (Admin Global Filter people
+			// pickers) when values are present; otherwise substring contains.
+			if len(q.Values) > 0 {
+				keyP := b.placeholder()
+				b.args = append(b.args, key)
+				placeholders := make([]string, len(q.Values))
+				for i, v := range q.Values {
+					p := b.placeholder()
+					b.args = append(b.args, v)
+					placeholders[i] = p
+				}
+				b.whereClauses = append(b.whereClauses,
+					"(custom_fields->>"+keyP+") IN ("+strings.Join(placeholders, ",")+")")
+				continue
+			}
 			if q.Contains == nil || strings.TrimSpace(*q.Contains) == "" {
 				continue
 			}
@@ -982,8 +1031,10 @@ func applyTaskSort(sort taskdom.TaskSort, b *queryBuilder) (fromClause, orderByC
 		orderByClause = "start_date ASC NULLS LAST, created_at ASC, id ASC"
 	case "due_date":
 		orderByClause = "due_date ASC NULLS LAST, created_at ASC, id ASC"
+	case "created", "":
+		orderByClause = "created_at ASC, id ASC"
 	default:
-		if sort.By != "" && sort.CFType != "" {
+		if sort.CFType != "" {
 			orderByClause = buildCFOrderBy(sort, b)
 		} else {
 			orderByClause = "created_at ASC, id ASC"
@@ -1422,6 +1473,109 @@ func (r *TaskRepository) ListAssignedTasks(ctx context.Context, memberIDs []uuid
 		return nil, false, err
 	}
 	return tasks, hasMore, nil
+}
+
+// ListTasksAcrossProjects returns a page of tasks across projectIDs matching
+// filter. Empty projectIDs yields an empty page. Multi-project IAM scopes on
+// ctx are applied the same way as ListAssignedTasks.
+func (r *TaskRepository) ListTasksAcrossProjects(ctx context.Context, projectIDs []uuid.UUID, filter taskdom.TaskFilter, limit int, sort taskdom.TaskSort) ([]*taskdom.Task, bool, error) {
+	if len(projectIDs) == 0 {
+		return nil, false, nil
+	}
+
+	b := newQueryBuilder()
+	b.addInClause("tasks.project_id", uuidSliceToStrSlice(projectIDs))
+
+	clause, none, err := projectScopesSQL(ctx, "task", taskScopeColumns, "tasks.project_id", b)
+	if err != nil {
+		return nil, false, err
+	}
+	if none {
+		return []*taskdom.Task{}, false, nil
+	}
+	if clause != "" {
+		b.whereClauses = append(b.whereClauses, clause)
+	}
+
+	baseWhere := "tasks.deleted_at IS NULL"
+	fromClause, orderByClause, selectCols := applyTaskSort(sort, b)
+	applyTaskFilter(b, filter)
+
+	if filter.CursorAfter != nil {
+		cur, err := taskdom.DecodeTaskCursor(*filter.CursorAfter)
+		if err != nil {
+			return nil, false, fmt.Errorf("task repo: invalid cursor: %w", err)
+		}
+		applyCursorWhere(b, cur, sort)
+	}
+
+	limitP := b.placeholder()
+	b.args = append(b.args, limit+1)
+
+	whereSQL := baseWhere
+	if len(b.whereClauses) > 0 {
+		whereSQL += " AND " + strings.Join(b.whereClauses, " AND ")
+	}
+
+	query := fmt.Sprintf(`SELECT %s %s WHERE %s ORDER BY %s LIMIT %s`, selectCols, fromClause, whereSQL, orderByClause, limitP)
+
+	var records []taskRecord
+	if err := r.db.SelectContext(ctx, &records, query, b.args...); err != nil {
+		return nil, false, fmt.Errorf("task repo: list across projects: %w", err)
+	}
+
+	hasMore := len(records) > limit
+	if hasMore {
+		records = records[:limit]
+	}
+
+	tasks := make([]*taskdom.Task, 0, len(records))
+	for i := range records {
+		t, err := toTaskEntity(&records[i])
+		if err != nil {
+			return nil, false, err
+		}
+		tasks = append(tasks, t)
+	}
+	if err := r.attachAssigneeIDs(ctx, tasks); err != nil {
+		return nil, false, err
+	}
+	return tasks, hasMore, nil
+}
+
+// CountTasksAcrossProjects returns how many tasks across projectIDs match
+// filter (CursorAfter is ignored). Empty projectIDs yields 0.
+func (r *TaskRepository) CountTasksAcrossProjects(ctx context.Context, projectIDs []uuid.UUID, filter taskdom.TaskFilter) (int64, error) {
+	if len(projectIDs) == 0 {
+		return 0, nil
+	}
+
+	b := newQueryBuilder()
+	b.addInClause("tasks.project_id", uuidSliceToStrSlice(projectIDs))
+
+	clause, none, err := projectScopesSQL(ctx, "task", taskScopeColumns, "tasks.project_id", b)
+	if err != nil {
+		return 0, fmt.Errorf("task repo: count across projects: %w", err)
+	}
+	if none {
+		return 0, nil
+	}
+	if clause != "" {
+		b.whereClauses = append(b.whereClauses, clause)
+	}
+
+	applyTaskFilter(b, filter)
+
+	whereSQL := "tasks.deleted_at IS NULL"
+	if len(b.whereClauses) > 0 {
+		whereSQL += " AND " + strings.Join(b.whereClauses, " AND ")
+	}
+
+	var count int64
+	if err := r.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM tasks WHERE `+whereSQL, b.args...); err != nil {
+		return 0, fmt.Errorf("task repo: count across projects: %w", err)
+	}
+	return count, nil
 }
 
 // CountTasks returns the total number of tasks matching filter for a project.

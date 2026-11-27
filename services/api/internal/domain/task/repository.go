@@ -2,6 +2,7 @@ package taskdom
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -129,6 +130,14 @@ type TaskRepository interface {
 	// (same cursor format as the "importance" ListTasks sort).
 	// Used by the cross-project "assigned to me" home page widget.
 	ListAssignedTasks(ctx context.Context, memberIDs []uuid.UUID, limit int, cursorAfter *string) ([]*Task, bool, error)
+	// ListTasksAcrossProjects returns a page of tasks across projectIDs that
+	// match filter, keyset-paginated via filter.CursorAfter. Empty projectIDs
+	// yields an empty page. IAM list scopes (when present on ctx) are applied
+	// per project the same way as ListAssignedTasks.
+	ListTasksAcrossProjects(ctx context.Context, projectIDs []uuid.UUID, filter TaskFilter, limit int, sort TaskSort) ([]*Task, bool, error)
+	// CountTasksAcrossProjects returns how many tasks across projectIDs match
+	// filter (ignoring CursorAfter). Empty projectIDs yields 0.
+	CountTasksAcrossProjects(ctx context.Context, projectIDs []uuid.UUID, filter TaskFilter) (int64, error)
 	// CountOpenTasksByProjects returns the number of non-done tasks across all
 	// of projectIDs in a single query, for cross-project aggregates like the
 	// home page's workspace stats widget — avoids an N-query per-project loop.
@@ -211,6 +220,18 @@ type TaskFilter struct {
 	ImportanceRanges []IntRange
 	// Tags filters tasks that have ANY of these tag values (exact match).
 	Tags []string
+	// AssigneeUserIDs matches tasks assigned to any project_members row whose
+	// account_id is in this set — used by cross-project search where the
+	// caller knows account/user IDs rather than per-project member IDs.
+	// Combined with AssigneeIDs / AssigneeNull via AND when those are also set.
+	AssigneeUserIDs []uuid.UUID
+	// CreatedAfter/CreatedBefore bound created_at as inclusive calendar-day
+	// (or exact instant) filters. Either may be nil.
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
+	// UpdatedAfter/UpdatedBefore bound updated_at the same way.
+	UpdatedAfter  *time.Time
+	UpdatedBefore *time.Time
 	// Group, when set, narrows the listing to a single group (column) of a
 	// "group by" dimension — see TaskGroup. It is ANDed with every other
 	// predicate, so a view's filters and one of its columns compose.

@@ -82,7 +82,8 @@
 			"emptyDescription": "現在、割り当てられた未完了タスクはありません。",
 			"loadError": "タスクを読み込めませんでした。もう一度お試しください。",
 			"loadMore": "もっと読み込む",
-			"loading": "読み込み中…"
+			"loading": "読み込み中…",
+			"globalTasks": "グローバルタスク"
 		},
 		"projectsSection": {
 			"title": "プロジェクト",

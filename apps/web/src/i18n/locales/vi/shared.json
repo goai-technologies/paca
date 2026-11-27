@@ -82,7 +82,8 @@
 			"emptyDescription": "Hiện không có nhiệm vụ đang mở nào được giao cho bạn.",
 			"loadError": "Không thể tải nhiệm vụ của bạn. Vui lòng thử lại.",
 			"loadMore": "Tải thêm",
-			"loading": "Đang tải…"
+			"loading": "Đang tải…",
+			"globalTasks": "Công việc toàn cục"
 		},
 		"projectsSection": {
 			"title": "Dự án",

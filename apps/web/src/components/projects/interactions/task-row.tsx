@@ -97,7 +97,8 @@ export function getRowColConfig(
 			};
 		case "assignee":
 			return {
-				className: "w-20 shrink-0",
+				// Wide enough for avatar + name (Global Results / read-only rows).
+				className: "w-36 shrink-0",
 				headerLabel: t("board.taskRow.columnHeaders.assignee"),
 			};
 		case "reporter":
@@ -449,7 +450,11 @@ export function TaskRow({
 					// biome-ignore lint/a11y/noStaticElementInteractions: cell container stops propagation; inner controls are the interactive elements
 					<div
 						key="assignee"
-						className={cn(col.className, "flex items-center justify-center")}
+						className={cn(
+							col.className,
+							"flex items-center",
+							canEditField ? "justify-center" : "justify-start",
+						)}
 						onClick={(e) => e.stopPropagation()}
 						onKeyDown={(e) => e.stopPropagation()}
 					>
@@ -459,6 +464,9 @@ export function TaskRow({
 							isAutoAssign={isAutoAssign}
 							autoEnabled={jevEnabled}
 							canEdit={canEditField}
+							// Read-only surfaces (Global Task Results) show the name /
+							// "Unassigned"; project list/board keep the compact avatar stack.
+							showNames={!canEditField}
 							size="md"
 							onChange={(patch) => onUpdateTaskField?.(task.id, patch)}
 						/>

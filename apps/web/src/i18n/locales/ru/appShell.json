@@ -31,7 +31,8 @@
 		"settings": "Настройки",
 		"changelog": "Что нового",
 		"activity": "Активность",
-		"serviceAccounts": "Сервисные аккаунты"
+		"serviceAccounts": "Сервисные аккаунты",
+		"globalTasks": "Глобальные задачи"
 	},
 	"projectSwitcher": {
 		"projects": "Проекты",

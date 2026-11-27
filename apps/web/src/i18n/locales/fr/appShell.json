@@ -31,7 +31,8 @@
 		"settings": "Paramètres",
 		"changelog": "Nouveautés",
 		"activity": "Activité",
-		"serviceAccounts": "Comptes de service"
+		"serviceAccounts": "Comptes de service",
+		"globalTasks": "Tâches globales"
 	},
 	"projectSwitcher": {
 		"projects": "Projets",

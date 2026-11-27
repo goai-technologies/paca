@@ -828,6 +828,78 @@ export const assignedTasksQueryOptions = () =>
 		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
 	});
 
+export const SEARCH_TASKS_PAGE_SIZE = 20;
+
+/** Filters for the cross-project Admin Global Task Filter (GET /tasks/search). */
+export interface SearchTasksOptions {
+	projectIds?: string[];
+	statusIds?: string[];
+	taskTypeIds?: string[];
+	/** Global account/user IDs — resolved server-side via project_members.account_id. */
+	assigneeUserIds?: string[];
+	importanceRanges?: { min: number; max: number }[];
+	tags?: string[];
+	createdAfter?: string;
+	createdBefore?: string;
+	updatedAfter?: string;
+	updatedBefore?: string;
+	customFieldFilters?: Record<string, CustomFieldFilterQuery>;
+	pageSize?: number;
+	cursor?: string;
+	sortBy?: string;
+}
+
+function buildSearchTaskQueryParams(opts: SearchTasksOptions = {}) {
+	const params: Record<string, string | number | boolean> = {
+		include: TASK_INCLUDE,
+		page_size: opts.pageSize ?? SEARCH_TASKS_PAGE_SIZE,
+	};
+	if (opts.cursor) params.cursor = opts.cursor;
+	if (opts.projectIds && opts.projectIds.length > 0)
+		params.project_ids = opts.projectIds.join(",");
+	if (opts.statusIds && opts.statusIds.length > 0)
+		params.status_ids = opts.statusIds.join(",");
+	if (opts.taskTypeIds && opts.taskTypeIds.length > 0)
+		params.task_type_ids = opts.taskTypeIds.join(",");
+	if (opts.assigneeUserIds && opts.assigneeUserIds.length > 0)
+		params.assignee_user_ids = opts.assigneeUserIds.join(",");
+	if (opts.importanceRanges && opts.importanceRanges.length > 0)
+		params.importance_ranges = JSON.stringify(opts.importanceRanges);
+	if (opts.tags && opts.tags.length > 0) params.tags = opts.tags.join(",");
+	if (opts.createdAfter) params.created_after = opts.createdAfter;
+	if (opts.createdBefore) params.created_before = opts.createdBefore;
+	if (opts.updatedAfter) params.updated_after = opts.updatedAfter;
+	if (opts.updatedBefore) params.updated_before = opts.updatedBefore;
+	if (
+		opts.customFieldFilters &&
+		Object.keys(opts.customFieldFilters).length > 0
+	) {
+		params.custom_field_filters = JSON.stringify(opts.customFieldFilters);
+	}
+	if (opts.sortBy) params.sort_by = opts.sortBy;
+	return params;
+}
+
+/** Cross-project task search — backs the Admin Global Tasks page. */
+export async function searchTasks(
+	opts: SearchTasksOptions = {},
+): Promise<TaskListResult> {
+	const { data } = await apiClient.instance.get<
+		SuccessEnvelope<TaskListResult>
+	>("/tasks/search", { params: buildSearchTaskQueryParams(opts) });
+	seedTaskPeople(data.data.items);
+	return data.data;
+}
+
+export const searchTasksQueryOptions = (opts: SearchTasksOptions) =>
+	infiniteQueryOptions({
+		queryKey: ["tasks", "search", opts],
+		queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+			searchTasks({ ...opts, cursor: pageParam }),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+	});
+
 export async function createTask(
 	projectId: string,
 	payload: {

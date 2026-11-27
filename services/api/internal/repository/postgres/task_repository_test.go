@@ -317,6 +317,21 @@ func TestApplyCustomFieldFilters_UrlContains(t *testing.T) {
 	}
 }
 
+func TestApplyCustomFieldFilters_TextValuesExactMatch(t *testing.T) {
+	b := newQueryBuilder()
+	applyCustomFieldFilters(b, map[string]taskdom.CustomFieldFilterQuery{
+		"qa_by": {FieldType: "text", Values: []string{"Jane", "Alex"}},
+	})
+	wantClause := "(custom_fields->>$1) IN ($2,$3)"
+	if len(b.whereClauses) != 1 || b.whereClauses[0] != wantClause {
+		t.Fatalf("whereClauses = %+v, want [%q]", b.whereClauses, wantClause)
+	}
+	wantArgs := []interface{}{"qa_by", "Jane", "Alex"}
+	if !reflect.DeepEqual(b.args, wantArgs) {
+		t.Fatalf("args = %+v, want %+v", b.args, wantArgs)
+	}
+}
+
 func TestApplyCustomFieldFilters_EmptyOrBlankValuesSkipped(t *testing.T) {
 	blank := "   "
 	b := newQueryBuilder()
@@ -435,6 +450,30 @@ func TestApplyTaskFilter_ImportanceRanges_ORsMultipleRanges(t *testing.T) {
 		t.Fatalf("whereClauses = %+v, want [%q]", b.whereClauses, wantClause)
 	}
 	wantArgs := []interface{}{1, 19, 100, 2147483647}
+	if !reflect.DeepEqual(b.args, wantArgs) {
+		t.Fatalf("args = %+v, want %+v", b.args, wantArgs)
+	}
+}
+
+func TestApplyTaskFilter_AssigneeUserIDs_UsesAccountID(t *testing.T) {
+	// Regression: unified-accounts migration renamed project_members.user_id
+	// to account_id; filtering by assignee_user_ids must reference account_id
+	// or PostgreSQL returns an error and the Global Filter shows a load failure.
+	u1 := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	u2 := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	b := newQueryBuilder()
+	applyTaskFilter(b, taskdom.TaskFilter{AssigneeUserIDs: []uuid.UUID{u1, u2}})
+	if len(b.whereClauses) != 1 {
+		t.Fatalf("expected 1 clause, got %+v", b.whereClauses)
+	}
+	clause := b.whereClauses[0]
+	if !strings.Contains(clause, "pm.account_id IN") {
+		t.Fatalf("expected pm.account_id filter, got %q", clause)
+	}
+	if strings.Contains(clause, "pm.user_id") {
+		t.Fatalf("must not reference dropped pm.user_id column, got %q", clause)
+	}
+	wantArgs := []interface{}{u1.String(), u2.String()}
 	if !reflect.DeepEqual(b.args, wantArgs) {
 		t.Fatalf("args = %+v, want %+v", b.args, wantArgs)
 	}
